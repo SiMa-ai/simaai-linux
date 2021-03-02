@@ -9,6 +9,15 @@
 source "drivers/media/rc/Kconfig"
 source "drivers/media/cec/Kconfig"
 
+menuconfig HARDWARE_ACCELERATION
+	tristate "Video codec support"
+	help
+	  Video Codec
+
+if HARDWARE_ACCELERATION
+source "drivers/media/al5r/Kconfig"
+endif # HARDWARE_ACCELERATION
+
 menuconfig MEDIA_SUPPORT
 	tristate "Multimedia support"
 	depends on HAS_IOMEM
