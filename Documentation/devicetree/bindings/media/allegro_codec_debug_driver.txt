@@ -1,0 +1,75 @@
+al5r:
+
+al,devicename: specifies the /dev/X name the created device should have. default is that the /dev/X node isn't created
+
+al,regs_min_addr: specifies the offset at which the registers of the ip start in the mapped region
+The default is 0.
+
+al,regs_min_addr_auto: Try to find what the offset of current IP is based on the knowledge of some of the IP we support.
+
+al,mem_offset_reg: You should only use this property if your IP only supports a 4G range.
+Specify the hardware IP range register address. You should ask where this register is in your IP.
+(See Hardware IP documentation)
+
+al5e, al5d:
+
+al,devicename: specifies the /dev/X name the created device should have. default is /dev/allegroIP for al5e and /dev/allegroDecodeIP for al5d
+al,mcu_ext_mem_size: specifies the size in bytes of the external memory of the mcu. default is MCU_SUBALLOCATOR_SIZE
+
+all:
+
+memory-region: a phandle that points to a reserved-memory node. The driver will use the reserved memory instead of using the CMA pools to allocate its memory. It will also configure the hw ip if needed so that the ip can access the allocated memory. (See https://xilinx-wiki.atlassian.net/wiki/spaces/A/pages/18841683/Linux+Reserved+Memory for more information)
+
+Here is an al5d device tree example in action
+
+			al5d@a0120000 {
+				compatible = "al,al5d-1.2", "al,al5d";
+				interrupt-parent = <0x4>;
+				interrupts = <0x0 0x59 0x4>;
+				reg = <0x0 0xa0120000 0x0 0x10000>;
+        al,mcu_ext_mem_size = 2097152; // 2MB instead of 32MB because you determined that you specific usecase doesn't need more memory for example
+			};
+
+Here is an al5r device tree example in action:
+
+			al5r@a0100000 {
+				compatible = "al,al5r";
+				interrupt-parent = <0x4>;
+				interrupts = <0x0 0x59 0x4>;
+				reg = <0x0 0xa0100000 0x0 0x10000>;
+        al,regs_min_addr = <0x8000>; // Could also be 0 depending on your IP version, you can also use al,regs_min_addr_auto
+        al,devicename = "allegroIP"; // Will create the /dev/allegroIP node and link it to the driver for you
+			};
+
+And another example using a reserved-memory node
+
+  / {
+    amba_pl@0 {
+        al5r@a3c80000 {
+            compatible = "al,al5r";
+            reg = <0x0 0xa3c80000 0x0 0x80000>;
+            al,regs_min_addr = <0x8000>;
+            interrupts = <0x0 0x59 0x4>;
+            interrupt-parent = <0x4>;
+            memory-region = <&reserved_dma>;
+            al,mem_offset_reg = <0x8050>; // only if your IP doesn't support more than 4G addresses
+            al,devicename = "allegroIP";
+        };
+    };
+};
+
+/ {
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+
+        reserved_dma: buffer@0 {
+            compatible = "shared-dma-pool";
+            no-map;
+            reg = <0x48 0x0 0x1 0x0>;
+        };
+    };
+};
+
+
