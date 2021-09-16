@@ -496,6 +496,12 @@ config VCPU_STALL_DETECTOR
 
 	  If you do not intend to run this kernel as a guest, say N.
 
+config SIMAAI_MEMORY
+	bool "SiMa.ai DaVinci family memory management support"
+	depends on ARCH_SIMAAI_DAVINCI
+	help
+	  This option enables memory management on SiMa.ai DaVinci family.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
