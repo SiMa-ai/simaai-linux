@@ -17,6 +17,30 @@
 #define CLIDR_CTYPE(clidr, level)	\
 	(((clidr) & CLIDR_CTYPE_MASK(level)) >> CLIDR_CTYPE_SHIFT(level))
 
+/*
+ * NumSets, bits[27:13] - (Number of sets in cache) - 1
+ * Associativity, bits[12:3] - (Associativity of cache) - 1
+ * LineSize, bits[2:0] - (Log2(Number of words in cache line)) - 2
+ */
+#define CCSIDR_EL1_WRITE_THROUGH	BIT(31)
+#define CCSIDR_EL1_WRITE_BACK		BIT(30)
+#define CCSIDR_EL1_READ_ALLOCATE	BIT(29)
+#define CCSIDR_EL1_WRITE_ALLOCATE	BIT(28)
+#define CCSIDR_EL1_LINESIZE_MASK	0x7
+#define CCSIDR_EL1_LINESIZE(x)		((x) & CCSIDR_EL1_LINESIZE_MASK)
+#define CCSIDR_EL1_ASSOCIATIVITY_SHIFT	3
+#define CCSIDR_EL1_ASSOCIATIVITY_MASK	0x3ff
+#define CCSIDR_EL1_ASSOCIATIVITY(x)	\
+	(((x) >> CCSIDR_EL1_ASSOCIATIVITY_SHIFT) & CCSIDR_EL1_ASSOCIATIVITY_MASK)
+#define CCSIDR_EL1_NUMSETS_SHIFT	13
+#define CCSIDR_EL1_NUMSETS_MASK		0x7fff
+#define CCSIDR_EL1_NUMSETS(x) \
+	(((x) >> CCSIDR_EL1_NUMSETS_SHIFT) & CCSIDR_EL1_NUMSETS_MASK)
+
+#define CACHE_LINESIZE(x)	(16 << CCSIDR_EL1_LINESIZE(x))
+#define CACHE_NUMSETS(x)	(CCSIDR_EL1_NUMSETS(x) + 1)
+#define CACHE_ASSOCIATIVITY(x)	(CCSIDR_EL1_ASSOCIATIVITY(x) + 1)
+
 int cache_line_size(void)
 {
 	if (coherency_max_size != 0)
@@ -36,11 +60,43 @@ static inline enum cache_type get_cache_type(int level)
 	return CLIDR_CTYPE(clidr, level);
 }
 
+/*
+ * Cache Size Selection Register(CSSELR) selects which Cache Size ID
+ * Register(CCSIDR) is accessible by specifying the required cache
+ * level and the cache type. We need to ensure that no one else changes
+ * CSSELR by calling this in non-preemtible context
+ */
+u64 __attribute_const__ cache_get_ccsidr(u64 csselr)
+{
+	u64 ccsidr;
+
+	/* Put value into CSSELR */
+	asm volatile("msr csselr_el1, %x0" : : "r" (csselr));
+	isb();
+	/* Read result out of CCSIDR */
+	asm volatile("mrs %x0, ccsidr_el1" : "=r" (ccsidr));
+
+	return ccsidr;
+}
+
 static void ci_leaf_init(struct cacheinfo *this_leaf,
 			 enum cache_type type, unsigned int level)
 {
+	bool is_icache = type & CACHE_TYPE_INST;
+	u64 tmp = cache_get_ccsidr((level - 1) << 1 | is_icache);
+
 	this_leaf->level = level;
 	this_leaf->type = type;
+	this_leaf->coherency_line_size = CACHE_LINESIZE(tmp);
+	this_leaf->number_of_sets = CACHE_NUMSETS(tmp);
+	this_leaf->ways_of_associativity = CACHE_ASSOCIATIVITY(tmp);
+	this_leaf->size = this_leaf->number_of_sets *
+	    this_leaf->coherency_line_size * this_leaf->ways_of_associativity;
+	this_leaf->attributes =
+		((tmp & CCSIDR_EL1_WRITE_THROUGH) ? CACHE_WRITE_THROUGH : 0) |
+		((tmp & CCSIDR_EL1_WRITE_BACK) ? CACHE_WRITE_BACK : 0) |
+		((tmp & CCSIDR_EL1_READ_ALLOCATE) ? CACHE_READ_ALLOCATE : 0) |
+		((tmp & CCSIDR_EL1_WRITE_ALLOCATE) ? CACHE_WRITE_ALLOCATE : 0);
 }
 
 int init_cache_level(unsigned int cpu)
