@@ -1107,7 +1107,7 @@ static void stmmac_check_pcs_mode(struct stmmac_priv *priv)
 {
 	int interface = priv->plat->interface;
 
-	if (priv->dma_cap.pcs) {
+	if (priv->dma_cap.pcs || priv->plat->apbxpcs) {
 		if ((interface == PHY_INTERFACE_MODE_RGMII) ||
 		    (interface == PHY_INTERFACE_MODE_RGMII_ID) ||
 		    (interface == PHY_INTERFACE_MODE_RGMII_RXID) ||
@@ -3673,6 +3673,18 @@ static int stmmac_request_irq_single(struct net_device *dev)
 				   "%s: ERROR: allocating the LPI IRQ %d (%d)\n",
 				   __func__, priv->lpi_irq, ret);
 			irq_err = REQ_IRQ_ERR_LPI;
+			goto irq_error;
+		}
+	}
+
+	/* Request the IRQ in case of another line is used for XPCS */
+	if (priv->xpcs_irq > 0) {
+		ret = request_irq(priv->xpcs_irq, stmmac_xpcs_interrupt, IRQF_SHARED,
+				  dev->name, dev);
+		if (unlikely(ret < 0)) {
+			netdev_err(priv->dev,
+				   "%s: ERROR: allocating the XPCS IRQ %d (%d)\n",
+				   __func__, priv->xpcs_irq, ret);
 			goto irq_error;
 		}
 	}
@@ -7041,6 +7053,21 @@ void stmmac_fpe_handshake(struct stmmac_priv *priv, bool enable)
 	}
 }
 
+static int stmmac_apbxpcs_setup(struct stmmac_priv *priv)
+{
+
+	priv->hw->xpcs = xpcs_create(priv->xpcs_addr, priv->plat->interface);
+
+	if (IS_ERR_OR_NULL(priv->hw->xpcs)) {
+		dev_warn(priv->device, "Cannot create XPCS");
+		return -ENODEV;
+	}
+
+	dev_info(priv->device, "Installled XPCS support\n");
+
+	return 0;
+}
+
 /**
  * stmmac_dvr_probe
  * @device: device pointer
@@ -7075,6 +7102,7 @@ int stmmac_dvr_probe(struct device *device,
 	priv->pause = pause;
 	priv->plat = plat_dat;
 	priv->ioaddr = res->addr;
+	priv->xpcs_addr = res->xpcs_addr;
 	priv->dev->base_addr = (unsigned long)res->addr;
 	priv->plat->dma_cfg->multi_msi_en = priv->plat->multi_msi_en;
 
@@ -7297,6 +7325,12 @@ int stmmac_dvr_probe(struct device *device,
 			goto error_xpcs_setup;
 	}
 
+	if (priv->plat->apbxpcs) {
+		ret = stmmac_apbxpcs_setup(priv);
+		if (ret)
+			goto error_xpcs_setup;
+	}
+
 	ret = stmmac_phy_setup(priv);
 	if (ret) {
 		netdev_err(ndev, "failed to setup phy (%d)\n", ret);
@@ -7372,6 +7406,8 @@ int stmmac_dvr_remove(struct device *dev)
 	stmmac_exit_fs(ndev);
 #endif
 	phylink_destroy(priv->phylink);
+	if (priv->plat->apbxpcs)
+		xpcs_destroy(priv->hw->xpcs);
 	if (priv->plat->stmmac_rst)
 		reset_control_assert(priv->plat->stmmac_rst);
 	reset_control_assert(priv->plat->stmmac_ahb_rst);

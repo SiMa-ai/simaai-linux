@@ -26,6 +26,7 @@
 
 struct stmmac_resources {
 	void __iomem *addr;
+	void __iomem *xpcs_addr;
 	u8 mac[ETH_ALEN];
 	int wol_irq;
 	int lpi_irq;
@@ -218,6 +219,7 @@ struct stmmac_priv {
 	int hwts_rx_en;
 
 	void __iomem *ioaddr;
+	void __iomem *xpcs_addr;
 	struct net_device *dev;
 	struct device *device;
 	struct mac_device_info *hw;

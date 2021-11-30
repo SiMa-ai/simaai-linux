@@ -406,7 +406,7 @@ int stmmac_xpcs_setup(struct mii_bus *bus)
 		if (IS_ERR(mdiodev))
 			continue;
 
-		xpcs = xpcs_create(mdiodev, mode);
+		xpcs = xpcs_create(mdiodev, mode, priv->plat->xpcs_skip_reset);
 		if (IS_ERR_OR_NULL(xpcs)) {
 			mdio_device_free(mdiodev);
 			continue;

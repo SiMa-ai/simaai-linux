@@ -340,6 +340,10 @@ static int stmmac_dt_phy(struct plat_stmmacenet_data *plat,
 		}
 	}
 
+	plat->apbxpcs = of_property_read_bool(np, "snps,apbxpcs");
+	if(plat->apbxpcs)
+		dev_info(dev, "Found APB XPCS subnode\n");
+
 	if (plat->mdio_node) {
 		dev_dbg(dev, "Found MDIO subnode\n");
 		mdio = true;
@@ -661,6 +665,8 @@ EXPORT_SYMBOL_GPL(stmmac_remove_config_dt);
 int stmmac_get_platform_resources(struct platform_device *pdev,
 				  struct stmmac_resources *stmmac_res)
 {
+	struct resource *res;
+
 	memset(stmmac_res, 0, sizeof(*stmmac_res));
 
 	/* Get IRQ information early to have an ability to ask for deferred
@@ -694,7 +700,12 @@ int stmmac_get_platform_resources(struct platform_device *pdev,
 		dev_info(&pdev->dev, "IRQ eth_lpi not found\n");
 	}
 
-	stmmac_res->addr = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "gmac");
+	stmmac_res->addr = devm_ioremap_resource(&pdev->dev, res);
+	if(IS_ERR(stmmac_res->addr))
+		stmmac_res->addr = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "xpcs");
+	stmmac_res->xpcs_addr = devm_ioremap_resource(&pdev->dev, res);
 
 	return PTR_ERR_OR_ZERO(stmmac_res->addr);
 }
