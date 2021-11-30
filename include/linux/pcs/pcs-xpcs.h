@@ -26,6 +26,7 @@ struct dw_xpcs {
 	void __iomem *addr;
 	const struct xpcs_id *id;
 	struct phylink_pcs pcs;
+	bool skip_reset;
 };
 
 int xpcs_get_an_mode(struct dw_xpcs *xpcs, phy_interface_t interface);
@@ -36,7 +37,8 @@ int xpcs_do_config(struct dw_xpcs *xpcs, phy_interface_t interface,
 void xpcs_get_interfaces(struct dw_xpcs *xpcs, unsigned long *interfaces);
 int xpcs_config_eee(struct dw_xpcs *xpcs, int mult_fact_100ns,
 		    int enable);
-struct dw_xpcs *xpcs_create(void __iomem *base, phy_interface_t interface);
+struct dw_xpcs *xpcs_create(void __iomem *base, phy_interface_t interface,
+			     int skip_reset);
 void xpcs_destroy(struct dw_xpcs *xpcs);
 
 #endif /* __LINUX_PCS_XPCS_H */

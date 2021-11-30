@@ -7105,7 +7105,8 @@ void stmmac_fpe_handshake(struct stmmac_priv *priv, bool enable)
 static int stmmac_apbxpcs_setup(struct stmmac_priv *priv)
 {
 
-	priv->hw->xpcs = xpcs_create(priv->xpcs_addr, priv->plat->interface);
+	priv->hw->xpcs = xpcs_create(priv->xpcs_addr, priv->plat->interface,
+					priv->plat->xpcs_skip_reset);
 
 	if (IS_ERR_OR_NULL(priv->hw->xpcs)) {
 		dev_warn(priv->device, "Cannot create XPCS");

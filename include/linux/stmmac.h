@@ -273,5 +273,6 @@ struct plat_stmmacenet_data {
 	bool use_phy_wol;
 	bool sph_disable;
 	bool apbxpcs;
+	bool xpcs_skip_reset;
 };
 #endif
