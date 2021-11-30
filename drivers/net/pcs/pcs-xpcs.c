@@ -292,9 +292,11 @@ static int xpcs_soft_reset(struct dw_xpcs *xpcs,
 		return -1;
 	}
 
-	ret = xpcs_write(xpcs, dev, MDIO_CTRL1, MDIO_CTRL1_RESET);
-	if (ret < 0)
-		return ret;
+	if(!xpcs->skip_reset) {
+		ret = xpcs_write(xpcs, dev, MDIO_CTRL1, MDIO_CTRL1_RESET);
+		if (ret < 0)
+			return ret;
+	}
 
 	return xpcs_poll_reset(xpcs, dev);
 }
@@ -1027,7 +1029,7 @@ static int xpcs_get_state_c37_sgmii(struct dw_xpcs *xpcs,
 	state->speed = SPEED_UNKNOWN;
 	state->duplex = DUPLEX_UNKNOWN;
 	state->pause = 0;
-
+	
 	/* For C37 SGMII mode, we check DW_VR_MII_AN_INTR_STS for link
 	 * status, speed and duplex.
 	 */
@@ -1321,7 +1323,8 @@ static const struct phylink_pcs_ops xpcs_phylink_ops = {
 	.pcs_link_up = xpcs_link_up,
 };
 
-struct dw_xpcs *xpcs_create(void __iomem *base, phy_interface_t interface)
+struct dw_xpcs *xpcs_create(void __iomem *base, phy_interface_t interface,
+			     int skip_reset)
 {
 	struct dw_xpcs *xpcs;
 	u32 xpcs_id;
@@ -1355,6 +1358,7 @@ struct dw_xpcs *xpcs_create(void __iomem *base, phy_interface_t interface)
 
 		xpcs->pcs.ops = &xpcs_phylink_ops;
 		xpcs->pcs.poll = true;
+		xpcs->skip_reset = skip_reset;
 
 		ret = xpcs_soft_reset(xpcs, compat);
 		if (ret)

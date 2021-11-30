@@ -344,6 +344,8 @@ static int stmmac_dt_phy(struct plat_stmmacenet_data *plat,
 	if(plat->apbxpcs)
 		dev_info(dev, "Found APB XPCS subnode\n");
 
+	plat->xpcs_skip_reset = of_property_read_bool(np, "snps,xpcs_skip_reset");
+
 	if (plat->mdio_node) {
 		dev_dbg(dev, "Found MDIO subnode\n");
 		mdio = true;
