@@ -137,6 +137,7 @@ static void stmmac_tx_timer_arm(struct stmmac_priv *priv, u32 queue);
 static void stmmac_flush_tx_descriptors(struct stmmac_priv *priv, int queue);
 static void stmmac_set_dma_operation_mode(struct stmmac_priv *priv, u32 txmode,
 					  u32 rxmode, u32 chan);
+static irqreturn_t stmmac_xpcs_interrupt(int irq, void *dev_id);
 
 #ifdef CONFIG_DEBUG_FS
 static const struct net_device_ops stmmac_netdev_ops;
@@ -5906,6 +5907,54 @@ static irqreturn_t stmmac_msi_intr_rx(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/**
+ *  stmmac_xpcs_interrupt - ISR of XPCS
+ *  @irq: interrupt number.
+ *  @dev_id: to pass the net device pointer (must be valid).
+ *  Description: this is the XPCS driver interrupt service routine.
+ *  It verifies link status change and autonegotiation results
+ */
+static irqreturn_t stmmac_xpcs_interrupt(int irq, void *dev_id)
+{
+	struct net_device *dev = (struct net_device *)dev_id;
+	struct stmmac_priv *priv = netdev_priv(dev);
+	struct phylink_link_state state;
+	struct phylink_pcs *pcs = &(priv->hw->xpcs->pcs);
+
+	state.interface = priv->plat->phy_interface;
+	state.speed = SPEED_UNKNOWN;
+	state.duplex = DUPLEX_UNKNOWN;
+	state.pause = MLO_PAUSE_NONE;
+	state.an_complete = 0;
+	state.link = 0;
+	priv->xstats.irq_rgmii_n++;
+
+	if(pcs && pcs->ops)
+		pcs->ops->pcs_get_state(pcs, &state);
+
+	/* Check the link status */
+	if (state.link) {
+		priv->xstats.pcs_link = 1;
+		priv->xstats.pcs_speed = state.speed;
+		priv->xstats.pcs_duplex = state.duplex;
+
+		netif_carrier_on(dev);
+
+		pr_info("Link is Up - %d/%s\n", (int)priv->xstats.pcs_speed,
+			priv->xstats.pcs_duplex ? "Full" : "Half");
+	} else {
+		priv->xstats.pcs_link = 0;
+		state.speed = SPEED_UNKNOWN;
+		state.duplex = DUPLEX_UNKNOWN;
+		state.pause = MLO_PAUSE_NONE;
+		state.an_complete = 0;
+		netif_carrier_off(dev);
+		pr_info("Link is Down\n");
+	}
+
+	return IRQ_HANDLED;
+}
+
 #ifdef CONFIG_NET_POLL_CONTROLLER
 /* Polling receive - used by NETCONSOLE and other diagnostic tools
  * to allow network I/O with interrupts disabled.
@@ -7115,6 +7164,7 @@ int stmmac_dvr_probe(struct device *device,
 		priv->rx_irq[i] = res->rx_irq[i];
 	for (i = 0; i < MTL_MAX_TX_QUEUES; i++)
 		priv->tx_irq[i] = res->tx_irq[i];
+	priv->xpcs_irq = res->xpcs_irq;
 
 	if (!is_zero_ether_addr(res->mac))
 		eth_hw_addr_set(priv->dev, res->mac);
