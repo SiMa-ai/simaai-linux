@@ -1054,6 +1054,8 @@ static int xpcs_get_state_c37_sgmii(struct dw_xpcs *xpcs,
 		else
 			state->duplex = DUPLEX_HALF;
 	}
+	ret &= ~(DW_VR_MII_CL37_ANCMPLT_INTR);
+	ret = xpcs_write(xpcs, MDIO_MMD_AN, DW_VR_MII_AN_INTR_STS, ret);
 
 	return 0;
 }

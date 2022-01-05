@@ -700,6 +700,14 @@ int stmmac_get_platform_resources(struct platform_device *pdev,
 		dev_info(&pdev->dev, "IRQ eth_lpi not found\n");
 	}
 
+	stmmac_res->xpcs_irq =
+		platform_get_irq_byname_optional(pdev, "xpcs_irq");
+	if (stmmac_res->xpcs_irq < 0) {
+		if (stmmac_res->xpcs_irq == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		dev_info(&pdev->dev, "IRQ xpcs not found\n");
+	}
+
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "gmac");
 	stmmac_res->addr = devm_ioremap_resource(&pdev->dev, res);
 	if(IS_ERR(stmmac_res->addr))

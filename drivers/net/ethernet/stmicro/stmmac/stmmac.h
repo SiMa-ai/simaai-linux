@@ -30,6 +30,7 @@ struct stmmac_resources {
 	u8 mac[ETH_ALEN];
 	int wol_irq;
 	int lpi_irq;
+	int xpcs_irq;
 	int irq;
 	int sfty_ce_irq;
 	int sfty_ue_irq;
@@ -252,6 +253,7 @@ struct stmmac_priv {
 	int clk_csr;
 	struct timer_list eee_ctrl_timer;
 	int lpi_irq;
+	int xpcs_irq;
 	int eee_enabled;
 	int eee_active;
 	int tx_lpi_timer;
