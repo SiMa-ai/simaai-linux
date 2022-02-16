@@ -12,6 +12,11 @@ config REMOTEPROC
 	  Support for remote processors (such as DSP coprocessors). These
 	  are mainly used on embedded systems.
 
+config SIMAAI_REMOTEPROC_EV
+	tristate "SIMAAI EV74 remoteproc support"
+	help
+	  Support for SiMa VDK remote processor management
+
 if REMOTEPROC
 
 config REMOTEPROC_CDEV
