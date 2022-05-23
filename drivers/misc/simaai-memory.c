@@ -14,9 +14,11 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <uapi/linux/simaai/simaai_memory_ioctl.h>
+#include <linux/of_reserved_mem.h>
 
 struct simaai_memory_buffer {
 	struct device *dev;
+	/* NOTE: change in datatype of id requires change in target_mask of per device struct */
 	unsigned int id;
 	void *cpu_addr;
 	dma_addr_t phys_addr;
@@ -40,6 +42,9 @@ struct simaai_memory_device {
 	struct cdev cdev;
 	dev_t dev_no;
 	struct class *dev_class;
+
+	/* target memory mask, depends on memory buffer id*/
+	unsigned int target_mask;
 };
 
 static void simaai_release_buffer(struct kref *ref)
@@ -60,8 +65,8 @@ static void simaai_release_buffer(struct kref *ref)
 				  buffer->phys_addr);
 	}
 
-	dev_info(buffer->dev, "Delete memory block id: %u size: %zu addr: 0x%0llx\n",
-		 buffer->id, buffer->aligned_size, buffer->phys_addr);
+	dev_info(buffer->dev, "Delete memory block id: %u(%#x) size: %zu p_addr: 0x%0llx\n",
+		 buffer->id, buffer->id, buffer->aligned_size, buffer->phys_addr);
 
 	kfree(buffer);
 }
@@ -132,9 +137,13 @@ simaai_allocate_buffer(struct simaai_memory_device *simaai_memory, size_t size,
 				       struct simaai_memory_buffer, node);
 		buffer->id = last->id + 1;
 	}
+
+	/* Add target mask to id */
+	buffer->id |= simaai_memory->target_mask;
+
 	list_add_tail(&buffer->node, &simaai_memory->buffer_head);
-	dev_info(buffer->dev, "Allocate memory block id: %u size: %zu addr: 0x%0llx\n",
-		 buffer->id, buffer->aligned_size, buffer->phys_addr);
+	dev_info(buffer->dev, "Allocate memory block id: %u(%#x) size: %zu p_addr: 0x%0llx\n",
+		 buffer->id, buffer->id, buffer->aligned_size, buffer->phys_addr);
 	mutex_unlock(&simaai_memory->buffer_lock);
 
 	return buffer;
@@ -210,7 +219,7 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 	case SIMAAI_IOC_MEM_ALLOC_GENERIC:
 		use_cma = true;
 		/* fall through */
-	case SIMAAI_IOC_MEM_ALLOC_DMA32:
+	case SIMAAI_IOC_MEM_ALLOC_COHERENT:
 		if (buffer)
 			return -EINVAL;
 
@@ -381,20 +390,35 @@ static int simaai_memory_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct simaai_memory_device *simaai_memory;
-	int ret;
+	int ret, target = SIMAAI_TARGET_ALLOCATOR_DRAM;
 
 	simaai_memory = devm_kzalloc(dev, sizeof(*simaai_memory), GFP_KERNEL);
 	if (!simaai_memory)
 		return -ENOMEM;
 
 	simaai_memory->dev = dev;
-
 	ret = of_property_read_string(dev->of_node, "simaai,dev-name",
 				      &simaai_memory->name);
 	if (ret) {
 		dev_err(dev, "Could not obtain simaai,dev-name property\n");
 		return ret;
 	}
+
+	ret = of_property_read_u32(dev->of_node, "simaai,target",
+				      &target);
+	if (ret) {
+		dev_warn(dev, "Could not obtain simaai,target property\n");
+	}
+
+    /* Initialize reserved memory resources */
+    if(target != SIMAAI_TARGET_ALLOCATOR_DRAM) {
+		ret = of_reserved_mem_device_init(dev);
+		if(ret) {
+			dev_err(dev, "Could not get reserved memory\n");
+			return ret;
+		}
+	}
+	simaai_memory->target_mask = SIMAAI_SET_TARGET_ALLOCATOR(target);
 
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (ret) {
@@ -421,9 +445,11 @@ static int simaai_memory_probe(struct platform_device *pdev)
 static int simaai_memory_remove(struct platform_device *pdev)
 {
 	struct simaai_memory_device *simaai_memory = platform_get_drvdata(pdev);
+	struct device *dev = &pdev->dev;
 
 	simaai_remove_char_dev(simaai_memory);
 	simaai_destroy_buffers(simaai_memory);
+	of_reserved_mem_device_release(dev);
 
 	return 0;
 }

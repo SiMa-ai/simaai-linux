@@ -22,6 +22,24 @@ struct simaai_memory_info {
 };
 
 /*
+ * Target mask to indicate from which target, memory is allocated
+ * Topmost bit is used to indicate target memory block
+ * No of bits to be used can be expanded in future to add more source
+ * Bit(31): 0 -> DRAM
+ *			1 -> OCM
+ */
+
+#define SIMAAI_TARGET_ALLOCATOR_DRAM 	(0)
+#define SIMAAI_TARGET_ALLOCATOR_OCM	 	(1)
+#define SIMAAI_TARGET_ALLOCATOR_DMS0	 	(2)
+#define SIMAAI_TARGET_ALLOCATOR_DMS1	 	(3)
+#define SIMAAI_TARGET_ALLOCATOR_DMS2	 	(4)
+#define SIMAAI_TARGET_ALLOCATOR_DMS3	 	(5)
+#define SIMAAI_TARGET_ALLOCATOR_EV74	 	(6)
+#define SIMAAI_SET_TARGET_ALLOCATOR(x) (((x) & 0xf) << 28)
+#define SIMAAI_GET_TARGET_ALLOCATOR(x) (((x) >> 28) & 0xf)
+
+/*
  * Allocate a memory buffer from generic pool
  *
  *  Takes a buffer size.
@@ -35,7 +53,7 @@ struct simaai_memory_info {
  * Takes a buffer size.
  * Binds allocated buffer to the driver file descriptor.
  */
-#define SIMAAI_IOC_MEM_ALLOC_DMA32	_IOW('S', 1, unsigned int)
+#define SIMAAI_IOC_MEM_ALLOC_COHERENT	_IOW('S', 1, unsigned int)
 
 /*
  * Free a memory buffer bound to the driver file descriptor.
