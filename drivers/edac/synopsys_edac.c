@@ -89,6 +89,7 @@
 #define DDR_ECC_INTR_SUPPORT		BIT(0)
 #define DDR_ECC_DATA_POISON_SUPPORT	BIT(1)
 #define DDR_ECC_INTR_SELF_CLEAR		BIT(2)
+#define DDR_ECC_MULTIPLE_INTRS		BIT(3)
 
 /* ZynqMP Enhanced DDR memory controller registers that are relevant to ECC */
 /* ECC Configuration Registers */
@@ -131,18 +132,29 @@
 #define ECC_POISON0_OFST		0xB8
 #define ECC_POISON1_OFST		0xBC
 
+/* ECC Address protection Status */
+#define ECC_APSTAT_OFST			0x388
+
 #define ECC_ADDRMAP0_OFFSET		0x200
 
 /* Control register bitfield definitions */
 #define ECC_CTRL_BUSWIDTH_MASK		0x3000
 #define ECC_CTRL_BUSWIDTH_SHIFT		12
-#define ECC_CTRL_CLR_CE_ERRCNT		BIT(2)
-#define ECC_CTRL_CLR_UE_ERRCNT		BIT(3)
 
 /* DDR Control Register width definitions  */
 #define DDRCTL_EWDTH_16			2
 #define DDRCTL_EWDTH_32			1
 #define DDRCTL_EWDTH_64			0
+
+/* ECC control clear register definitions */
+#define ECC_CTRL_CLR_CE_ERR			BIT(0)
+#define ECC_CTRL_CLR_UE_ERR			BIT(1)
+#define ECC_CTRL_CLR_CE_ERRCNT		BIT(2)
+#define ECC_CTRL_CLR_UE_ERRCNT		BIT(3)
+#define ECC_CTRL_CLR_AP_ERR			BIT(4)
+#define ECC_CTRL_CLR_CE_INTR_EN		BIT(8)
+#define ECC_CTRL_CLR_UE_INTR_EN		BIT(9)
+#define ECC_CTRL_CLR_AP_INTR_EN		BIT(10)
 
 /* ECC status register definitions */
 #define ECC_STAT_UECNT_MASK		0xF0000
@@ -150,11 +162,14 @@
 #define ECC_STAT_CECNT_MASK		0xF00
 #define ECC_STAT_CECNT_SHIFT		8
 #define ECC_STAT_BITNUM_MASK		0x7F
+#define ECC_STAT_CE_ERR_MASK		BIT(8)
+#define ECC_STAT_UE_ERR_MASK		BIT(16)
 
-/* ECC error count register definitions */
+/* ECC Error counter register definitions */
 #define ECC_ERRCNT_UECNT_MASK		0xFFFF0000
 #define ECC_ERRCNT_UECNT_SHIFT		16
-#define ECC_ERRCNT_CECNT_MASK		0xFFFF
+#define ECC_ERRCNT_CECNT_MASK		0x0000FFFF
+#define ECC_ERRCNT_CECNT_SHIFT		0
 
 /* DDR QOS Interrupt register definitions */
 #define DDR_QOS_IRQ_STAT_OFST		0x20200
@@ -202,6 +217,9 @@
 /* DDRC ECC CE & UE poison mask */
 #define ECC_CEPOISON_MASK		0x3
 #define ECC_UEPOISON_MASK		0x1
+
+/* ECC Address protection Status mask*/
+#define ECC_APSTAT_APERR_MASK		BIT(0)
 
 /* DDRC Device config masks */
 #define DDRC_MSTR_CFG_MASK		0xC0000000
@@ -462,6 +480,65 @@ out:
 }
 
 /**
+ * simaai_get_error_info - Get the current ECC error info.
+ * @priv:	DDR memory controller private instance data.
+ *
+ * Return: one if there is no error otherwise returns zero.
+ */
+static int simaai_get_error_info(struct synps_edac_priv *priv)
+{
+	struct synps_ecc_status *p;
+	u32 regval, clearval = 0;
+	void __iomem *base;
+
+	base = priv->baseaddr;
+	p = &priv->stat;
+
+	regval = readl(base + ECC_ERRCNT_OFST);
+
+	p->ce_cnt = (regval & ECC_ERRCNT_CECNT_MASK) >> ECC_ERRCNT_CECNT_SHIFT;
+	p->ue_cnt = (regval & ECC_ERRCNT_UECNT_MASK) >> ECC_ERRCNT_UECNT_SHIFT;
+	if (!p->ce_cnt)
+		goto ue_err;
+
+	p->ceinfo.bitpos = (regval & ECC_STAT_BITNUM_MASK);
+
+	regval = readl(base + ECC_CEADDR0_OFST);
+	p->ceinfo.row = (regval & ECC_CEADDR0_RW_MASK);
+	regval = readl(base + ECC_CEADDR1_OFST);
+	p->ceinfo.bank = (regval & ECC_CEADDR1_BNKNR_MASK) >>
+					ECC_CEADDR1_BNKNR_SHIFT;
+	p->ceinfo.bankgrpnr = (regval &	ECC_CEADDR1_BNKGRP_MASK) >>
+					ECC_CEADDR1_BNKGRP_SHIFT;
+	p->ceinfo.blknr = (regval & ECC_CEADDR1_BLKNR_MASK);
+	p->ceinfo.data = readl(base + ECC_CSYND0_OFST);
+	edac_dbg(2, "ECCCSYN0: 0x%08X ECCCSYN1: 0x%08X ECCCSYN2: 0x%08X\n",
+		 readl(base + ECC_CSYND0_OFST), readl(base + ECC_CSYND1_OFST),
+		 readl(base + ECC_CSYND2_OFST));
+ue_err:
+	if (!p->ue_cnt)
+		goto out;
+
+	regval = readl(base + ECC_UEADDR0_OFST);
+	p->ueinfo.row = (regval & ECC_CEADDR0_RW_MASK);
+	regval = readl(base + ECC_UEADDR1_OFST);
+	p->ueinfo.bankgrpnr = (regval & ECC_CEADDR1_BNKGRP_MASK) >>
+					ECC_CEADDR1_BNKGRP_SHIFT;
+	p->ueinfo.bank = (regval & ECC_CEADDR1_BNKNR_MASK) >>
+					ECC_CEADDR1_BNKNR_SHIFT;
+	p->ueinfo.blknr = (regval & ECC_CEADDR1_BLKNR_MASK);
+	p->ueinfo.data = readl(base + ECC_UESYND0_OFST);
+out:
+	clearval = readl(base + ECC_CLR_OFST);
+	clearval |= ECC_CTRL_CLR_CE_ERR | ECC_CTRL_CLR_CE_ERRCNT;
+	clearval |= ECC_CTRL_CLR_UE_ERR | ECC_CTRL_CLR_UE_ERRCNT;
+	clearval |= ECC_CTRL_CLR_AP_ERR;
+	writel(clearval, base + ECC_CLR_OFST);
+
+	return 0;
+}
+
+/**
  * handle_error - Handle Correctable and Uncorrectable errors.
  * @mci:	EDAC memory controller instance.
  * @p:		Synopsys ECC status structure.
@@ -516,11 +593,19 @@ static void handle_error(struct mem_ctl_info *mci, struct synps_ecc_status *p)
 
 static void enable_intr(struct synps_edac_priv *priv)
 {
+	u32 ctrl_clr;
+
 	/* Enable UE/CE Interrupts */
 	if (priv->p_data->quirks & DDR_ECC_INTR_SELF_CLEAR)
 		writel(DDR_UE_MASK | DDR_CE_MASK,
 		       priv->baseaddr + ECC_CLR_OFST);
-	else
+	else if (priv->p_data->quirks & DDR_ECC_MULTIPLE_INTRS) {
+		/* Enable UE/CE/AP Interrupts */
+		ctrl_clr = readl(priv->baseaddr + ECC_CLR_OFST);
+		ctrl_clr |= ECC_CTRL_CLR_CE_INTR_EN | ECC_CTRL_CLR_UE_INTR_EN
+				| ECC_CTRL_CLR_AP_INTR_EN;
+		writel(ctrl_clr, priv->baseaddr + ECC_CLR_OFST);
+	} else
 		writel(DDR_QOSUE_MASK | DDR_QOSCE_MASK,
 		       priv->baseaddr + DDR_QOS_IRQ_EN_OFST);
 
@@ -528,10 +613,18 @@ static void enable_intr(struct synps_edac_priv *priv)
 
 static void disable_intr(struct synps_edac_priv *priv)
 {
+	u32 ctrl_clr;
+
 	/* Disable UE/CE Interrupts */
 	if (priv->p_data->quirks & DDR_ECC_INTR_SELF_CLEAR)
 		writel(0x0, priv->baseaddr + ECC_CLR_OFST);
-	else
+	else if (priv->p_data->quirks & DDR_ECC_MULTIPLE_INTRS) {
+		/* Disable UE/CE/AP Interrupts */
+		ctrl_clr = readl(priv->baseaddr + ECC_CLR_OFST);
+		ctrl_clr &= ~(ECC_CTRL_CLR_CE_INTR_EN | ECC_CTRL_CLR_UE_INTR_EN
+				| ECC_CTRL_CLR_AP_INTR_EN);
+		writel(ctrl_clr, priv->baseaddr + ECC_CLR_OFST);
+	} else
 		writel(DDR_QOSUE_MASK | DDR_QOSCE_MASK,
 		       priv->baseaddr + DDR_QOS_IRQ_DB_OFST);
 }
@@ -558,10 +651,19 @@ static irqreturn_t intr_handler(int irq, void *dev_id)
 	 * so this condition does not apply.
 	 */
 	if (!(priv->p_data->quirks & DDR_ECC_INTR_SELF_CLEAR)) {
-		regval = readl(priv->baseaddr + DDR_QOS_IRQ_STAT_OFST);
-		regval &= (DDR_QOSCE_MASK | DDR_QOSUE_MASK);
-		if (!(regval & ECC_CE_UE_INTR_MASK))
-			return IRQ_NONE;
+		if(priv->p_data->quirks & DDR_ECC_MULTIPLE_INTRS) {
+			regval = readl(priv->baseaddr + ECC_STAT_OFST) |
+					readl(priv->baseaddr + ECC_APSTAT_OFST);
+			regval &= (ECC_STAT_CE_ERR_MASK | ECC_STAT_UE_ERR_MASK
+					| ECC_APSTAT_APERR_MASK);
+			if (!regval)
+				return IRQ_NONE;
+		} else {
+			regval = readl(priv->baseaddr + DDR_QOS_IRQ_STAT_OFST);
+			regval &= (DDR_QOSCE_MASK | DDR_QOSUE_MASK);
+			if (!(regval & ECC_CE_UE_INTR_MASK))
+				return IRQ_NONE;
+		}
 	}
 
 	status = p_data->get_error_info(priv);
@@ -575,9 +677,14 @@ static irqreturn_t intr_handler(int irq, void *dev_id)
 	edac_dbg(3, "Total error count CE %d UE %d\n",
 		 priv->ce_cnt, priv->ue_cnt);
 	/* v3.0 of the controller does not have this register */
-	if (!(priv->p_data->quirks & DDR_ECC_INTR_SELF_CLEAR))
-		writel(regval, priv->baseaddr + DDR_QOS_IRQ_STAT_OFST);
-	else
+	if (!(priv->p_data->quirks & DDR_ECC_INTR_SELF_CLEAR)) {
+		if (priv->p_data->quirks & DDR_ECC_MULTIPLE_INTRS) {
+			regval = readl(priv->baseaddr + ECC_CLR_OFST) | ECC_CTRL_CLR_CE_ERR
+				       | ECC_CTRL_CLR_UE_ERR | ECC_CTRL_CLR_AP_ERR;
+			writel(regval, priv->baseaddr + ECC_CLR_OFST);
+		} else
+			writel(regval, priv->baseaddr + DDR_QOS_IRQ_STAT_OFST);
+	} else
 		enable_intr(priv);
 
 	return IRQ_HANDLED;
@@ -840,7 +947,7 @@ static void mc_init(struct mem_ctl_info *mci, struct platform_device *pdev)
 	platform_set_drvdata(pdev, mci);
 
 	/* Initialize controller capabilities and configuration */
-	mci->mtype_cap = MEM_FLAG_DDR3 | MEM_FLAG_DDR2;
+	mci->mtype_cap = MEM_FLAG_LRDDR4 | MEM_FLAG_DDR4 | MEM_FLAG_DDR3 | MEM_FLAG_DDR2;
 	mci->edac_ctl_cap = EDAC_FLAG_NONE | EDAC_FLAG_SECDED;
 	mci->scrub_cap = SCRUB_HW_SRC;
 	mci->scrub_mode = SCRUB_NONE;
@@ -862,13 +969,15 @@ static void mc_init(struct mem_ctl_info *mci, struct platform_device *pdev)
 	init_csrows(mci);
 }
 
-static int setup_irq(struct mem_ctl_info *mci,
-		     struct platform_device *pdev)
+static int setup_single_irq(struct mem_ctl_info *mci,
+	     struct platform_device *pdev, const char *name)
 {
-	struct synps_edac_priv *priv = mci->pvt_info;
 	int ret, irq;
 
-	irq = platform_get_irq(pdev, 0);
+	if(name == NULL)
+		irq = platform_get_irq(pdev, 0);
+	else
+		irq = platform_get_irq_byname(pdev, name);
 	if (irq < 0) {
 		edac_printk(KERN_ERR, EDAC_MC,
 			    "No IRQ %d in DT\n", irq);
@@ -879,10 +988,29 @@ static int setup_irq(struct mem_ctl_info *mci,
 			       0, dev_name(&pdev->dev), mci);
 	if (ret < 0) {
 		edac_printk(KERN_ERR, EDAC_MC, "Failed to request IRQ\n");
-		return ret;
 	}
 
-	enable_intr(priv);
+	return ret;
+}
+
+static int setup_irq(struct mem_ctl_info *mci,
+		     struct platform_device *pdev)
+{
+	struct synps_edac_priv *priv = mci->pvt_info;
+	int ret;
+
+	if(priv->p_data->quirks & DDR_ECC_MULTIPLE_INTRS) {
+		ret = setup_single_irq(mci, pdev, "eccc");
+		if(ret == 0)
+			ret = setup_single_irq(mci, pdev, "eccu");
+		if(ret == 0)
+			ret = setup_single_irq(mci, pdev, "eccap");
+	} else {
+		ret = setup_single_irq(mci, pdev, NULL);
+	}
+
+	if(ret == 0)
+		enable_intr(priv);
 
 	return 0;
 }
@@ -919,6 +1047,17 @@ static const struct synps_platform_data synopsys_edac_def = {
 			  ),
 };
 
+static const struct synps_platform_data simaai_edac_def = {
+	.get_error_info	= simaai_get_error_info,
+	.get_mtype	= zynqmp_get_mtype,
+	.get_dtype	= zynqmp_get_dtype,
+	.get_ecc_state	= zynqmp_get_ecc_state,
+	.quirks         = (DDR_ECC_INTR_SUPPORT | DDR_ECC_MULTIPLE_INTRS
+#ifdef CONFIG_EDAC_DEBUG
+			  | DDR_ECC_DATA_POISON_SUPPORT
+#endif
+			  ),
+};
 
 static const struct of_device_id synps_edac_match[] = {
 	{
@@ -932,6 +1071,10 @@ static const struct of_device_id synps_edac_match[] = {
 	{
 		.compatible = "snps,ddrc-3.80a",
 		.data = (void *)&synopsys_edac_def
+	},
+	{
+		.compatible = "simaai,ddrc-4.50a",
+		.data = (void *)&simaai_edac_def
 	},
 	{
 		/* end of table */
@@ -1349,7 +1492,7 @@ static int mc_probe(struct platform_device *pdev)
 	layers[1].size = SYNPS_EDAC_NR_CHANS;
 	layers[1].is_virt_csrow = false;
 
-	mci = edac_mc_alloc(0, ARRAY_SIZE(layers), layers,
+	mci = edac_mc_alloc(edac_device_alloc_index(), ARRAY_SIZE(layers), layers,
 			    sizeof(struct synps_edac_priv));
 	if (!mci) {
 		edac_printk(KERN_ERR, EDAC_MC,
