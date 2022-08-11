@@ -90,6 +90,7 @@
 #define DDR_ECC_DATA_POISON_SUPPORT	BIT(1)
 #define DDR_ECC_INTR_SELF_CLEAR		BIT(2)
 #define DDR_ECC_MULTIPLE_INTRS		BIT(3)
+#define DDR_ECC_SKIP_REG_ADDR8		BIT(4)
 
 /* ZynqMP Enhanced DDR memory controller registers that are relevant to ECC */
 /* ECC Configuration Registers */
@@ -1052,7 +1053,8 @@ static const struct synps_platform_data simaai_edac_def = {
 	.get_mtype	= zynqmp_get_mtype,
 	.get_dtype	= zynqmp_get_dtype,
 	.get_ecc_state	= zynqmp_get_ecc_state,
-	.quirks         = (DDR_ECC_INTR_SUPPORT | DDR_ECC_MULTIPLE_INTRS
+	.quirks         = (DDR_ECC_INTR_SUPPORT
+			| DDR_ECC_MULTIPLE_INTRS | DDR_ECC_SKIP_REG_ADDR8
 #ifdef CONFIG_EDAC_DEBUG
 			  | DDR_ECC_DATA_POISON_SUPPORT
 #endif
@@ -1436,8 +1438,12 @@ static void setup_address_map(struct synps_edac_priv *priv)
 	for (index = 0; index < 12; index++) {
 		u32 addrmap_offset;
 
-		addrmap_offset = ECC_ADDRMAP0_OFFSET + (index * 4);
-		addrmap[index] = readl(priv->baseaddr + addrmap_offset);
+		if((index == 8) && (priv->p_data->quirks & DDR_ECC_SKIP_REG_ADDR8)) {
+			addrmap[index] = 0;
+		} else {
+			addrmap_offset = ECC_ADDRMAP0_OFFSET + (index * 4);
+			addrmap[index] = readl(priv->baseaddr + addrmap_offset);
+		}
 	}
 
 	setup_row_address_map(priv, addrmap);
