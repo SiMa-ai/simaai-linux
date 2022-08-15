@@ -15,7 +15,12 @@ config REMOTEPROC
 config SIMAAI_REMOTEPROC_EV
 	tristate "SIMAAI EV74 remoteproc support"
 	help
-	  Support for SiMa VDK remote processor management
+	  Support for SiMa EV74 remote processor management
+
+config SIMAAI_REMOTEPROC_M4
+	tristate "SIMAAI M4 remoteproc support"
+	help
+	  Support for SiMa M4 remote processor management
 
 if REMOTEPROC
 
