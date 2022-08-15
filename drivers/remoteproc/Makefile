@@ -39,3 +39,4 @@ obj-$(CONFIG_STM32_RPROC)		+= stm32_rproc.o
 obj-$(CONFIG_TI_K3_DSP_REMOTEPROC)	+= ti_k3_dsp_remoteproc.o
 obj-$(CONFIG_TI_K3_R5_REMOTEPROC)	+= ti_k3_r5_remoteproc.o
 obj-$(CONFIG_SIMAAI_REMOTEPROC_EV)	+= simaai_rproc_ev.o
+obj-$(CONFIG_SIMAAI_REMOTEPROC_M4)	+= simaai_rproc_m4.o
