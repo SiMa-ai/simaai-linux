@@ -51,4 +51,21 @@ extern char __sched_text_start[], __sched_text_end[];
 /* Is this address in the __sched functions? */
 extern int in_sched_functions(unsigned long addr);
 
+#ifdef CONFIG_EDAC
+extern void edac_dump_device_stats(void);
+#endif
+
+#ifdef CONFIG_ARM_GIC_V3
+extern void gic_dump_irq_status(void);
+#endif
+
+static inline void dump_platform_devices(void) {
+#ifdef CONFIG_EDAC
+	edac_dump_device_stats();
+#endif
+#ifdef CONFIG_ARM_GIC_V3
+	gic_dump_irq_status();
+#endif
+}
+
 #endif /* _LINUX_SCHED_DEBUG_H */

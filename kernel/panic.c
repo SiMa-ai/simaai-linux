@@ -674,6 +674,8 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 	if (!regs)
 		dump_stack();
 
+	dump_platform_devices();
+
 	print_irqtrace_events(current);
 
 	print_oops_end_marker();

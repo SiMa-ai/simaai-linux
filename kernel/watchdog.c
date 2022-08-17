@@ -434,6 +434,8 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 		else
 			dump_stack();
 
+		dump_platform_devices();
+
 		if (softlockup_all_cpu_backtrace) {
 			trigger_allbutself_cpu_backtrace();
 			clear_bit_unlock(0, &soft_lockup_nmi_warn);
