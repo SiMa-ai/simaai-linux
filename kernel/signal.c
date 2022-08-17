@@ -1275,6 +1275,7 @@ static void print_fatal_signal(int signr)
 	preempt_disable();
 	show_regs(regs);
 	preempt_enable();
+	dump_platform_devices();
 }
 
 static int __init setup_print_fatal_signals(char *str)

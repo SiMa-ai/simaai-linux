@@ -144,6 +144,8 @@ static void watchdog_overflow_callback(struct perf_event *event,
 		else
 			dump_stack();
 
+		dump_platform_devices();
+
 		/*
 		 * Perform all-CPU dump only once to avoid multiple hardlockups
 		 * generating interleaving traces

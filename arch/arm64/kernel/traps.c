@@ -196,6 +196,7 @@ static int __die(const char *str, long err, struct pt_regs *regs)
 
 	print_modules();
 	show_regs(regs);
+	dump_platform_devices();
 
 	dump_kernel_instr(KERN_EMERG, regs);
 
@@ -260,6 +261,7 @@ static void arm64_show_signal(int signo, const char *str)
 	print_vma_addr(KERN_CONT " in ", regs->pc);
 	pr_cont("\n");
 	__show_regs(regs);
+	dump_platform_devices();
 }
 
 void arm64_force_sig_fault(int signo, int code, unsigned long far,
@@ -899,6 +901,7 @@ void panic_bad_stack(struct pt_regs *regs, unsigned long esr, unsigned long far)
 		 ovf_stk, ovf_stk + OVERFLOW_STACK_SIZE);
 
 	__show_regs(regs);
+	dump_platform_devices();
 
 	/*
 	 * We use nmi_panic to limit the potential for recusive overflows, and
@@ -917,6 +920,8 @@ void __noreturn arm64_serror_panic(struct pt_regs *regs, unsigned long esr)
 		smp_processor_id(), esr, esr_get_class_string(esr));
 	if (regs)
 		__show_regs(regs);
+
+	dump_platform_devices();
 
 	nmi_panic(regs, "Asynchronous SError Interrupt");
 
