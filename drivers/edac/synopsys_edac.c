@@ -91,6 +91,7 @@
 #define DDR_ECC_INTR_SELF_CLEAR		BIT(2)
 #define DDR_ECC_MULTIPLE_INTRS		BIT(3)
 #define DDR_ECC_SKIP_REG_ADDR8		BIT(4)
+#define DDR_ECC_DUMP_IN_CHECK		BIT(5)
 
 /* ZynqMP Enhanced DDR memory controller registers that are relevant to ECC */
 /* ECC Configuration Registers */
@@ -714,8 +715,14 @@ static void check_errors(struct mem_ctl_info *mci)
 	priv->ue_cnt += priv->stat.ue_cnt;
 	handle_error(mci, &priv->stat);
 
-	edac_dbg(3, "Total error count CE %d UE %d\n",
-		 priv->ce_cnt, priv->ue_cnt);
+	if (priv->p_data->quirks & DDR_ECC_DUMP_IN_CHECK) {
+		edac_mc_printk(mci, "", "Total error count CE %d UE %d\n",
+			 priv->ce_cnt, priv->ue_cnt);
+	} else {
+		edac_dbg(3, "Total error count CE %d UE %d\n",
+			 priv->ce_cnt, priv->ue_cnt);
+	}
+
 }
 
 /**
@@ -1053,8 +1060,8 @@ static const struct synps_platform_data simaai_edac_def = {
 	.get_mtype	= zynqmp_get_mtype,
 	.get_dtype	= zynqmp_get_dtype,
 	.get_ecc_state	= zynqmp_get_ecc_state,
-	.quirks         = (DDR_ECC_INTR_SUPPORT
-			| DDR_ECC_MULTIPLE_INTRS | DDR_ECC_SKIP_REG_ADDR8
+	.quirks         = (DDR_ECC_INTR_SUPPORT | DDR_ECC_MULTIPLE_INTRS
+			| DDR_ECC_SKIP_REG_ADDR8 | DDR_ECC_DUMP_IN_CHECK
 #ifdef CONFIG_EDAC_DEBUG
 			  | DDR_ECC_DATA_POISON_SUPPORT
 #endif
@@ -1523,6 +1530,10 @@ static int mc_probe(struct platform_device *pdev)
 		edac_printk(KERN_ERR, EDAC_MC,
 			    "Failed to register with EDAC core\n");
 		goto free_edac_mc;
+	}
+
+	if (priv->p_data->quirks & DDR_ECC_DUMP_IN_CHECK) {
+		mci->edac_check = check_errors;
 	}
 
 #ifdef CONFIG_EDAC_DEBUG
