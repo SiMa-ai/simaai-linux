@@ -1089,3 +1089,20 @@ void edac_mc_handle_error(const enum hw_event_mc_err_type type,
 	edac_raw_mc_handle_error(e);
 }
 EXPORT_SYMBOL_GPL(edac_mc_handle_error);
+
+void edac_dump_device_stats(void)
+{
+	struct list_head *item;
+	struct mem_ctl_info *p;
+
+	edac_printk(KERN_INFO, EDAC_MC, "Dumping EDAC Statistics\n");
+	mutex_lock(&mem_ctls_mutex);
+	list_for_each(item, &mc_devices) {
+		p = list_entry(item, struct mem_ctl_info, link);
+
+		if (p->edac_check != NULL) {
+			p->edac_check(p);
+		}
+	}
+	mutex_unlock(&mem_ctls_mutex);
+}
