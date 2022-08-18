@@ -59,7 +59,32 @@ extern void edac_dump_device_stats(void);
 extern void gic_dump_irq_status(void);
 #endif
 
+#ifdef CONFIG_ARM64
+#include <asm/sysreg.h>
+#include <linux/printk.h>
+static inline void arm64_dump_err_status(void)
+{
+	u64 val, errselr;
+	u64 i;
+
+	pr_info("Dumping ARM Cortex-A65 ERRXSTATUS registers\n");
+
+	errselr = read_sysreg_s(SYS_ERRSELR_EL1);
+	for(i = 0; i < 2; i++) {
+		write_sysreg_s((errselr & (~0xffff)) | i, SYS_ERRSELR_EL1);
+		isb();
+		val = read_sysreg_s(SYS_ERXSTATUS_EL1);
+		pr_info("ERR%lldSTATUS: 0x%016llx\n", i, val);
+	}
+	write_sysreg_s(errselr, SYS_ERRSELR_EL1);
+	isb();
+}
+#endif
+
 static inline void dump_platform_devices(void) {
+#ifdef CONFIG_ARM64
+	arm64_dump_err_status();
+#endif
 #ifdef CONFIG_EDAC
 	edac_dump_device_stats();
 #endif
