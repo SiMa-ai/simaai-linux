@@ -350,6 +350,66 @@ static int gic_peek_irq(struct irq_data *d, u32 offset)
 	return !!(readl_relaxed(base + offset + (index / 32) * 4) & mask);
 }
 
+static int gic_peek_irq_by_num(irq_hw_number_t num, u32 offset)
+{
+	void __iomem *base;
+	u32 mask;
+	enum gic_intid_range range = __get_intid_range(num);
+
+	mask = 1 << (num % 32);
+
+	if (range == PPI_RANGE || range == EPPI_RANGE)
+		base = gic_data_rdist_sgi_base();
+	else
+		base = gic_data.dist_base;
+
+	return !!(readl_relaxed(base + offset + (num / 32) * 4) & mask);
+}
+
+static void gic_pr_cont_irq_status(irq_hw_number_t num, u32 offset)
+{
+	if((num % 32) == 0)
+		pr_info("%03ld:", num);
+	if((num % 8) == 0)
+		pr_cont(" ");
+	pr_cont("%d", gic_peek_irq_by_num(num, offset) ? 1 : 0);
+	if((num % 32) == 31)
+		pr_cont("\n");
+}
+
+void gic_dump_irq_status(void)
+{
+	irq_hw_number_t i;
+
+	pr_info("Dumping GIC Interrupt Lines Status\n");
+
+	pr_info("PPI Lines\n");
+	pr_info("PENDING:\n");
+	for(i = 16; i < 32; i++)
+		gic_pr_cont_irq_status(i, GICD_ISPENDR);
+
+	pr_info("ACTIVE:\n");
+	for(i = 16; i < 32; i++)
+		gic_pr_cont_irq_status(i, GICD_ISACTIVER);
+
+	pr_info("ENABLED:\n");
+	for(i = 16; i < 32; i++)
+		gic_pr_cont_irq_status(i, GICD_ISENABLER);
+
+	pr_info("SPI Lines\n");
+	pr_info("PENDING:\n");
+	for(i = 32; i < GIC_LINE_NR; i++)
+		gic_pr_cont_irq_status(i, GICD_ISPENDR);
+
+	pr_info("ACTIVE: ");
+	for(i = 32; i < GIC_LINE_NR; i++)
+		gic_pr_cont_irq_status(i, GICD_ISACTIVER);
+
+	pr_info("ENABLED: ");
+	for(i = 32; i < GIC_LINE_NR; i++)
+		gic_pr_cont_irq_status(i, GICD_ISENABLER);
+}
+
 static void gic_poke_irq(struct irq_data *d, u32 offset)
 {
 	void __iomem *base;
