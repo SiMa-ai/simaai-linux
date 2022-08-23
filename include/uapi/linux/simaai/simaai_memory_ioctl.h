@@ -17,8 +17,17 @@ struct simaai_memory_info {
 	__u32 size;
 	/* allocated buffer size aligned to page boundary */
 	__u32 aligned_size;
+	/* buffer flags */
+	__u32 flags;
 	/* buffer starting physical address */
 	__u64 phys_addr;
+};
+
+struct simaai_alloc_args {
+	/* buffer size requested by user */
+	__u32 size;
+	/* buffer flags */
+	__u32 flags;
 };
 
 /*
@@ -39,13 +48,16 @@ struct simaai_memory_info {
 #define SIMAAI_SET_TARGET_ALLOCATOR(x) (((x) & 0xf) << 28)
 #define SIMAAI_GET_TARGET_ALLOCATOR(x) (((x) >> 28) & 0xf)
 
+#define SIMAAI_BUFFER_FLAG_CACHED		BIT(0)
+#define SIMAAI_BUFFER_FLAG_RDONLY		BIT(1)
+
 /*
  * Allocate a memory buffer from generic pool
  *
  *  Takes a buffer size.
  *  Binds allocated buffer to the driver file descriptor.
  */
-#define SIMAAI_IOC_MEM_ALLOC_GENERIC	_IOW('S', 0, unsigned int)
+#define SIMAAI_IOC_MEM_ALLOC_GENERIC	_IOW('S', 0, struct simaai_alloc_args)
 
 /*
  * Allocate memory buffer from DMA32 pool
@@ -53,7 +65,7 @@ struct simaai_memory_info {
  * Takes a buffer size.
  * Binds allocated buffer to the driver file descriptor.
  */
-#define SIMAAI_IOC_MEM_ALLOC_COHERENT	_IOW('S', 1, unsigned int)
+#define SIMAAI_IOC_MEM_ALLOC_COHERENT	_IOW('S', 1, struct simaai_alloc_args)
 
 /*
  * Free a memory buffer bound to the driver file descriptor.
