@@ -20,6 +20,7 @@ struct simaai_memory_buffer {
 	struct device *dev;
 	/* NOTE: change in datatype of id requires change in target_mask of per device struct */
 	unsigned int id;
+	unsigned int flags;
 	void *cpu_addr;
 	dma_addr_t phys_addr;
 	/* Requested memory size */
@@ -86,7 +87,7 @@ static void simaai_destroy_buffers(struct simaai_memory_device *simaai_memory)
 
 static struct simaai_memory_buffer *
 simaai_allocate_buffer(struct simaai_memory_device *simaai_memory, size_t size,
-		       bool cma_region)
+		       bool cma_region, unsigned int flags)
 {
 	struct simaai_memory_buffer *buffer = NULL, *last = NULL;
 
@@ -101,6 +102,7 @@ simaai_allocate_buffer(struct simaai_memory_device *simaai_memory, size_t size,
 	buffer->dev = simaai_memory->dev;
 	buffer->size = size;
 	buffer->aligned_size = PAGE_ALIGN(size);
+	buffer->flags = flags;
 
 	if (cma_region && (buffer->aligned_size > PAGE_SIZE)) {
 		buffer->cpu_addr = dma_alloc_contiguous(simaai_memory->dev,
@@ -210,7 +212,7 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 			     cdev);
 	void __user *argp = (void __user *)arg;
 	struct simaai_memory_buffer *buffer = filp->private_data;
-	unsigned int size;
+	struct simaai_alloc_args args;
 	unsigned int id;
 	struct simaai_memory_info info;
 	bool use_cma = false;
@@ -223,10 +225,10 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 		if (buffer)
 			return -EINVAL;
 
-		if (copy_from_user(&size, argp, sizeof(size)))
+		if (copy_from_user(&args, argp, sizeof(args)))
 			return -EFAULT;
 
-		buffer = simaai_allocate_buffer(simaai_memory, size, use_cma);
+		buffer = simaai_allocate_buffer(simaai_memory, args.size, use_cma, args.flags);
 		if (!buffer) {
 			dev_err(simaai_memory->dev, "Could not allocate buffer\n");
 			return -ENOMEM;
@@ -266,6 +268,7 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 		info.id = buffer->id;
 		info.size = buffer->size;
 		info.aligned_size = buffer->aligned_size;
+		info.flags = buffer->flags;
 		info.phys_addr = buffer->phys_addr;
 
 		if (copy_to_user(argp, &info, sizeof(info)))
@@ -303,10 +306,8 @@ static int simaai_memory_dev_mmap(struct file *filp, struct vm_area_struct *vma)
 		return -EINVAL;
 	}
 
-	vma->vm_page_prot = phys_mem_access_prot(filp,
-						 paddr >> PAGE_SHIFT,
-						 vsize,
-						 vma->vm_page_prot);
+	vma->vm_page_prot = __pgprot((buffer->flags & SIMAAI_BUFFER_FLAG_CACHED ? PROT_NORMAL : PROT_NORMAL_NC)
+			                   | (buffer->flags & SIMAAI_BUFFER_FLAG_RDONLY ? PTE_RDONLY : 0x0) | PTE_USER);
 
 	if (remap_pfn_range(vma, vma->vm_start, paddr >> PAGE_SHIFT, vsize,
 			    vma->vm_page_prot)) {
