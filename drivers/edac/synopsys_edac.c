@@ -320,6 +320,7 @@ struct synps_ecc_status {
 /**
  * struct synps_edac_priv - DDR memory controller private instance data.
  * @baseaddr:		Base address of the DDR controller.
+ * @phyaddr:		Base address of the DDR PHY controller.
  * @message:		Buffer for framing the event specific info.
  * @stat:		ECC status information.
  * @p_data:		Platform data.
@@ -334,6 +335,7 @@ struct synps_ecc_status {
  */
 struct synps_edac_priv {
 	void __iomem *baseaddr;
+	void __iomem *phyaddr;
 	char message[SYNPS_EDAC_MSG_SIZE];
 	struct synps_ecc_status stat;
 	const struct synps_platform_data *p_data;
@@ -1481,13 +1483,35 @@ static int mc_probe(struct platform_device *pdev)
 	struct synps_edac_priv *priv;
 	struct mem_ctl_info *mci;
 	void __iomem *baseaddr;
+	void __iomem *phyaddr;
 	struct resource *res;
 	int rc;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	/*
+	 * Initialize PHY controller register space, if provided in the device
+	 * tree node. If it is not provided in device tree, some debugging
+	 * information may be not displayed when ECC errors happen.
+	 */
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "phy");
+	phyaddr = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(phyaddr)) {
+		edac_printk(KERN_DEBUG, EDAC_MC, "No PHY base address defined\n");
+		phyaddr = NULL;
+	}
+
+	/*
+	 * Initialize DDR controller register space.
+	 * Try first using name. If name is not provided for the region
+	 * in the device tree node, let's assume it is the first region.
+	 */
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ddrc");
 	baseaddr = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(baseaddr))
-		return PTR_ERR(baseaddr);
+	if (IS_ERR(baseaddr)) {
+		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+		baseaddr = devm_ioremap_resource(&pdev->dev, res);
+		if (IS_ERR(baseaddr))
+			return PTR_ERR(baseaddr);
+	}
 
 	p_data = of_device_get_match_data(&pdev->dev);
 	if (!p_data)
@@ -1515,6 +1539,7 @@ static int mc_probe(struct platform_device *pdev)
 
 	priv = mci->pvt_info;
 	priv->baseaddr = baseaddr;
+	priv->phyaddr = phyaddr;
 	priv->p_data = p_data;
 
 	mc_init(mci, pdev);
