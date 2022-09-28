@@ -223,6 +223,18 @@
 /* ECC Address protection Status mask*/
 #define ECC_APSTAT_APERR_MASK		BIT(0)
 
+/* PHY Controller registers */
+#define DDRPHY_MICROCONTMUXSEL_OFST		0x1A0000
+#define DDRPHY_DBYTE0_OFST				0x20000
+#define DDRPHY_DBYTE_SIZE				0x02000
+#define DDRPHY_DBYTE_COUNT				10
+#define DDRPHY_RXFIFOCHECKSTATUS		0xAC
+#define DDRPHY_RXFIFOCHECKERRVALUES		0xAE
+#define DDRPHY_RXFIFOINFO				0xB0
+#define DDRPHY_RXFIFOCONTENTSDQ3210		0xB4
+#define DDRPHY_RXFIFOCONTENTSDQ7654		0xB6
+#define DDRPHY_RXFIFOCONTENTSDBI		0xB8
+
 /* DDRC Device config masks */
 #define DDRC_MSTR_CFG_MASK		0xC0000000
 #define DDRC_MSTR_CFG_SHIFT		30
@@ -492,10 +504,13 @@ out:
 static int simaai_get_error_info(struct synps_edac_priv *priv)
 {
 	struct synps_ecc_status *p;
-	u32 regval, clearval = 0;
+	u32 regval, clearval = 0, i;
 	void __iomem *base;
+	void __iomem *phybase;
+	void __iomem *bytebase;
 
 	base = priv->baseaddr;
+	phybase = priv->phyaddr;
 	p = &priv->stat;
 
 	regval = readl(base + ECC_ERRCNT_OFST);
@@ -538,6 +553,23 @@ out:
 	clearval |= ECC_CTRL_CLR_UE_ERR | ECC_CTRL_CLR_UE_ERRCNT;
 	clearval |= ECC_CTRL_CLR_AP_ERR;
 	writel(clearval, base + ECC_CLR_OFST);
+
+	if ((priv->p_data->quirks & DDR_ECC_DUMP_IN_CHECK) && (phybase != NULL)) {
+		writew(0x0, phybase + DDRPHY_MICROCONTMUXSEL_OFST);
+		for(i = 0; i < DDRPHY_DBYTE_COUNT; i++) {
+			bytebase = phybase + DDRPHY_DBYTE0_OFST + i * DDRPHY_DBYTE_SIZE;
+			edac_printk(KERN_INFO, EDAC_MC, "BYTE[%d] CheckStatus: 0x%04x, "
+					"CheckErrValues: 0x%04x, Info: 0x%04x, ContentsDQ3210: "
+					"0x%04x, ContentsDQ7654: 0x%04x, ContentsDBI: 0x%04x\n", i,
+					readw(bytebase + DDRPHY_RXFIFOCHECKSTATUS),
+					readw(bytebase + DDRPHY_RXFIFOCHECKERRVALUES),
+					readw(bytebase + DDRPHY_RXFIFOINFO),
+					readw(bytebase + DDRPHY_RXFIFOCONTENTSDQ3210),
+					readw(bytebase + DDRPHY_RXFIFOCONTENTSDQ7654),
+					readw(bytebase + DDRPHY_RXFIFOCONTENTSDBI));
+		}
+		writew(0x1, phybase + DDRPHY_MICROCONTMUXSEL_OFST);
+	}
 
 	return 0;
 }
