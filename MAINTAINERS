@@ -19934,6 +19934,7 @@ M:	Yurii Konovalenko <orientua@gmail.com>
 L:	linux-iio@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/counter/dw-apb-timer-cnt.txt
+F:	drivers/counter/dw-apb-timer-cnt.c
 
 SYNOPSYS DESIGNWARE AXI DMAC DRIVER
 M:	Eugeniy Paltsev <Eugeniy.Paltsev@synopsys.com>

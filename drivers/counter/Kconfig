@@ -116,4 +116,14 @@ config TI_ECAP_CAPTURE
 	  To compile this driver as a module, choose M here: the module
 	  will be called ti-ecap-capture.
 
+config DW_TIMER_CNT
+	tristate "Synopsys DesignWare Timer counter driver"
+	depends on OF
+	help
+	  Select this option to enable the Synopsys DesignWare Timer counter
+	  driver.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called dw-apb-timer-cnt.
+
 endif # COUNTER
