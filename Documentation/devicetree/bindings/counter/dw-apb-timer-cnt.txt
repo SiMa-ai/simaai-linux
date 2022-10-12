@@ -1,0 +1,25 @@
+Synopsys DesignWare APB timer counter
+
+This driver exposes a simple incremental counter for the timer.
+
+Required properties:
+- compatible:		Must be "snps,dw-apb-timer-counter-2.12a".
+- reg:			Must be set to the memory region of the timer.
+
+Optional property:
+- interrupts: 		Should contain the channel interrupt signals to handle
+			channel overflow
+- snps,channels:	Number of channels in the timer
+
+Example:
+			counter0: counter@704000 {
+				compatible = "snps,dw-apb-timer-counter-2.12a";
+				reg = <0x0 0x00704000 0x0 0x000000b0>;
+				interrupt-parent = <&gic>;
+				interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
+				snps,channels = <0x4>;
+				status = "okay";
+			};
