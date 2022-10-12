@@ -19929,6 +19929,12 @@ S:	Supported
 F:	Documentation/devicetree/bindings/spi/snps,dw-apb-ssi.yaml
 F:	drivers/spi/spi-dw*
 
+SYNOPSYS DESIGNWARE APB TIMER COUNTER DRIVER
+M:	Yurii Konovalenko <orientua@gmail.com>
+L:	linux-iio@vger.kernel.org
+S:	Maintained
+F:	Documentation/devicetree/bindings/counter/dw-apb-timer-cnt.txt
+
 SYNOPSYS DESIGNWARE AXI DMAC DRIVER
 M:	Eugeniy Paltsev <Eugeniy.Paltsev@synopsys.com>
 S:	Maintained
