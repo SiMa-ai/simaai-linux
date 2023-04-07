@@ -1,0 +1,88 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2021 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "davinci-h.dtsi"
+
+
+/ {
+	model = "SiMa.ai DaVinci Half-Height-Half-Length Board";
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs";
+	};
+
+	aliases {
+		ethernet0 = &eth0;
+		ethernet1 = &eth1;
+		console   = &uart0;
+		mmc0 = &sdhci0;
+		mmc1 = &sdhci1;
+	};
+    
+	// DMS: hw interleave enabled - flat 14GB + 2GB ECC
+	//fisrt 0.5GB left for 32-bit cores ie EV74, EM4, M4 etc
+	//Enable following node if hw interleave enabled.
+	
+	//memory@80000000 {
+		//device_type = "memory";
+		//reg = <0x0 0xA0000000 0x3 0x60000000>;
+	//};
+
+	//Enable following node(s) if hw interleave disabled.
+	//DMS0-3, 3.5GB each with 0.5GB hole in between.
+	//fisrt 0.5GB left for 32-bit cores ie EV74, EM4, M4 etc 
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0xA0000000 0x0 0xC0000000>;
+	};
+	
+ 	//DMS1: 3.5GB
+	memory@180000000 {
+		device_type = "memory";
+		reg = <0x1 0x80000000 0x0 0xE0000000>;
+	};
+    
+	//DMS2: 3.5GB
+	memory@280000000 {
+		device_type = "memory";
+		reg = <0x2 0x80000000 0x0 0xE0000000>;
+	};
+    
+	//DMS3: 3.5GB
+	memory@380000000 {
+		device_type = "memory";
+		reg = <0x3 0x80000000 0x0 0xE0000000>;
+	};	
+};
+
+&i2c0 {
+	status = "okay";
+};
+
+&i2c1 {
+	status = "okay";
+};
+
+&sdhci0 {
+	status = "okay";
+};
+
+&sdhci1 {
+	status = "okay";
+};
+
+&eth0 {
+	status = "okay";
+};
+
+&eth1 {
+	status = "okay";
+};
+
+&pcie_ep {
+	status = "okay";
+};
