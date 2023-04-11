@@ -64,3 +64,5 @@ obj-$(CONFIG_QCOM_IPCC)		+= qcom-ipcc.o
 obj-$(CONFIG_APPLE_MAILBOX)	+= apple-mailbox.o
 
 obj-$(CONFIG_SIMAAI_MBOX)		+= sima-mailbox.o sima-mailbox-client.o
+
+obj-$(CONFIG_SIMAAI_HPI)		+= sima-hpi.o

@@ -302,4 +302,10 @@ config SIMAAI_MBOX
 	  to send short messages between ARM64-bit cores and coprocessors.
 	  Say Y here if you want to use the SiMa.ai mailbox support.
 
+config SIMAAI_HPI
+	tristate "SiMa.ai HPI"
+	depends on HAS_IOMEM && ARCH_SIMAAI_DAVINCI
+	help
+	  An implementation of the SiMa.ai DaVinci HPI driver.
+
 endif
