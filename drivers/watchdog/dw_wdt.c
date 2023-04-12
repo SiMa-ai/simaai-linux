@@ -88,6 +88,7 @@ struct dw_wdt {
 	struct dw_wdt_timeout	timeouts[DW_WDT_NUM_TOPS];
 	struct watchdog_device	wdd;
 	struct reset_control	*rst;
+	bool			force_irq_mode;
 	/* Save/restore */
 	u32			control;
 	u32			timeout;
@@ -110,6 +111,10 @@ static void dw_wdt_update_mode(struct dw_wdt *dw_wdt, enum dw_wdt_rmod rmod)
 	u32 val;
 
 	val = readl(dw_wdt->regs + WDOG_CONTROL_REG_OFFSET);
+
+	if(dw_wdt->force_irq_mode)
+		rmod = DW_WDT_RMOD_IRQ;
+
 	if (rmod == DW_WDT_RMOD_IRQ)
 		val |= WDOG_CONTROL_REG_RESP_MODE_MASK;
 	else
@@ -548,6 +553,7 @@ static void dw_wdt_dbgfs_clear(struct dw_wdt *dw_wdt) {}
 static int dw_wdt_drv_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	struct device_node *np = pdev->dev.of_node;
 	struct watchdog_device *wdd;
 	struct dw_wdt *dw_wdt;
 	int ret;
@@ -605,6 +611,8 @@ static int dw_wdt_drv_probe(struct platform_device *pdev)
 		ret = PTR_ERR(dw_wdt->rst);
 		goto out_disable_pclk;
 	}
+
+	dw_wdt->force_irq_mode = of_property_read_bool(np, "snps,force_irq_mode");
 
 	/* Enable normal reset without pre-timeout by default. */
 	dw_wdt_update_mode(dw_wdt, DW_WDT_RMOD_RESET);
