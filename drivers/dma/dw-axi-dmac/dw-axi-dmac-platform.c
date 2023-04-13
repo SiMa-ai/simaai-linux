@@ -369,6 +369,45 @@ static void dw_axi_dma_set_byte_halfword(struct axi_dma_chan *chan, bool set)
 
 	iowrite32(val, chan->chip->apb_regs + offset);
 }
+
+static void mark_hwdesc_done(struct axi_dma_desc *dma_desc)
+{
+	int i = 0;
+	u32 val;
+
+	do {
+		if(!dma_desc->hw_desc[i].lli) {
+			pr_err("NULL LLI POINTER\n");
+			return;
+		}
+		val = le32_to_cpu(dma_desc->hw_desc[i].lli->ctl_hi);
+		if(dma_desc->hw_desc[i].lli->reserved_lo != DMAC_DESC_COMPLETED) {
+			dma_desc->hw_desc[i].lli->reserved_lo = DMAC_DESC_COMPLETED;
+			return;
+		}
+		i++;
+	} while(!(val & CH_CTL_H_LLI_LAST));
+}
+
+static int get_next_hwdesc_number(struct axi_dma_desc *dma_desc)
+{
+	int i = 0;
+	u32 val;
+
+	do {
+		if(!dma_desc->hw_desc[i].lli) {
+			pr_err("NULL LLI POINTER\n");
+			return -1;
+		}
+		val = le32_to_cpu(dma_desc->hw_desc[i].lli->ctl_hi);
+		if(dma_desc->hw_desc[i].lli->reserved_lo != DMAC_DESC_COMPLETED)
+			return i;
+		i++;
+	} while(!(val & CH_CTL_H_LLI_LAST));
+
+	return -1;
+}
+
 /* Called in chan locked context */
 static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 				      struct axi_dma_desc *first)
@@ -377,6 +416,7 @@ static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 	struct axi_dma_chan_config config = {};
 	u32 irq_mask;
 	u8 lms = 0; /* Select AXI0 master for LLI fetching */
+	u32 i;
 
 	if (unlikely(axi_chan_is_hw_enable(chan))) {
 		dev_err(chan2dev(chan), "%s is non-idle!\n",
@@ -387,8 +427,8 @@ static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 
 	axi_dma_enable(chan->chip);
 
-	config.dst_multblk_type = DWAXIDMAC_MBLK_TYPE_LL;
-	config.src_multblk_type = DWAXIDMAC_MBLK_TYPE_LL;
+	config.dst_multblk_type = chan->chip->dw->hdata->xfer_mode;
+	config.src_multblk_type = chan->chip->dw->hdata->xfer_mode;
 	config.tt_fc = DWAXIDMAC_TT_FC_MEM_TO_MEM_DMAC;
 	config.prior = priority;
 	config.hs_sel_dst = DWAXIDMAC_HS_SEL_HW;
@@ -416,11 +456,26 @@ static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 	default:
 		break;
 	}
+
 	axi_chan_config_write(chan, &config);
 
-	write_chan_llp(chan, first->hw_desc[0].llp | lms);
+	if (chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) {
+		i = get_next_hwdesc_number(first);
+		if(i < 0) {
+			dev_err(chan->chip->dev, "No blocks for current descriptor\n");
+			return;
+		}
+		axi_chan_iowrite64(chan, CH_BLOCK_TS, first->hw_desc[i].lli->block_ts_lo);
+		axi_chan_iowrite32(chan, CH_CTL_L, first->hw_desc[i].lli->ctl_lo);
+		axi_chan_iowrite32(chan, CH_CTL_H, first->hw_desc[i].lli->ctl_hi);
+		axi_chan_iowrite64(chan, CH_SAR, first->hw_desc[i].lli->sar);
+		axi_chan_iowrite64(chan, CH_DAR, first->hw_desc[i].lli->dar);
+		irq_mask = DWAXIDMAC_IRQ_BLOCK_TRF | DWAXIDMAC_IRQ_DMA_TRF | DWAXIDMAC_IRQ_ALL_ERR;
+	} else {
+		write_chan_llp(chan, first->hw_desc[0].llp | lms);
+		irq_mask = DWAXIDMAC_IRQ_DMA_TRF | DWAXIDMAC_IRQ_ALL_ERR;
+	}
 
-	irq_mask = DWAXIDMAC_IRQ_DMA_TRF | DWAXIDMAC_IRQ_ALL_ERR;
 	axi_chan_irq_sig_set(chan, irq_mask);
 
 	/* Generate 'suspend' status but don't generate interrupt */
@@ -901,7 +956,10 @@ dma_chan_prep_dma_memcpy(struct dma_chan *dchan, dma_addr_t dst_adr,
 		 * Actually source and destination widths can be different, but
 		 * make them same to be simpler.
 		 */
-		xfer_width = axi_chan_get_xfer_width(chan, src_adr, dst_adr, xfer_len);
+		if(chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS)
+			xfer_width = chan->chip->dw->hdata->m_data_width;
+		else
+			xfer_width = axi_chan_get_xfer_width(chan, src_adr, dst_adr, xfer_len);
 
 		/*
 		 * block_ts indicates the total number of data of width
@@ -922,7 +980,8 @@ dma_chan_prep_dma_memcpy(struct dma_chan *dchan, dma_addr_t dst_adr,
 		write_desc_dar(hw_desc, dst_adr);
 		hw_desc->lli->block_ts_lo = cpu_to_le32(block_ts - 1);
 
-		reg = CH_CTL_H_LLI_VALID;
+		reg = (chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) ?
+			0 : CH_CTL_H_LLI_VALID;
 		if (chan->chip->dw->hdata->restrict_axi_burst_len) {
 			u32 burst_len = chan->chip->dw->hdata->axi_rw_burst_len;
 
@@ -933,12 +992,18 @@ dma_chan_prep_dma_memcpy(struct dma_chan *dchan, dma_addr_t dst_adr,
 		}
 		hw_desc->lli->ctl_hi = cpu_to_le32(reg);
 
-		reg = (DWAXIDMAC_BURST_TRANS_LEN_4 << CH_CTL_L_DST_MSIZE_POS |
-		       DWAXIDMAC_BURST_TRANS_LEN_4 << CH_CTL_L_SRC_MSIZE_POS |
-		       xfer_width << CH_CTL_L_DST_WIDTH_POS |
-		       xfer_width << CH_CTL_L_SRC_WIDTH_POS |
-		       DWAXIDMAC_CH_CTL_L_INC << CH_CTL_L_DST_INC_POS |
-		       DWAXIDMAC_CH_CTL_L_INC << CH_CTL_L_SRC_INC_POS);
+		if(chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) {
+			reg = (xfer_width << CH_CTL_L_DST_WIDTH_POS  |
+				xfer_width << CH_CTL_L_SRC_WIDTH_POS);
+			hw_desc->lli->reserved_lo = DMAC_DESC_SUBMITTED;
+			hw_desc->lli->reserved_hi = 0;
+		} else
+			reg = (DWAXIDMAC_BURST_TRANS_LEN_4 << CH_CTL_L_DST_MSIZE_POS |
+			       DWAXIDMAC_BURST_TRANS_LEN_4 << CH_CTL_L_SRC_MSIZE_POS |
+			       xfer_width << CH_CTL_L_DST_WIDTH_POS |
+			       xfer_width << CH_CTL_L_SRC_WIDTH_POS |
+			       DWAXIDMAC_CH_CTL_L_INC << CH_CTL_L_DST_INC_POS |
+			       DWAXIDMAC_CH_CTL_L_INC << CH_CTL_L_SRC_INC_POS);
 		hw_desc->lli->ctl_lo = cpu_to_le32(reg);
 
 		set_desc_src_master(hw_desc);
@@ -1067,8 +1132,8 @@ static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 		goto out;
 	}
 
+	desc = vd_to_axi_desc(vd);
 	if (chan->cyclic) {
-		desc = vd_to_axi_desc(vd);
 		if (desc) {
 			llp = lo_hi_readq(chan->chan_regs + CH_LLP);
 			for (i = 0; i < count; i++) {
@@ -1087,12 +1152,22 @@ static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 			axi_chan_enable(chan);
 		}
 	} else {
-		/* Remove the completed descriptor from issued list before completing */
-		list_del(&vd->node);
-		vchan_cookie_complete(vd);
+		if (chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS)
+			mark_hwdesc_done(desc);
+
+		if((chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) ||
+			((chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) &&
+			(get_next_hwdesc_number(desc) < 0)))
+		{
+			/* Remove the completed descriptor from issued list before completing */
+			list_del(&vd->node);
+			vchan_cookie_complete(vd);
+		}
 
 		/* Submit queued descriptors after processing the completed ones */
-		axi_chan_start_first_queued(chan);
+		if (!((chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS)
+		       && (chan->is_paused)))
+			axi_chan_start_first_queued(chan);
 	}
 
 out:
@@ -1368,6 +1443,16 @@ static int parse_device_properties(struct axi_dma_chip *chip)
 		chip->dw->hdata->restrict_axi_burst_len = true;
 		chip->dw->hdata->axi_rw_burst_len = tmp;
 	}
+
+	/* transfer-mode is optional property */
+	ret = device_property_read_u32(dev, "snps,transfer-mode", &tmp);
+	chip->dw->hdata->xfer_mode = 0;
+	if (!ret) {
+		if (tmp > DWAXIDMAC_MBLK_TYPE_LL)
+			return -EINVAL;
+		chip->dw->hdata->xfer_mode = tmp;
+	} else
+		chip->dw->hdata->xfer_mode = DWAXIDMAC_MBLK_TYPE_LL;
 
 	return 0;
 }

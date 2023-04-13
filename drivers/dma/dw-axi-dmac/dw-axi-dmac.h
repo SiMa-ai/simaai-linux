@@ -22,6 +22,10 @@
 #define DMAC_MAX_MASTERS	2
 #define DMAC_MAX_BLK_SIZE	0x200000
 
+#define DMAC_DESC_SUBMITTED (1)
+#define DMAC_DESC_ISSUED    (2)
+#define DMAC_DESC_COMPLETED (3)
+
 struct dw_axi_dma_hcfg {
 	u32	nr_channels;
 	u32	nr_masters;
@@ -33,6 +37,7 @@ struct dw_axi_dma_hcfg {
 	/* Register map for DMAX_NUM_CHANNELS <= 8 */
 	bool	reg_map_8_channels;
 	bool	restrict_axi_burst_len;
+	u32 xfer_mode;
 };
 
 struct axi_dma_chan {
