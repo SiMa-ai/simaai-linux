@@ -18,7 +18,7 @@
 
 #include "../virt-dma.h"
 
-#define DMAC_MAX_CHANNELS	16
+#define DMAC_MAX_CHANNELS	32
 #define DMAC_MAX_MASTERS	2
 #define DMAC_MAX_BLK_SIZE	0x200000
 
@@ -153,6 +153,8 @@ static inline struct axi_dma_chan *dchan_to_axi_dma_chan(struct dma_chan *dchan)
 #define DMAC_CHEN_L		0x018 /* R/W DMAC Channel Enable 00-31 */
 #define DMAC_CHEN_H		0x01C /* R/W DMAC Channel Enable 32-63 */
 #define DMAC_CHSUSPREG		0x020 /* R/W DMAC Channel Suspend */
+#define DMAC_CHSUSPREG_L	0x020 /* R/W DMAC Channel Suspend 00-31 */
+#define DMAC_CHSUSPREG_H	0x024 /* R/W DMAC Channel Suspend 32-63 */
 #define DMAC_CHABORTREG		0x028 /* R/W DMAC Channel Abort */
 #define DMAC_INTSTATUS		0x030 /* R DMAC Interrupt Status */
 #define DMAC_COMMON_INTCLEAR	0x038 /* W DMAC Interrupt Clear */
