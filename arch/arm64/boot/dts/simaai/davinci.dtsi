@@ -190,6 +190,13 @@
 			clock-output-names = "sysclk";
 		};
 
+		ethclk: clk250mhz {
+                       compatible = "fixed-clock";
+                        #clock-cells = <0>;
+                        clock-frequency = <250000000>;
+                        clock-output-names = "ethclk";
+                };
+
 		sdhciclk: clk400mhz {
 			compatible = "fixed-clock";
 			#clock-cells = <0>;
@@ -444,7 +451,7 @@
                 interrupts = <GIC_SPI 129 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
                 interrupt-names = "macirq", "xpcs_irq";
 
-                clocks = <&sysclk>;
+                clocks = <&ethclk>;
                 clock-names = "stmmaceth";
 
 	        phy-mode = "sgmii";
@@ -468,7 +475,7 @@
                 interrupts = <GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 137 IRQ_TYPE_LEVEL_HIGH>;
                 interrupt-names = "macirq", "xpcs_irq";
 
-                clocks = <&sysclk>;
+                clocks = <&ethclk>;
                 clock-names = "stmmaceth";
 
 	        phy-mode = "sgmii";
@@ -492,7 +499,7 @@
                 interrupts = <GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 138 IRQ_TYPE_LEVEL_HIGH>;
                 interrupt-names = "macirq", "xpcs_irq";
 
-                clocks = <&sysclk>;
+                clocks = <&ethclk>;
                 clock-names = "stmmaceth";
 
 	        phy-mode = "sgmii";
@@ -516,7 +523,7 @@
                 interrupts = <GIC_SPI 135 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 139 IRQ_TYPE_LEVEL_HIGH>;
                 interrupt-names = "macirq", "xpcs_irq";
 
-                clocks = <&sysclk>;
+                clocks = <&ethclk>;
                 clock-names = "stmmaceth";
 
 	        phy-mode = "sgmii";
