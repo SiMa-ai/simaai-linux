@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2021 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "davinci.dtsi"
+
+/* So far Davinci-H defined similar to Davinci SoC */
+

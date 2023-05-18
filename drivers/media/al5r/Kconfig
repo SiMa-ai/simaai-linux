@@ -1,0 +1,10 @@
+    config ALLEGRO_CODEC_DRIVER
+        tristate "Allegro IP driver"
+        depends on HAS_DMA
+        depends on HAS_IOMEM
+        help
+	  Say Y for enabling the hardware codec driver
+
+          To compile this support as a module, choose M here:
+          The module will be called allegro_encoder.
+          If unsure, say N.
