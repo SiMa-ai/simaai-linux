@@ -270,6 +270,8 @@ static long al5r_codec_ioctl(struct file *filp, unsigned int cmd,
 		return al5_ioctl_get_dma_mmap(codec->device, chan, arg);
 	case GET_DMA_FD:
 		return al5_ioctl_get_dma_fd(codec->device, codec->dma_offset, arg);
+	case GET_DMA_FD_CACHED:
+		return al5_ioctl_get_dma_fd_cached(codec->device, codec->dma_offset, arg);
 	case GET_DMA_PHY:
 		return al5_ioctl_get_dmabuf_dma_addr(codec->device, codec->dma_offset,
 						     arg);

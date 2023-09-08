@@ -75,6 +75,10 @@
 	status = "okay";
 };
 
+&reg_sdhci1 {
+	status = "okay";
+};
+
 &eth0 {
 	status = "okay";
 };
