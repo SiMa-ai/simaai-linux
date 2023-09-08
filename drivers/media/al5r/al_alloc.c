@@ -19,7 +19,7 @@ MODULE_DESCRIPTION("Allegro Common");
 struct al5_dma_buffer *al5_alloc_dma(struct device *dev, size_t size)
 {
 	struct al5_dma_buffer *buf =
-		kmalloc(sizeof(struct al5_dma_buffer),
+		kzalloc(sizeof(struct al5_dma_buffer),
 			GFP_KERNEL);
 
 	if (!buf)

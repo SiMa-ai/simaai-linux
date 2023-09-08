@@ -13,6 +13,7 @@ struct al5_dma_buffer {
 	size_t size;
 	dma_addr_t dma_handle;
 	void *cpu_handle;
+	int is_cacheable;
 };
 
 struct al5_dma_buffer *al5_alloc_dma(struct device *dev, size_t size);

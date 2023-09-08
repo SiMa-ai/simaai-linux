@@ -411,6 +411,29 @@ static void cma_debug_show_areas(struct cma *cma)
 static inline void cma_debug_show_areas(struct cma *cma) { }
 #endif
 
+static unsigned long cma_total_free_pages(struct cma *cma)
+{
+        unsigned long next_zero_bit, next_set_bit, nr_zero;
+        unsigned long start = 0;
+        unsigned long nr_part, nr_total = 0;
+        unsigned long nbits = cma_bitmap_maxno(cma);
+
+        spin_lock_irq(&cma->lock);
+        for (;;) {
+                next_zero_bit = find_next_zero_bit(cma->bitmap, nbits, start);
+                if (next_zero_bit >= nbits)
+                        break;
+                next_set_bit = find_next_bit(cma->bitmap, nbits, next_zero_bit);
+                nr_zero = next_set_bit - next_zero_bit;
+                nr_part = nr_zero << cma->order_per_bit;
+                nr_total += nr_part;
+                start = next_zero_bit + nr_zero;
+        }
+        spin_unlock_irq(&cma->lock);
+
+        return nr_total;
+}
+
 /**
  * cma_alloc() - allocate pages from contiguous area
  * @cma:   Contiguous memory region for which the allocation is performed.
@@ -504,8 +527,11 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 	}
 
 	if (ret && !no_warn) {
-		pr_err_ratelimited("%s: %s: alloc failed, req-size: %lu pages, ret: %d\n",
-				   __func__, cma->name, count, ret);
+		pr_err_ratelimited("%s: %s: alloc failed, req-size: %lu pages,"
+			           "free pages: %lu, total pages: %lu ,ret: %d\n",
+				   __func__, cma->name, count, 
+				   cma_total_free_pages(cma),
+				   cma->count,ret);
 		cma_debug_show_areas(cma);
 	}
 

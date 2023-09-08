@@ -188,6 +188,7 @@
 /* ECC Corrected Error Register Mask and Shifts*/
 #define ECC_CEADDR0_RW_MASK		0x3FFFF
 #define ECC_CEADDR0_RNK_MASK		BIT(24)
+#define ECC_CEADDR0_RNK_SHIFT		24
 #define ECC_CEADDR1_BNKGRP_MASK		0x3000000
 #define ECC_CEADDR1_BNKNR_MASK		0x70000
 #define ECC_CEADDR1_BLKNR_MASK		0xFFF
@@ -297,20 +298,24 @@
 
 /**
  * struct ecc_error_info - ECC error log information.
+ * @rank:	Rank number.
  * @row:	Row number.
  * @col:	Column number.
  * @bank:	Bank number.
  * @bitpos:	Bit position.
- * @data:	Data causing the error.
+ * @syndrome:	Syndrome causing the error.
+ * @bitmask:	Data causing the error.
  * @bankgrpnr:	Bank group number.
  * @blknr:	Block number.
  */
 struct ecc_error_info {
+	u32 rank;
 	u32 row;
 	u32 col;
 	u32 bank;
 	u32 bitpos;
-	u32 data;
+	u32 syndrome[3];
+	u32 bitmask[3];
 	u32 bankgrpnr;
 	u32 blknr;
 };
@@ -410,9 +415,9 @@ static int zynq_get_error_info(struct synps_edac_priv *priv)
 	p->ceinfo.row = (regval & ADDR_ROW_MASK) >> ADDR_ROW_SHIFT;
 	p->ceinfo.col = regval & ADDR_COL_MASK;
 	p->ceinfo.bank = (regval & ADDR_BANK_MASK) >> ADDR_BANK_SHIFT;
-	p->ceinfo.data = readl(base + CE_DATA_31_0_OFST);
+	p->ceinfo.syndrome[0] = readl(base + CE_DATA_31_0_OFST);
 	edac_dbg(3, "CE bit position: %d data: %d\n", p->ceinfo.bitpos,
-		 p->ceinfo.data);
+		 p->ceinfo.syndrome[0]);
 	clearval = ECC_CTRL_CLR_CE_ERR;
 
 ue_err:
@@ -424,7 +429,7 @@ ue_err:
 	p->ueinfo.row = (regval & ADDR_ROW_MASK) >> ADDR_ROW_SHIFT;
 	p->ueinfo.col = regval & ADDR_COL_MASK;
 	p->ueinfo.bank = (regval & ADDR_BANK_MASK) >> ADDR_BANK_SHIFT;
-	p->ueinfo.data = readl(base + UE_DATA_31_0_OFST);
+	p->ueinfo.syndrome[0] = readl(base + UE_DATA_31_0_OFST);
 	clearval |= ECC_CTRL_CLR_UE_ERR;
 
 out:
@@ -469,7 +474,9 @@ static int zynqmp_get_error_info(struct synps_edac_priv *priv)
 	p->ceinfo.bankgrpnr = (regval &	ECC_CEADDR1_BNKGRP_MASK) >>
 					ECC_CEADDR1_BNKGRP_SHIFT;
 	p->ceinfo.blknr = (regval & ECC_CEADDR1_BLKNR_MASK);
-	p->ceinfo.data = readl(base + ECC_CSYND0_OFST);
+	p->ceinfo.syndrome[0] = readl(base + ECC_CSYND0_OFST);
+	p->ceinfo.syndrome[1] = readl(base + ECC_CSYND1_OFST);
+	p->ceinfo.syndrome[2] = readl(base + ECC_CSYND2_OFST);
 	edac_dbg(2, "ECCCSYN0: 0x%08X ECCCSYN1: 0x%08X ECCCSYN2: 0x%08X\n",
 		 readl(base + ECC_CSYND0_OFST), readl(base + ECC_CSYND1_OFST),
 		 readl(base + ECC_CSYND2_OFST));
@@ -485,7 +492,9 @@ ue_err:
 	p->ueinfo.bank = (regval & ECC_CEADDR1_BNKNR_MASK) >>
 					ECC_CEADDR1_BNKNR_SHIFT;
 	p->ueinfo.blknr = (regval & ECC_CEADDR1_BLKNR_MASK);
-	p->ueinfo.data = readl(base + ECC_UESYND0_OFST);
+	p->ueinfo.syndrome[0] = readl(base + ECC_UESYND0_OFST);
+	p->ueinfo.syndrome[1] = readl(base + ECC_UESYND1_OFST);
+	p->ueinfo.syndrome[2] = readl(base + ECC_UESYND2_OFST);
 out:
 	clearval = ECC_CTRL_CLR_CE_ERR | ECC_CTRL_CLR_CE_ERRCNT;
 	clearval |= ECC_CTRL_CLR_UE_ERR | ECC_CTRL_CLR_UE_ERRCNT;
@@ -520,33 +529,47 @@ static int simaai_get_error_info(struct synps_edac_priv *priv)
 	if (!p->ce_cnt)
 		goto ue_err;
 
+	regval = readl(base + ECC_STAT_OFST);
 	p->ceinfo.bitpos = (regval & ECC_STAT_BITNUM_MASK);
 
 	regval = readl(base + ECC_CEADDR0_OFST);
 	p->ceinfo.row = (regval & ECC_CEADDR0_RW_MASK);
+	p->ceinfo.rank = (regval & ECC_CEADDR0_RNK_MASK) >>
+					ECC_CEADDR0_RNK_SHIFT;
 	regval = readl(base + ECC_CEADDR1_OFST);
 	p->ceinfo.bank = (regval & ECC_CEADDR1_BNKNR_MASK) >>
 					ECC_CEADDR1_BNKNR_SHIFT;
 	p->ceinfo.bankgrpnr = (regval &	ECC_CEADDR1_BNKGRP_MASK) >>
 					ECC_CEADDR1_BNKGRP_SHIFT;
 	p->ceinfo.blknr = (regval & ECC_CEADDR1_BLKNR_MASK);
-	p->ceinfo.data = readl(base + ECC_CSYND0_OFST);
-	edac_dbg(2, "ECCCSYN0: 0x%08X ECCCSYN1: 0x%08X ECCCSYN2: 0x%08X\n",
-		 readl(base + ECC_CSYND0_OFST), readl(base + ECC_CSYND1_OFST),
-		 readl(base + ECC_CSYND2_OFST));
+	p->ceinfo.col = regval & ECC_CEADDR1_BLKNR_MASK;
+	p->ceinfo.syndrome[0] = readl(base + ECC_CSYND0_OFST);
+	p->ceinfo.syndrome[1] = readl(base + ECC_CSYND1_OFST);
+	p->ceinfo.syndrome[2] = readl(base + ECC_CSYND2_OFST);
+	p->ueinfo.bitmask[0] = readl(base + ECC_BITMASK0_OFST);
+	p->ueinfo.bitmask[1] = readl(base + ECC_BITMASK1_OFST);
+	p->ueinfo.bitmask[2] = readl(base + ECC_BITMASK2_OFST);
 ue_err:
 	if (!p->ue_cnt)
 		goto out;
 
 	regval = readl(base + ECC_UEADDR0_OFST);
 	p->ueinfo.row = (regval & ECC_CEADDR0_RW_MASK);
+	p->ueinfo.rank = (regval & ECC_CEADDR0_RNK_MASK) >>
+					ECC_CEADDR0_RNK_SHIFT;;
 	regval = readl(base + ECC_UEADDR1_OFST);
 	p->ueinfo.bankgrpnr = (regval & ECC_CEADDR1_BNKGRP_MASK) >>
 					ECC_CEADDR1_BNKGRP_SHIFT;
 	p->ueinfo.bank = (regval & ECC_CEADDR1_BNKNR_MASK) >>
 					ECC_CEADDR1_BNKNR_SHIFT;
 	p->ueinfo.blknr = (regval & ECC_CEADDR1_BLKNR_MASK);
-	p->ueinfo.data = readl(base + ECC_UESYND0_OFST);
+	p->ueinfo.col = regval & ECC_CEADDR1_BLKNR_MASK;
+	p->ueinfo.syndrome[0] = readl(base + ECC_UESYND0_OFST);
+	p->ueinfo.syndrome[1] = readl(base + ECC_UESYND1_OFST);
+	p->ueinfo.syndrome[2] = readl(base + ECC_UESYND2_OFST);
+	p->ueinfo.bitmask[0] = readl(base + ECC_BITMASK0_OFST);
+	p->ueinfo.bitmask[1] = readl(base + ECC_BITMASK1_OFST);
+	p->ueinfo.bitmask[2] = readl(base + ECC_BITMASK2_OFST);
 out:
 	clearval = readl(base + ECC_CLR_OFST);
 	clearval |= ECC_CTRL_CLR_CE_ERR | ECC_CTRL_CLR_CE_ERRCNT;
@@ -590,15 +613,19 @@ static void handle_error(struct mem_ctl_info *mci, struct synps_ecc_status *p)
 		pinf = &p->ceinfo;
 		if (priv->p_data->quirks & DDR_ECC_INTR_SUPPORT) {
 			snprintf(priv->message, SYNPS_EDAC_MSG_SIZE,
-				 "DDR ECC error type:%s Row %d Bank %d BankGroup Number %d Block Number %d Bit Position: %d Data: 0x%08x",
-				 "CE", pinf->row, pinf->bank,
-				 pinf->bankgrpnr, pinf->blknr,
-				 pinf->bitpos, pinf->data);
+				 "DDR ECC error type:%s Rank %d Row %d Bank %d BankGroup Number %d Block Number %d Bit Position: %d "
+				 "Syndrome: 0x%08x 0x%08x 0x%08x Bit Mask: 0x%08x 0x%08x 0x%08x",
+				 "CE", pinf->rank, pinf->row, pinf->bank,
+				 pinf->bankgrpnr, pinf->blknr, pinf->bitpos, 
+				 pinf->syndrome[0], pinf->syndrome[1], pinf->syndrome[2],
+				 pinf->bitmask[0], pinf->bitmask[1], pinf->bitmask[2]);
 		} else {
 			snprintf(priv->message, SYNPS_EDAC_MSG_SIZE,
-				 "DDR ECC error type:%s Row %d Bank %d Col %d Bit Position: %d Data: 0x%08x",
-				 "CE", pinf->row, pinf->bank, pinf->col,
-				 pinf->bitpos, pinf->data);
+				 "DDR ECC error type:%s Rank %d Row %d Bank %d Col %d Bit Position: %d "
+				 "Syndrome: 0x%08x 0x%08x 0x%08x Bit Mask: 0x%08x 0x%08x 0x%08x",
+				 "CE", pinf->rank, pinf->row, pinf->bank, pinf->col, pinf->bitpos,
+				 pinf->syndrome[0], pinf->syndrome[1], pinf->syndrome[2],
+				 pinf->bitmask[0], pinf->bitmask[1], pinf->bitmask[2]);
 		}
 
 		edac_mc_handle_error(HW_EVENT_ERR_CORRECTED, mci,
@@ -610,13 +637,19 @@ static void handle_error(struct mem_ctl_info *mci, struct synps_ecc_status *p)
 		pinf = &p->ueinfo;
 		if (priv->p_data->quirks & DDR_ECC_INTR_SUPPORT) {
 			snprintf(priv->message, SYNPS_EDAC_MSG_SIZE,
-				 "DDR ECC error type :%s Row %d Bank %d BankGroup Number %d Block Number %d",
-				 "UE", pinf->row, pinf->bank,
-				 pinf->bankgrpnr, pinf->blknr);
+				 "DDR ECC error type :%s Rank %d Row %d Bank %d BankGroup Number %d Block Number %d "
+				 "Syndrome: 0x%08x 0x%08x 0x%08x Bit Mask: 0x%08x 0x%08x 0x%08x",
+				 "UE", pinf->rank, pinf->row, pinf->bank,
+				 pinf->bankgrpnr, pinf->blknr,
+				 pinf->syndrome[0], pinf->syndrome[1], pinf->syndrome[2],
+				 pinf->bitmask[0], pinf->bitmask[1], pinf->bitmask[2]);
 		} else {
 			snprintf(priv->message, SYNPS_EDAC_MSG_SIZE,
-				 "DDR ECC error type :%s Row %d Bank %d Col %d ",
-				 "UE", pinf->row, pinf->bank, pinf->col);
+				 "DDR ECC error type :%s Rank %d Row %d Bank %d Col %d "
+				 "Syndrome: 0x%08x 0x%08x 0x%08x Bit Mask: 0x%08x 0x%08x 0x%08x",
+				 "UE", pinf->rank, pinf->row, pinf->bank, pinf->col,
+				 pinf->syndrome[0], pinf->syndrome[1], pinf->syndrome[2],
+				 pinf->bitmask[0], pinf->bitmask[1], pinf->bitmask[2]);
 		}
 
 		edac_mc_handle_error(HW_EVENT_ERR_UNCORRECTED, mci,

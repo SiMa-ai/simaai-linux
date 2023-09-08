@@ -1193,6 +1193,13 @@ config REGULATOR_SC2731
 	  This driver provides support for the voltage regulators on the
 	  SC2731 PMIC.
 
+config REGULATOR_SIMAAIPRC
+	tristate "SiMa.ai PRC regulator driver"
+	depends on HAS_IOMEM && ARCH_SIMAAI_DAVINCI
+	help
+	  This driver provides support for the voltage regulators via PRC
+	  registers on the SiMa.ai DaVinci SoC.
+
 config REGULATOR_SKY81452
 	tristate "Skyworks Solutions SKY81452 voltage regulator"
 	depends on MFD_SKY81452

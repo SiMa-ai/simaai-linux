@@ -12,6 +12,8 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <asm/pgtable.h>
+#include <linux/dma-direct.h>
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Kevin Grandemange");
@@ -143,11 +145,66 @@ static void al5_dmabuf_unmap(struct dma_buf_attachment *at,
 {
 }
 
+static int al5_dmabuf_mmap_cached(struct dma_buf *buf,
+                                   struct vm_area_struct *vma)
+{
+        struct al5_dmabuf_priv *dinfo = NULL;
+        struct al5_dma_buffer *buffer = NULL;
+        unsigned long start = 0;
+        unsigned long vsize = 0;
+        unsigned long user_count = 0;
+        unsigned long count = 0;
+        unsigned long pfn = 0;
+        int ret = 0;
+
+        if (!buf || !vma) {
+                pr_err("Invalid params for mmap cached\n");
+                return -EINVAL;
+        }
+
+        dinfo = buf->priv;
+        buffer = dinfo->buffer;
+
+        start = vma->vm_start;
+        vsize = vma->vm_end - start;
+
+        user_count = vma_pages(vma);
+        count = PAGE_ALIGN(vsize) >> PAGE_SHIFT;
+        pfn = PHYS_PFN(dma_to_phys(dinfo->dev, buffer->dma_handle));
+
+        if (!dinfo || !buffer || !start || !vsize ||
+            !user_count || !count || !pfn) {
+                pr_err("Unable to find vma page map\n");
+                return -ENXIO;
+        }
+
+        if (vma->vm_pgoff >= count ||
+                user_count > count - vma->vm_pgoff) {
+            return -ENXIO;
+        }
+
+        vma->vm_page_prot = __pgprot_modify(vma->vm_page_prot,
+                                            PTE_ATTRINDX_MASK,
+                              PTE_ATTRINDX(MT_NORMAL | PTE_PXN | PTE_UXN));
+
+        ret = remap_pfn_range (vma, vma->vm_start, pfn + vma->vm_pgoff,
+                        user_count << PAGE_SHIFT, vma->vm_page_prot);
+        if (ret < 0) {
+                pr_err("Remapping cached memory failed, error: %d\n", ret);
+                return ret;
+        }
+
+        vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
+
+        return 0;
+}
+
 static int al5_dmabuf_mmap(struct dma_buf *buf, struct vm_area_struct *vma)
 {
 	struct al5_dmabuf_priv *dinfo = buf->priv;
 	unsigned long start = vma->vm_start;
 	unsigned long vsize = vma->vm_end - start;
+
 	struct al5_dma_buffer *buffer = dinfo->buffer;
 	int ret;
 
@@ -155,6 +212,10 @@ static int al5_dmabuf_mmap(struct dma_buf *buf, struct vm_area_struct *vma)
 		pr_err("No buffer to map\n");
 		return -EINVAL;
 	}
+
+	if (buffer->is_cacheable) {
+	    return al5_dmabuf_mmap_cached(buf,vma);
+        }
 
 	vma->vm_pgoff = 0;
 
@@ -341,6 +402,28 @@ int al5_allocate_dmabuf(struct device *dev, size_t size, u32 *fd)
 	*fd = al5_create_dmabuf_fd(dev, size, buffer);
 	return 0;
 }
+
+int al5_allocate_dmabuf_cached(struct device *dev, size_t size, u32 *fd)
+{
+        struct al5_dma_buffer *buffer = NULL;
+
+        if (dev == NULL || fd == NULL) {
+            dev_err(dev,"Invalid arguments\n");
+            return -EINVAL;
+        }
+
+        buffer = al5_alloc_dma(dev, size);
+        if (!buffer) {
+            dev_err(dev, "Can't alloc DMA buffer\n");
+            return -ENOMEM;
+        }
+
+        buffer->is_cacheable = 1;
+
+        *fd = al5_create_dmabuf_fd(dev, size, buffer);
+        return 0;
+}
+
 
 int al5_dmabuf_get_address(struct device *dev, u32 fd, dma_addr_t *bus_address)
 {

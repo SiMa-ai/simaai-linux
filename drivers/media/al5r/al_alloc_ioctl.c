@@ -35,6 +35,33 @@ int al5_ioctl_get_dma_fd(struct device *dev, dma_addr_t dma_offset, unsigned lon
 	return 0;
 }
 
+int al5_ioctl_get_dma_fd_cached(struct device *dev, dma_addr_t dma_offset, unsigned long arg)
+{
+        struct al5_dma_info info;
+        struct al5_dma_buffer *buffer = NULL;
+        int err;
+        dma_addr_t bus_addr;
+
+        if (copy_from_user(&info, (struct al5_dma_info *)arg, sizeof(info)))
+                return -EFAULT;
+
+        err = al5_allocate_dmabuf_cached(dev, info.size, &info.fd);
+        if (err)
+                return err;
+
+        err = al5_dmabuf_get_address(dev, info.fd, &bus_addr);
+        if (err)
+                return err;
+
+        info.phy_addr = bus_addr - dma_offset;
+
+        if (copy_to_user((void *)arg, &info, sizeof(info)))
+                return -EFAULT;
+
+        return 0;
+}
+
+
 int add_buffer_to_list(struct al5r_codec_chan *chan, struct al5_dma_buffer *buf)
 {
 	struct al5_dma_buf_mmap *buf_mmap = kmalloc(sizeof(*buf_mmap), GFP_KERNEL);
