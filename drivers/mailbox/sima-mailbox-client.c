@@ -46,6 +46,7 @@ struct sima_mbox_client {
 	struct class *dev_class;
 	struct mutex dev_lock;
 	int dev_open_count;
+	int max_users;
 };
 
 static int init_device(struct sima_mbox_client *mbox)
@@ -107,8 +108,12 @@ static int mbox_dev_open(struct inode *inode, struct file *filp)
 	mutex_lock(&mbox->dev_lock);
 	if (!mbox->dev_open_count)
 		ret = init_device(mbox);
-	if (!ret)
-		mbox->dev_open_count++;
+	if (!ret) {
+		if((mbox->dev_open_count < mbox->max_users) || (mbox->max_users == 0))
+			mbox->dev_open_count++;
+		else
+			ret = -EBUSY;
+	}
 	mutex_unlock(&mbox->dev_lock);
 
 	return ret;
@@ -319,6 +324,9 @@ static int sima_mbox_client_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev,
 			 "cannot obtain sima,rx-fifo-depth property\n");
 	}
+
+	ret = of_property_read_u32(pdev->dev.of_node, "sima,max-users",
+				   &mbox->max_users);
 
 	/* Tx descriptors region */
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "tx_desc");

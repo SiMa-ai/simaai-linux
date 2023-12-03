@@ -135,7 +135,7 @@
 					};
 				};
 
-				core3 {
+				core2 {
 					thread0 {
 						cpu = <&cpu4>;
 					};
@@ -144,7 +144,7 @@
 					};
 				};
 
-				core4 {
+				core3 {
 					thread0 {
 						cpu = <&cpu6>;
 					};
@@ -292,6 +292,7 @@
 		sima,dev-name = "ev74_lp_mbox";
 		sima,tx-tout-ms = <500>;
 		sima,rx-fifo-depth = <128>;
+		sima,max-users = <1>;
 		status = "okay";
 	};
 	
@@ -304,6 +305,7 @@
 		sima,dev-name = "ev74_hp_mbox";
 		sima,tx-tout-ms = <500>;
 		sima,rx-fifo-depth = <128>;
+		sima,max-users = <10>;
 		status = "okay";
 	};
 	
@@ -316,6 +318,7 @@
 		sima,dev-name = "m4_lp_mbox";
 		sima,tx-tout-ms = <500>;
 		sima,rx-fifo-depth = <128>;
+		sima,max-users = <1>;
 		status = "okay";
 	};
 	
@@ -328,6 +331,7 @@
 		sima,dev-name = "m4_hp_mbox";
 		sima,tx-tout-ms = <500>;
 		sima,rx-fifo-depth = <128>;
+		sima,max-users = <1>;
 		status = "okay";
 	};
 
@@ -460,6 +464,12 @@
                 interrupts = <GIC_SPI 46 IRQ_TYPE_LEVEL_HIGH>;
                 status = "okay";
         };
+
+	stmmac_axi_config: axi_config {
+		snps,wr_osr_lmt = <3>;
+		snps,rd_osr_lmt = <3>;
+	};
+
         eth0: ethernet@1000000 {
 		compatible = "snps,dwmac-3.710", "snps,dwmac";
                 reg = <0 0x1000000 0 0x1500>,
@@ -474,13 +484,15 @@
 
 	        phy-mode = "sgmii";
                 managed = "in-band-status";
-
+                tx-fifo-depth = <16384>;
+                rx-fifo-depth = <16384>;
                 snps,pbl = <16>;
                 snps,force_sf_dma_mode;
                 snps,aal;
                 snps,apbxpcs;
                 snps,xpcs_skip_reset;
                 snps,ps-speed = <1000>;
+                snps,axi-config = <&stmmac_axi_config>;
                 status = "disabled";
 	};
 
@@ -498,13 +510,15 @@
 
 	        phy-mode = "sgmii";
                 managed = "in-band-status";
-
+                tx-fifo-depth = <16384>;
+                rx-fifo-depth = <16384>;
                 snps,pbl = <16>;
                 snps,force_sf_dma_mode;
                 snps,aal;
                 snps,apbxpcs;
                 snps,xpcs_skip_reset;
                 snps,ps-speed = <1000>;
+                snps,axi-config = <&stmmac_axi_config>;
                 status = "disabled";
 	};
 
@@ -522,6 +536,8 @@
 
 	        phy-mode = "sgmii";
                 managed = "in-band-status";
+                tx-fifo-depth = <16384>;
+                rx-fifo-depth = <16384>;
 
                 snps,pbl = <16>;
                 snps,force_sf_dma_mode;
@@ -529,6 +545,7 @@
                 snps,apbxpcs;
                 snps,xpcs_skip_reset;
                 snps,ps-speed = <1000>;
+                snps,axi-config = <&stmmac_axi_config>;
                 status = "disabled";
 	};
 
@@ -546,6 +563,8 @@
 
 	        phy-mode = "sgmii";
                 managed = "in-band-status";
+                tx-fifo-depth = <16384>;
+                rx-fifo-depth = <16384>;
 
                 snps,pbl = <16>;
                 snps,force_sf_dma_mode;
@@ -553,6 +572,7 @@
                 snps,apbxpcs;
                 snps,xpcs_skip_reset;
                 snps,ps-speed = <1000>;
+                snps,axi-config = <&stmmac_axi_config>;
                 status = "disabled";
 	};
 
@@ -610,10 +630,10 @@
                 reg = <0x00000003 0x80000000 0x00000000 0xA0000000>;
 		};
 
-	pcie_reserved: pcie_reserved_buf@120000000 {
+	pcie_reserved: pcie_reserved_buf@1A0000000 {
 		compatible = "simaai,shared-pcie-buffer";
 		no-map;
-		reg = <0x01 0x20000000 0x0 0x20000000>;
+		reg = <0x01 0xA0000000 0x0 0x20000000>;
 		};
 	};
 
