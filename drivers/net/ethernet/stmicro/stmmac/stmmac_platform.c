@@ -539,6 +539,11 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		plat->force_sf_dma_mode = 1;
 	}
 
+	if (of_device_is_compatible(np, "snps,dwmac-3.730")) {
+		plat->enh_desc = 1;
+		plat->force_sf_dma_mode = 1;
+	}
+
 	if (of_device_is_compatible(np, "snps,dwxgmac")) {
 		plat->has_xgmac = 1;
 		plat->pmt = 1;
