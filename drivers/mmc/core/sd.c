@@ -1485,7 +1485,7 @@ retry:
 	 * transfer mode.
 	 */
 	if (!v18_fixup_failed && !mmc_host_is_spi(host) && mmc_host_uhs(host) &&
-	    mmc_sd_card_using_v18(card) &&
+	    (rocr & SD_ROCR_S18A) && mmc_sd_card_using_v18(card) &&
 	    host->ios.signal_voltage != MMC_SIGNAL_VOLTAGE_180) {
 		if (mmc_host_set_uhs_voltage(host) ||
 		    mmc_sd_init_uhs_card(card)) {

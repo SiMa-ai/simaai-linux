@@ -5582,29 +5582,24 @@ static int stmmac_change_mtu(struct net_device *dev, int new_mtu)
 	const int mtu = new_mtu;
 	int ret;
 
-    printk("%s: Entered\n", __func__);
 	if (txfifosz == 0)
 		txfifosz = priv->dma_cap.tx_fifo_size;
 
 	txfifosz /= priv->plat->tx_queues_to_use;
 
 	if (stmmac_xdp_is_enabled(priv) && new_mtu > ETH_DATA_LEN) {
-		printk("Jumbo frames not supported for XDP\n");
+		netdev_dbg(priv->dev, "Jumbo frames not supported for XDP\n");
 		return -EINVAL;
 	}
 
 	new_mtu = STMMAC_ALIGN(new_mtu);
 
-    printk("%s: 0: %d, %d, %d\n", __func__, new_mtu, txfifosz, BUF_SIZE_16KiB);
-
 	/* If condition true, FIFO is too small or MTU too large */
 	if ((txfifosz < new_mtu) || (new_mtu > BUF_SIZE_16KiB))
 		return -EINVAL;
 
-    printk("%s: 1\n", __func__);
-	
-    if (netif_running(dev)) {
-		netdev_err(priv->dev, "restarting interface to change its MTU\n");
+	if (netif_running(dev)) {
+		netdev_dbg(priv->dev, "restarting interface to change its MTU\n");
 		/* Try to allocate the new DMA conf with the new mtu */
 		dma_conf = stmmac_setup_dma_desc(priv, mtu);
 		if (IS_ERR(dma_conf)) {
@@ -5612,7 +5607,6 @@ static int stmmac_change_mtu(struct net_device *dev, int new_mtu)
 				   mtu);
 			return PTR_ERR(dma_conf);
 		}
-        printk("%s: 2\n", __func__);
 
 		stmmac_release(dev);
 
@@ -5623,14 +5617,12 @@ static int stmmac_change_mtu(struct net_device *dev, int new_mtu)
 			return ret;
 		}
 
-    printk("%s: 3\n", __func__);
 		stmmac_set_rx_mode(dev);
 	}
 
 	dev->mtu = mtu;
 	netdev_update_features(dev);
 
-    printk("%s: 4\n", __func__);
 	return 0;
 }
 
@@ -7320,10 +7312,6 @@ int stmmac_dvr_probe(struct device *device,
 
 	/* MTU range: 46 - hw-specific max */
 	ndev->min_mtu = ETH_ZLEN - ETH_HLEN;
-    dev_warn(priv->device,
-			 "%s: warning0: plat MTU (%d) vs ndev MTU (%d)\n",
-			 __func__, priv->plat->maxmtu, ndev->max_mtu);
-
 	if (priv->plat->has_xgmac)
 		ndev->max_mtu = XGMAC_JUMBO_LEN;
 	else if ((priv->plat->enh_desc) || (priv->synopsys_id >= DWMAC_CORE_4_00))
@@ -7341,9 +7329,6 @@ int stmmac_dvr_probe(struct device *device,
 			 "%s: warning: maxmtu having invalid value (%d)\n",
 			 __func__, priv->plat->maxmtu);
 
-    dev_warn(priv->device,
-			 "%s: warning: plat MTU (%d) vs ndev MTU (%d)\n",
-			 __func__, priv->plat->maxmtu, ndev->max_mtu);
 	if (flow_ctrl)
 		priv->flow_ctrl = FLOW_AUTO;	/* RX/TX pause on */
 

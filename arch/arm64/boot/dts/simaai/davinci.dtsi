@@ -382,7 +382,7 @@
 		regulator-name = "vddsdhci1";
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <3300000>;
-		regulator-settling-time-us = <5000>;
+		regulator-settling-time-us = <50000>;
 
 		regulator-mask = <0xC0>;
 		regulator-boot-val = <0x0>;
