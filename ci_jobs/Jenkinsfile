@@ -1,0 +1,36 @@
+library('sima-jenkins-lib')
+def main() {
+    properties([
+            disableConcurrentBuilds(abortPrevious: true)
+    ])
+    node('soc-yocto-scl') {
+        container("soc-yocto-scl") {
+            stage("upstream-custom-yocto") {
+                    script {
+                        def jobName = 'build_soc_yocto_images_custom'
+                        def parameters = [
+                            string(name: 'LINUX_BRANCH', value: "${env.CHANGE_BRANCH}"),
+                            string(name: 'BRANCH_CONTAINER_BASE', value: "${env.CHANGE_TARGET}"),
+                        ]
+                        println "Passing LINUX_BRANCH ${env.CHANGE_BRANCH} to upstream job"
+                        println "Passing BRANCH_CONTAINER_BASE ${env.CHANGE_TARGET} to upstream job}"
+                        // Triggering another job with parameters and waiting for its completion
+                                            def triggeredBuild = build job: jobName, parameters: parameters, wait: true
+                                            def status = triggeredBuild.getResult()
+
+                                            if (status == 'SUCCESS') {
+                                                echo "Job '${jobName}' completed successfully."
+                                            } else {
+                                                error "Job '${jobName}' failed or was aborted."
+                                            }
+                    }
+            } // upstream-custom-yocto
+        } // container
+    } // node
+} // main
+
+utils.job_wrapper({
+    main()
+}, 360)
+
+return this

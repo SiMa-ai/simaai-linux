@@ -45,7 +45,7 @@
 #define CVU_SYS_REG_OFFSET 0x40
 #define CVU_STU_REG_OFFSET (0x14)
 
-#define CVU_C0_BOOT_VECTOR	0x90000000
+#define CVU_FIRMWARE_SIZE	0x04000000
 #define PRC_REG__CKG_RST_REG__CVU_CK_RST_ADDR 0x00000108
 
 const char *ev_mem_names[SIMA_MAX_MEM_REGIONS] = {
@@ -168,6 +168,9 @@ static int sima_rproc_start(struct rproc *rproc)
 static int sima_rproc_start(struct rproc *rproc)
 {
 	struct device *dev = rproc->dev.parent;
+	struct sima_rproc *srproc = rproc->priv;
+	uint32_t boot_vector = (uint32_t)(srproc->mem[0].dev_addr + srproc->mem[0].size
+					  - CVU_FIRMWARE_SIZE);
 
 	uint32_t clk_offset = PRC_REG__CKG_RST_REG__CVU_CK_RST_ADDR;
 
@@ -221,19 +224,19 @@ static int sima_rproc_start(struct rproc *rproc)
 	/* udelay(100); */
 
 	*cvu_ctrl0 &= ~0x3fffff;
-	*cvu_ctrl0 = *cvu_ctrl0 | (CVU_C0_BOOT_VECTOR >> 10);
+	*cvu_ctrl0 = *cvu_ctrl0 | (boot_vector >> 10);
 	*cvu_ctrlsys0 = 0x20000000;
 
 	*cvu_ctrl1 &= ~0x3fffff;
-	*cvu_ctrl1 = *cvu_ctrl1 | (CVU_C0_BOOT_VECTOR >> 10);
+	*cvu_ctrl1 = *cvu_ctrl1 | (boot_vector >> 10);
 	*cvu_ctrlsys1 = 0x20040000; //here same inside or different outside - tbd
 
 	*cvu_ctrl2 &= ~0x3fffff;
-	*cvu_ctrl2 = *cvu_ctrl2 | (CVU_C0_BOOT_VECTOR >> 10);
+	*cvu_ctrl2 = *cvu_ctrl2 | (boot_vector >> 10);
 	*cvu_ctrlsys2 = 0x20080000;
 
 	*cvu_ctrl3 &= ~0x3fffff;
-	*cvu_ctrl3 = *cvu_ctrl3 | (CVU_C0_BOOT_VECTOR >> 10);
+	*cvu_ctrl3 = *cvu_ctrl3 | (boot_vector >> 10);
 	*cvu_ctrlsys3 = 0x200C0000;
 
 	cvu.u32 = NOC_REG_READ(addr + clk_offset);

@@ -18,6 +18,7 @@ struct dma_coherent_mem {
 	unsigned long	*bitmap;
 	spinlock_t	spinlock;
 	bool		use_dev_dma_pfn_offset;
+	bool		skip_memset_in_alloc;
 };
 
 static inline struct dma_coherent_mem *dev_get_coherent_memory(struct device *dev)
@@ -161,7 +162,8 @@ static void *__dma_alloc_from_coherent(struct device *dev,
 			((dma_addr_t)pageno << PAGE_SHIFT);
 	ret = mem->virt_base + ((dma_addr_t)pageno << PAGE_SHIFT);
 	spin_unlock_irqrestore(&mem->spinlock, flags);
-	memset(ret, 0, size);
+	if(!mem->skip_memset_in_alloc)
+		memset(ret, 0, size);
 	return ret;
 err:
 	spin_unlock_irqrestore(&mem->spinlock, flags);
@@ -340,6 +342,7 @@ static int rmem_dma_device_init(struct reserved_mem *rmem, struct device *dev)
 					       rmem->size, true);
 		if (IS_ERR(mem))
 			return PTR_ERR(mem);
+		mem->skip_memset_in_alloc = rmem->skip_memset_in_alloc;
 		rmem->priv = mem;
 	}
 	dma_assign_coherent_memory(dev, rmem->priv);
@@ -364,6 +367,11 @@ static int __init rmem_dma_setup(struct reserved_mem *rmem)
 
 	if (of_get_flat_dt_prop(node, "reusable", NULL))
 		return -EINVAL;
+
+	if (of_get_flat_dt_prop(node, "simaai,skip-memset-in-alloc", NULL))
+		rmem->skip_memset_in_alloc = true;
+	else
+		rmem->skip_memset_in_alloc = false;
 
 #ifdef CONFIG_ARM
 	if (!of_get_flat_dt_prop(node, "no-map", NULL)) {

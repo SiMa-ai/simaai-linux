@@ -8,6 +8,7 @@
 #include <linux/io.h>
 #include <linux/kfifo.h>
 #include <linux/mailbox_client.h>
+#include <linux/mailbox_controller.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/poll.h>
@@ -16,7 +17,7 @@
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 
-#include <uapi/linux/sima/sima-mailbox.h>
+#include <linux/mailbox/simaai-mailbox.h>
 
 /* Tx timeout in milliseconds */
 #define SIMA_TX_TOUT		500
@@ -27,19 +28,19 @@
 struct sima_mbox_client {
 	const char *name;
 	struct device *dev;
+	struct mbox_client client;
+	struct mbox_chan *channel;
+	const char *channel_name;
 	/* Tx */
-	struct mbox_client tx_client;
-	struct mbox_chan *tx_channel;
-	void __iomem *tx_ring;
 	struct mutex write_lock;
+	struct simaai_mbmsg *msgs;
+	DECLARE_BITMAP(msgs_bmap, MBOX_TX_QUEUE_LEN);
+	wait_queue_head_t tx_wq;
 	/* Rx */
-	struct mbox_client rx_client;
-	struct mbox_chan *rx_channel;
-	void __iomem *rx_ring;
 	u32 rx_ring_size;
 	struct kfifo rx_fifo;
 	spinlock_t rx_fifo_lock;
-	wait_queue_head_t rx_fifo_waitq;
+	wait_queue_head_t rx_wq;
 	/* Character device stuff */
 	struct cdev cdev;
 	dev_t dev_no;
@@ -51,48 +52,25 @@ struct sima_mbox_client {
 
 static int init_device(struct sima_mbox_client *mbox)
 {
-	int ret;
-
 	kfifo_reset(&mbox->rx_fifo);
 
-	mbox->tx_channel = mbox_request_channel_byname(&mbox->tx_client, "tx");
-	if (IS_ERR(mbox->tx_channel)) {
-		dev_err(mbox->dev, "Failed to request Tx channel\n");
-		mbox->tx_channel = NULL;
-		ret = -EINVAL;
-		goto err;
-	}
-
-	mbox->rx_channel = mbox_request_channel_byname(&mbox->rx_client, "rx");
-	if (IS_ERR(mbox->rx_channel)) {
-		dev_err(mbox->dev, "Failed to request Rx channel\n");
-		mbox->rx_channel = NULL;
-		ret = -EINVAL;
-		goto err;
+	mbox->channel = mbox_request_channel_byname(&mbox->client, 
+			mbox->channel_name);
+	if (IS_ERR(mbox->channel)) {
+		dev_err(mbox->dev, "Failed to request channel %s\n",
+				mbox->channel_name);
+		mbox->channel = NULL;
+		return -EINVAL;
 	}
 
 	return 0;
-err:
-	if (mbox->tx_channel) {
-		mbox_free_channel(mbox->tx_channel);
-		mbox->tx_channel = NULL;
-	}
-	if (mbox->rx_channel) {
-		mbox_free_channel(mbox->rx_channel);
-		mbox->rx_channel = NULL;
-	}
-	return ret;
 }
 
 static void release_dev(struct sima_mbox_client *mbox)
 {
-	if (mbox->tx_channel) {
-		mbox_free_channel(mbox->tx_channel);
-		mbox->tx_channel = NULL;
-	}
-	if (mbox->rx_channel) {
-		mbox_free_channel(mbox->rx_channel);
-		mbox->rx_channel = NULL;
+	if (mbox->channel) {
+		mbox_free_channel(mbox->channel);
+		mbox->channel = NULL;
 	}
 }
 
@@ -109,7 +87,7 @@ static int mbox_dev_open(struct inode *inode, struct file *filp)
 	if (!mbox->dev_open_count)
 		ret = init_device(mbox);
 	if (!ret) {
-		if((mbox->dev_open_count < mbox->max_users) || (mbox->max_users == 0))
+		if ((mbox->dev_open_count < mbox->max_users) || (mbox->max_users == 0))
 			mbox->dev_open_count++;
 		else
 			ret = -EBUSY;
@@ -132,35 +110,63 @@ static int mbox_dev_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+static int tx_msg_available(struct sima_mbox_client *mbox, int *msgid)
+{
+	int ret;
+	
+	ret = mutex_lock_interruptible(&mbox->write_lock);
+	if (ret) {
+		dev_err(mbox->dev, "Failed to lock mutex\n");
+		return ret;
+	}
+	
+	*msgid = bitmap_find_free_region(mbox->msgs_bmap, MBOX_TX_QUEUE_LEN, 0);
+	mutex_unlock(&mbox->write_lock);
+
+	return *msgid >= 0;
+}
+
 static ssize_t mbox_dev_write(struct file *filp, const char __user *buf,
 			      size_t count, loff_t *fpos)
 {
 	struct sima_mbox_client *mbox = filp->private_data;
-	struct sima_ipc_message msg;
-	const size_t len = sizeof(msg);
-	u32 i = 0; /* The first descriptor is used for now */
-	int ret;
+	ssize_t len = count > SIMAAI_MAX_DATA_SIZE ? SIMAAI_MAX_DATA_SIZE : count;
+	struct simaai_mbmsg *msg;
+	int ret, msgid;
 
-	if (count != len) {
-		dev_err(mbox->dev,
-			"Incorrect message length %zd, shall be %zd\n",
-			count, len);
-		return -EINVAL;
+
+	if (!tx_msg_available(mbox, &msgid) && (filp->f_flags & O_NONBLOCK)) {
+		dev_err(mbox->dev, "%d: Returning %d\n", __LINE__, -EAGAIN);
+		return -EAGAIN;
 	}
 
-	ret = copy_from_user(&msg, buf, len);
-	if (ret)
-		return -EFAULT;
+	if (msgid < 0) {
+		ret = wait_event_interruptible(mbox->tx_wq, !tx_msg_available(mbox, &msgid));
+		if (ret < 0) {
+			dev_err(mbox->dev, "Failed to find available message placeholder\n");
+			return ret;
+		}
+	}
 
-	if (mutex_lock_interruptible(&mbox->write_lock))
-		return -ERESTARTSYS;
-	memcpy_toio(mbox->tx_ring, &msg, len);
-	ret = mbox_send_message(mbox->tx_channel, &i);
-	mutex_unlock(&mbox->write_lock);
+	msg = (struct simaai_mbmsg *)((void *)(mbox->msgs) + msgid * SIMAAI_MAX_MSG_SIZE);
+	ret = copy_from_user(msg->data, buf, len);
+	msg->len = len;
+
+	ret = mbox_send_message(mbox->channel, msg);
 
 	if (ret < 0) {
 		dev_err(mbox->dev, "Failed to send message via mailbox\n");
-		return ret;
+		len = (ssize_t)ret;
+	}
+
+	ret = mutex_lock_interruptible(&mbox->write_lock);
+	bitmap_release_region(mbox->msgs_bmap, msgid, 0);
+	mutex_unlock(&mbox->write_lock);
+	wake_up_all(&mbox->tx_wq);
+
+	if (ret < 0) {
+		dev_err(mbox->dev, "Failed to lock mutex\n");
+		len = (ssize_t)ret;
 	}
 
 	return len;
@@ -171,29 +177,30 @@ static ssize_t mbox_dev_read(struct file *filp, char __user *buf,
 {
 	struct inode *inode = file_inode(filp);
 	struct sima_mbox_client *mbox = filp->private_data;
-	struct sima_ipc_message msg;
+	char msg_raw[SIMAAI_MAX_MSG_SIZE];
+	struct simaai_mbmsg *msg;
 	int ret;
 
-	if (count < sizeof(msg))
-		return -EINVAL;
-
-	while (!kfifo_out_spinlocked(&mbox->rx_fifo, &msg, sizeof(msg),
+	while (!kfifo_out_spinlocked(&mbox->rx_fifo, msg_raw, sizeof(msg_raw),
 				     &mbox->rx_fifo_lock)) {
 		if (filp->f_flags & O_NONBLOCK)
 			return -EAGAIN;
 
-		ret = wait_event_interruptible(mbox->rx_fifo_waitq,
+		ret = wait_event_interruptible(mbox->rx_wq,
 					       !kfifo_is_empty(&mbox->rx_fifo));
 		if (ret)
 			return ret;
 	}
 
-	ret = copy_to_user(buf, &msg, sizeof(msg));
+	msg = (struct simaai_mbmsg *)msg_raw;
+	if (count > msg->len)
+		count = msg->len;
+	ret = copy_to_user(buf, msg->data, count);
 	if (ret) {
 		ret = -EFAULT;
 	} else {
 		inode->i_atime = current_time(inode);
-		ret = sizeof(msg);
+		ret = count;
 	}
 
 	return ret;
@@ -202,13 +209,20 @@ static ssize_t mbox_dev_read(struct file *filp, char __user *buf,
 static __poll_t mbox_dev_poll(struct file *filp, struct poll_table_struct *wait)
 {
 	struct sima_mbox_client *mbox = filp->private_data;
-	/* Write is always available */
-	__poll_t ret = EPOLLOUT | EPOLLWRNORM;
+	__poll_t req_events = poll_requested_events(wait);
+	__poll_t ret = 0;
 
-	poll_wait(filp, &mbox->rx_fifo_waitq, wait);
+	if (req_events & (EPOLLIN | EPOLLRDNORM))
+		poll_wait(filp, &mbox->rx_wq, wait);
+
+	if (req_events & (EPOLLOUT | EPOLLWRNORM))
+		poll_wait(filp, &mbox->tx_wq, wait);
 
 	if (!kfifo_is_empty(&mbox->rx_fifo))
-		ret = EPOLLIN | EPOLLRDNORM;
+		ret |= EPOLLIN | EPOLLRDNORM;
+
+	if (!bitmap_full(mbox->msgs_bmap, MBOX_TX_QUEUE_LEN))
+		ret |= EPOLLOUT | EPOLLWRNORM;
 
 	return ret;
 }
@@ -273,27 +287,17 @@ static void message_from_remote(struct mbox_client *client, void *message)
 {
 	struct sima_mbox_client *mbox = dev_get_drvdata(client->dev);
 	unsigned long flags;
-	struct sima_ipc_message msg;
-	u32 i = *(u32 *)message;
-	void __iomem *desc = ((struct sima_ipc_message *)mbox->rx_ring) + i;
-
-	if (unlikely(i >= mbox->rx_ring_size)) {
-		dev_err(mbox->dev, "Rx descriptor index is out of range\n");
-		return;
-	}
 
 	spin_lock_irqsave(&mbox->rx_fifo_lock, flags);
-	memcpy_fromio(&msg, desc, sizeof(msg));
-	kfifo_in(&mbox->rx_fifo, &msg, sizeof(msg));
+	kfifo_in(&mbox->rx_fifo, message, SIMAAI_MAX_MSG_SIZE);
 	spin_unlock_irqrestore(&mbox->rx_fifo_lock, flags);
 
-	wake_up_interruptible(&mbox->rx_fifo_waitq);
+	wake_up_interruptible(&mbox->rx_wq);
 }
 
 static int sima_mbox_client_probe(struct platform_device *pdev)
 {
 	struct sima_mbox_client *mbox;
-	struct resource *res;
 	int ret;
 	u32 tx_tout = SIMA_TX_TOUT;
 	u32 fifo_depth = SIMA_DESC_FIFO_DEPTH;
@@ -302,77 +306,61 @@ static int sima_mbox_client_probe(struct platform_device *pdev)
 	if (!mbox)
 		return -ENOMEM;
 
+	mbox->msgs = devm_kzalloc(&pdev->dev, SIMAAI_MAX_MSG_SIZE *
+				  MBOX_TX_QUEUE_LEN, GFP_KERNEL);
+	if (!mbox->msgs)
+		return -ENOMEM;
 	mbox->dev = &pdev->dev;
 
-	ret = of_property_read_string(pdev->dev.of_node, "sima,dev-name",
+	ret = of_property_read_string(pdev->dev.of_node, "simaai,dev-name",
 				      &mbox->name);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "cannot obtain sima,dev-name property\n");
+		dev_err(&pdev->dev, "cannot obtain simaai,dev-name property\n");
 		return -ENXIO;
 	}
 
-	ret = of_property_read_u32(pdev->dev.of_node, "sima,tx-tout-ms",
+	ret = of_property_read_string(pdev->dev.of_node, "simaai,channel",
+				      &mbox->channel_name);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "cannot obtain simaai,channel property\n");
+		return -ENXIO;
+	}
+
+	ret = of_property_read_u32(pdev->dev.of_node, "simaai,tx-tout-ms",
 				   &tx_tout);
 	if (ret < 0) {
 		dev_warn(&pdev->dev,
-			 "cannot obtain sima,tx-tout-ms property\n");
+			 "cannot obtain simaai,tx-tout-ms property\n");
 	}
 
-	ret = of_property_read_u32(pdev->dev.of_node, "sima,rx-fifo-depth",
+	ret = of_property_read_u32(pdev->dev.of_node, "simaai,rx-fifo-depth",
 				   &fifo_depth);
 	if (ret < 0) {
 		dev_warn(&pdev->dev,
-			 "cannot obtain sima,rx-fifo-depth property\n");
+			 "cannot obtain simaai,rx-fifo-depth property\n");
 	}
 
-	ret = of_property_read_u32(pdev->dev.of_node, "sima,max-users",
+	ret = of_property_read_u32(pdev->dev.of_node, "simaai,max-users",
 				   &mbox->max_users);
 
-	/* Tx descriptors region */
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "tx_desc");
-	mbox->tx_ring = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(mbox->tx_ring)) {
-		dev_err(&pdev->dev, "cannot remap Tx IPC descriptors memory\n");
-		return PTR_ERR(mbox->tx_ring);
-	}
-
-	/* Rx descriptors region */
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "rx_desc");
-	mbox->rx_ring = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(mbox->rx_ring)) {
-		dev_err(&pdev->dev, "cannot remap Rx IPC descriptors memory\n");
-		return PTR_ERR(mbox->rx_ring);
-	}
-
-	mbox->rx_ring_size =
-		resource_size(res) / sizeof(struct sima_ipc_message);
-
-	ret = kfifo_alloc(&mbox->rx_fifo,
-			  fifo_depth * sizeof(struct sima_ipc_message),
-			  GFP_KERNEL);
+	ret = kfifo_alloc(&mbox->rx_fifo, fifo_depth * SIMAAI_MAX_MSG_SIZE, GFP_KERNEL);
 	if (ret) {
 		dev_err(&pdev->dev, "cannot allocate Rx FIFO\n");
 		return ret;
 	}
 
-	mbox->tx_client.dev = &pdev->dev;
-	mbox->tx_client.rx_callback = NULL;
-	mbox->tx_client.tx_done = NULL;
-	mbox->tx_client.tx_block = true;
-	mbox->tx_client.knows_txdone = false;
-	mbox->tx_client.tx_tout = tx_tout;
-
-	mbox->rx_client.dev = &pdev->dev;
-	mbox->rx_client.rx_callback = message_from_remote;
-	mbox->rx_client.tx_done = NULL;
-	mbox->rx_client.tx_block = true;
-	mbox->rx_client.knows_txdone = false;
-	mbox->rx_client.tx_tout = tx_tout;
+	mbox->client.dev = &pdev->dev;
+	mbox->client.rx_callback = message_from_remote;
+	mbox->client.tx_done = NULL;
+	mbox->client.tx_block = true;
+	mbox->client.knows_txdone = false;
+	mbox->client.tx_tout = tx_tout;
 
 	mutex_init(&mbox->dev_lock);
 	mutex_init(&mbox->write_lock);
 	spin_lock_init(&mbox->rx_fifo_lock);
-	init_waitqueue_head(&mbox->rx_fifo_waitq);
+	init_waitqueue_head(&mbox->rx_wq);
+	init_waitqueue_head(&mbox->tx_wq);
 
 	ret = create_char_dev(mbox);
 	if (ret != 0)
@@ -395,7 +383,7 @@ static int sima_mbox_client_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id sima_mbox_client_match[] = {
-	{ .compatible = "sima,mailbox-client" },
+	{ .compatible = "simaai,mailbox-client" },
 	{},
 };
 
