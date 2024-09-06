@@ -327,10 +327,14 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 	return 0;
 }
 
+#define pgprot_dmacoherent_cached(prot) \
+	__pgprot_modify(prot, PTE_ATTRINDX_MASK, \
+			PTE_ATTRINDX(MT_NORMAL) | PTE_PXN | PTE_UXN)
+
 static int simaai_memory_dev_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	struct simaai_memory_buffer *buffer;
-	unsigned long paddr;
+	u64 paddr;
 	unsigned long vsize;
 
 	paddr = vma->vm_pgoff << PAGE_SHIFT;
@@ -344,8 +348,10 @@ static int simaai_memory_dev_mmap(struct file *filp, struct vm_area_struct *vma)
 		return -EINVAL;
 	}
 
-	vma->vm_page_prot = __pgprot((buffer->flags & SIMAAI_BUFFER_FLAG_CACHED ? PROT_NORMAL : PROT_NORMAL_NC)
-				   | (buffer->flags & SIMAAI_BUFFER_FLAG_RDONLY ? PTE_RDONLY : 0x0) | PTE_USER);
+	if (!(buffer->flags & SIMAAI_BUFFER_FLAG_CACHED))
+		vma->vm_page_prot = pgprot_dmacoherent(vma->vm_page_prot);
+	else
+		vma->vm_page_prot = pgprot_dmacoherent_cached(vma->vm_page_prot);
 
 	if (remap_pfn_range(vma, vma->vm_start, paddr >> PAGE_SHIFT, vsize,
 			    vma->vm_page_prot)) {
