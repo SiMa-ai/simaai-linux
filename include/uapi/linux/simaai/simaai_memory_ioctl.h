@@ -9,6 +9,7 @@
 #include <linux/ioctl.h>
 #include <linux/types.h>
 
+#define MAX_SEGMENTS					(16)
 /* Allocated buffer info provided by the driver */
 struct simaai_memory_info {
 	/* buffer target */
@@ -23,6 +24,8 @@ struct simaai_memory_info {
 	__u64 phys_addr;
 	/* buffer starting bus address */
 	__u64 bus_addr;
+	/* offset from the parent segment */
+	__u64 offset;
 };
 
 /* Allocate buffer */
@@ -30,28 +33,34 @@ struct simaai_alloc_args {
 	/* buffer target */
 	__u32 target;
 	/* buffer size requested by user */
-	__u32 size;
+	__u32 size[MAX_SEGMENTS];
 	/* allocated buffer size aligned to page boundary */
 	__u32 aligned_size;
 	/* buffer flags */
 	__u32 flags;
 	/* buffer starting physical address */
-	__u64 phys_addr;
+	__u64 phys_addr[MAX_SEGMENTS];
 	/* buffer starting bus address */
-	__u64 bus_addr;
+	__u64 bus_addr[MAX_SEGMENTS];
+	/* num of segments */
+	__u32 num_of_segments;
+	/* offset from parent segment */
+	__u64 offset[MAX_SEGMENTS];
 };
 
 /* Free buffer */
 struct simaai_free_args {
 	/* buffer ID assigned by kernel */
-	__u64 phys_addr;
+	__u64 phys_addr[MAX_SEGMENTS];
+	/* num of segments */
+	__u32 num_of_segments;
 };
 
 /*
  * Target mask to indicate from which target, memory is allocated
  */
 #define SIMAAI_TARGET_ALLOCATOR_DRAM		(0)
-#define SIMAAI_TARGET_ALLOCATOR_OCM	 	(1)
+#define SIMAAI_TARGET_ALLOCATOR_OCM			(1)
 #define SIMAAI_TARGET_ALLOCATOR_DMS0	 	(2)
 #define SIMAAI_TARGET_ALLOCATOR_DMS1	 	(3)
 #define SIMAAI_TARGET_ALLOCATOR_DMS2	 	(4)
