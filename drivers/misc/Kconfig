@@ -502,6 +502,14 @@ config SIMAAI_MEMORY
 	help
 	  This option enables memory management on SiMa.ai DaVinci family.
 
+config SIMAAI_THERMAL
+	tristate "SiMa.ai DaVinci family thermal sensor support"
+	default y
+	depends on ARCH_SIMAAI_DAVINCI
+	help
+	  This option enables thermal sensor support on
+	  SiMa.ai DaVinci family.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"

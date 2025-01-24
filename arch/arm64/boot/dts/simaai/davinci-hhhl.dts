@@ -37,7 +37,8 @@
 	//fisrt 0.5GB left for 32-bit cores ie EV74, EM4, M4 etc 
 	memory@80000000 {
 		device_type = "memory";
-		reg = <0x0 0xA4000000 0x0 0xBC000000>;
+		reg = < 0x0 0x80000000 0x0 0x70000000
+                               0x0 0xF8000000 0x0 0x68000000>;
 	};
 	
  	//DMS1: 3.5GB
@@ -90,3 +91,4 @@
 &pcie_ep {
 	status = "okay";
 };
+

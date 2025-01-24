@@ -537,10 +537,10 @@
         #size-cells = <2>;
         ranges;
 
-        linux,cma {
+        cma_reserved: linux,cma {
             compatible = "shared-dma-pool";
             reusable;
-            reg = <0x00000000 0xB0000000 0x00000000 0x30000000>;
+            reg = <0x00000000 0x80000000 0x00000000 0x70000000>;
             linux,cma-default;
         };
 
@@ -558,13 +558,6 @@
                 reg = <0x0 0x300000 0x0 0x100000>;
 		};
 
-        evmem_reserved: evmem@0x88000000 {
-                compatible = "shared-dma-pool";
-                no-map;
-                simaai,skip-memset-in-alloc;
-                reg = <0x00000000 0x88000000 0x00000000 0x18000000>;
-		};
-
         dms0_reserved: dms@0x100000000 {
                 compatible = "shared-dma-pool";
                 no-map;
@@ -576,32 +569,27 @@
                 compatible = "shared-dma-pool";
                 no-map;
                 simaai,skip-memset-in-alloc;
-                reg = <0x00000001 0xE0000000 0x00000000 0x80000000>;
+                reg = <0x00000002 0x00000000 0x00000000 0x60000000>;
 		};
 
         dms2_reserved: dms@0x300000000 {
                 compatible = "shared-dma-pool";
                 no-map;
                 simaai,skip-memset-in-alloc;
-                reg = <0x00000002 0xC0000000 0x00000000 0xA0000000>;
+                reg = <0x00000003 0x00000000 0x00000000 0x60000000>;
 		};
 
-        dms3_reserved: dms@0x380000000 {
+        dms3_reserved: dms@0x400000000 {
                 compatible = "shared-dma-pool";
                 no-map;
                 simaai,skip-memset-in-alloc;
-                reg = <0x00000003 0x80000000 0x00000000 0xA0000000>;
-		};
-
-	pcie_reserved: pcie_reserved_buf@1A0000000 {
-		compatible = "simaai,shared-pcie-buffer";
-		no-map;
-		reg = <0x01 0xA0000000 0x0 0x20000000>;
+                reg = <0x00000004 0x00000000 0x00000000 0x60000000>;
 		};
 	};
 
 	simaai,memory-manager {
 		compatible = "simaai,memory-manager";
+		memory-region = <&cma_reserved>;
 		simaai,target = <0>;
 		status = "okay";
 	};
@@ -641,23 +629,16 @@
 		status = "okay";
 	};
 
-	simaai,evmem-manager {
-		compatible = "simaai,memory-manager";
-		memory-region = <&evmem_reserved>;
-		simaai,target = <6>;
+	simaai,evxx-rproc {
+		compatible = "simaai,evxx-rproc";
+		st,auto-boot =  <1>;
+		/* ARM specific */
+		reg = < 0x0 0x10000000 0x0 0x00001000
+		0x0 0xF0000000 0x0 0x04000000>; /* EV_FIRMWARE */
+		reg-names = "ev_csm", "ev_mem";
+ 		sima,pm-firmware = "davinci-evxx-fw";
 		status = "okay";
 	};
-
-        simaai,evxx-rproc {
-	          compatible = "simaai,evxx-rproc";
-                  st,auto-boot =  <1>;
-                  /* ARM specific */
-                  reg = < 0x0 0x10000000 0x0 0x00001000
-		          0x0 0x88000000 0x0 0x1c000000>; /* SRAM */
-                  reg-names = "ev_csm", "ev_mem";
-                  sima,pm-firmware = "davinci-evxx-fw";
-                  status = "okay";
-        };
 
 	simaai,m4-rproc {
 		compatible = "simaai,m4-rproc";
@@ -670,7 +651,6 @@
 
     	watchdog@0x700000 {
         	compatible = "snps,dw-wdt";
-        	interrupts = <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>;
         	reg = <0x0 0x700000 0x0 0x1000>;
         	clocks = <&sysclk>;
         	clock-names = "core";
@@ -784,7 +764,6 @@
 			<0 0x1900000 0 0x300000>,  // DBI2
 			<0 0x082a000 0 0x001000>;  // Glue Logic
 		reg-names = "dbi", "dbi2", "glue_logic" ;
-		ddr-region = <&pcie_reserved>;
 		ocm-region = <&ocm_pcie_reserved>;
 		num-lanes = <8>;
 		interrupt-parent = <&gic>;
@@ -831,3 +810,4 @@
 		status = "disabled";
 	};
 };
+

@@ -33,6 +33,9 @@ struct simaai_memory_buffer {
 	size_t			aligned_size;
 	u32			owner;
 	struct kref		refcount;
+	struct simaai_memory_buffer *parent;
+	/* indicates offset from parent if this is buffer for segment */
+	u64 			offset;
 };
 
 struct simaai_memory_filp_buffer {
@@ -74,8 +77,10 @@ static void simaai_release_buffer(struct kref *ref)
 
 	radix_tree_delete(&simaaimem.buffer_root, buffer->phys_addr);
 
-	dma_free_coherent(buffer->dev, buffer->aligned_size,
+	if (buffer->parent == NULL ) {
+		dma_free_coherent(buffer->dev, buffer->aligned_size,
 			  buffer->cpu_addr, buffer->phys_addr);
+	}
 
 	kfree(buffer);
 }
@@ -115,6 +120,49 @@ static void simaai_destroy_buffers(struct simaai_memdev *memdev)
 }
 
 static struct simaai_memory_buffer *
+simaai_allocate_segment_buffer(struct device *dev, u32 target, size_t size, unsigned int flags,
+		u64 phys_addr)
+{
+	struct simaai_memory_buffer *buffer = NULL;
+	int res;
+
+	if (!size)
+		goto err_alloc;
+
+	buffer = kzalloc(sizeof(*buffer), GFP_KERNEL);
+	if (buffer == NULL)
+		goto err_alloc;
+
+	buffer->dev = dev;
+	buffer->size = size;
+	buffer->aligned_size = size;
+	buffer->flags = flags;
+	buffer->target = target;
+	buffer->owner = (u32) task_pid_nr(current);
+	buffer->phys_addr = phys_addr;
+	buffer->bus_addr = phys_addr;
+	buffer->parent = NULL;
+	buffer->offset = 0;
+	kref_init(&buffer->refcount);
+
+	mutex_lock(&simaaimem.buffer_lock);
+	res = radix_tree_insert(&simaaimem.buffer_root, buffer->phys_addr, buffer);
+	if (res != 0) {
+		dev_err(dev, "radix_tree_insert failed with error %d\n", res);
+		mutex_unlock(&simaaimem.buffer_lock);
+		goto err_insert;		
+	}
+	mutex_unlock(&simaaimem.buffer_lock);
+
+	return buffer;
+
+err_insert:
+	kfree(buffer);
+err_alloc:
+	return NULL;
+}
+
+static struct simaai_memory_buffer *
 simaai_allocate_buffer(struct device *dev, u32 target, size_t size, unsigned int flags)
 {
 	struct simaai_memory_buffer *buffer = NULL;
@@ -133,6 +181,8 @@ simaai_allocate_buffer(struct device *dev, u32 target, size_t size, unsigned int
 	buffer->flags = flags;
 	buffer->target = target;
 	buffer->owner = (u32) task_pid_nr(current);
+	buffer->parent = NULL;
+	buffer->offset = 0;
 
 	buffer->cpu_addr = dma_alloc_coherent(dev, buffer->aligned_size, &buffer->phys_addr, GFP_USER);
 	if (!buffer->cpu_addr) {
@@ -147,6 +197,7 @@ simaai_allocate_buffer(struct device *dev, u32 target, size_t size, unsigned int
 	res = radix_tree_insert(&simaaimem.buffer_root, buffer->phys_addr, buffer);
 	if (res != 0) {
 		dev_err(dev, "radix_tree_insert failed with error %d\n", res);
+		mutex_unlock(&simaaimem.buffer_lock);
 		goto err_insert;		
 	}
 	mutex_unlock(&simaaimem.buffer_lock);
@@ -167,8 +218,13 @@ static void simaai_free_buffer(dma_addr_t phys_addr)
 
 	mutex_lock(&simaaimem.buffer_lock);
 	buffer = radix_tree_lookup(&simaaimem.buffer_root, phys_addr);
-	if(buffer != NULL)
+	if(buffer != NULL) {
+		if(buffer->parent != NULL)
+			kref_put(&buffer->parent->refcount, simaai_release_buffer);
+
 		kref_put(&buffer->refcount, simaai_release_buffer);
+	}
+		
 	mutex_unlock(&simaaimem.buffer_lock);
 }
 
@@ -247,17 +303,29 @@ static long simaai_memory_remove_cursor(struct file *filp, dma_addr_t phys_addr)
 	return 0;
 }
 
+static void free_segment_buffers(struct file *filp, struct simaai_alloc_args *aargs, unsigned int last_index)
+{
+	unsigned int iter = 0;
+
+	for(iter = 0; iter <= last_index; iter++) {
+		simaai_memory_remove_cursor(filp, aargs->phys_addr[iter]);
+		simaai_free_buffer(aargs->phys_addr[iter]);
+	}
+}
+
 static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 				    unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
-	struct simaai_memory_buffer *buffer;
+	struct simaai_memory_buffer *buffer, *child;
 	struct device *dev = NULL;
 	struct simaai_memdev *cur;
 	struct simaai_alloc_args aargs;
 	struct simaai_free_args fargs;
 	struct simaai_memory_info info;
 	long ret;
+	u32 buffer_size = 0;
+	unsigned int iter = 0;
 
 	switch (cmd) {
 	case SIMAAI_IOC_MEM_ALLOC_COHERENT:
@@ -275,17 +343,55 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 		if (dev == NULL)
 			return -EINVAL;
 
-		buffer = simaai_allocate_buffer(dev, aargs.target, aargs.size, aargs.flags);
+		if (aargs.num_of_segments != 1) {
+			for(iter = 0; iter < aargs.num_of_segments; iter++) {
+				buffer_size += aargs.size[iter];
+			}
+		} else {
+			buffer_size = aargs.size[0];
+		}
+
+		buffer = simaai_allocate_buffer(dev, aargs.target, buffer_size, aargs.flags);
 		if (buffer == NULL) {
 			dev_err(dev, "Could not allocate buffer\n");
 			return -ENOMEM;
 		}
 		aargs.aligned_size = buffer->aligned_size;
-		aargs.phys_addr = buffer->phys_addr;
-		aargs.bus_addr = buffer->bus_addr;
+		aargs.phys_addr[0] = buffer->phys_addr;
+		aargs.bus_addr[0] = buffer->bus_addr;
+		aargs.offset[0] = buffer->offset;
+
 		ret = simaai_memory_insert_cursor(dev, filp, buffer->phys_addr);
 		if(ret != 0)
 			return ret;
+
+		for (iter = 1; iter < aargs.num_of_segments; iter++) {
+
+			child = simaai_allocate_segment_buffer(dev, aargs.target, aargs.size[iter], aargs.flags,
+						aargs.phys_addr[iter - 1] + aargs.size[iter -1]);
+			if (child == NULL) {
+				dev_err(dev, "Failed to allocate segment buffer\n");
+				free_segment_buffers(filp, &aargs, iter);
+				return -ENOMEM;
+			}
+								
+			child->parent = buffer;
+			kref_get(&child->parent->refcount);
+			aargs.aligned_size = child->aligned_size;
+			aargs.phys_addr[iter] = child->phys_addr;
+			aargs.bus_addr[iter] = child->bus_addr;
+			aargs.offset[iter] = aargs.offset[iter - 1] + aargs.size[iter - 1];
+			child->offset = aargs.offset[iter];
+
+			ret = simaai_memory_insert_cursor(dev, filp, child->phys_addr);
+			if(ret != 0) {
+				dev_err(dev, "Failed insert cursor for segment buffer\n");
+				free_segment_buffers(filp, &aargs, iter);
+				return ret;
+			}
+		}
+		aargs.size[0] = buffer->size;
+
 		if (copy_to_user(argp, &aargs, sizeof(aargs)))
 			return -EFAULT;		
 		break;
@@ -293,8 +399,11 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 		if (copy_from_user(&fargs, argp, sizeof(fargs)))
 			return -EFAULT;
 
-		ret = simaai_memory_remove_cursor(filp, fargs.phys_addr);
-		simaai_free_buffer(fargs.phys_addr);
+		for(iter = 0; iter < fargs.num_of_segments; iter++) {
+			ret = simaai_memory_remove_cursor(filp, fargs.phys_addr[iter]);
+			simaai_free_buffer(fargs.phys_addr[iter]);
+		}
+
 		break;
 	case SIMAAI_IOC_MEM_INFO:
 		if (copy_from_user(&info, argp, sizeof(info)))
@@ -306,12 +415,15 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 			return -EINVAL;
 		
 		kref_get(&buffer->refcount);
+		if (buffer->parent)
+			kref_get(&buffer->parent->refcount);
 		info.size = buffer->size;
 		info.aligned_size = buffer->aligned_size;
 		info.flags = buffer->flags;
 		info.phys_addr = buffer->phys_addr;
 		info.bus_addr = buffer->bus_addr;
 		info.target = buffer->target;
+		info.offset = buffer->offset;
 		ret = simaai_memory_insert_cursor(dev, filp, buffer->phys_addr);
 		if(ret != 0)
 			return ret;
@@ -364,7 +476,7 @@ static int simaai_memory_dev_mmap(struct file *filp, struct vm_area_struct *vma)
 
 ssize_t simaai_memory_dev_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 {
-	char header [] = "| Physical address |       Size       | Target |   Owner   |\n";
+	char header [] = "| Physical address |      Parent      | #Ref |       Size       | Target |   Owner   |\n";
 	int line_length = sizeof(header);
 	int l;
 	ssize_t total = 0;
@@ -394,8 +506,9 @@ ssize_t simaai_memory_dev_read(struct file *filp, char *buf, size_t count, loff_
 		if(*f_pos > offset)
 			continue;
 		buffer = *((struct simaai_memory_buffer **)slot);
-		sprintf(header, "|   0x%010llx   |   0x%010lx   |   %*d   | %*d |\n",
-			buffer->phys_addr, buffer->size, 2, buffer->target, 9, buffer->owner);
+		sprintf(header, "|   0x%010llx   |   0x%010llx   |  %*d  |   0x%010lx   |   %*d   | %*d |\n",
+			buffer->phys_addr, (buffer->parent) ? (buffer->parent->phys_addr) : 0, 2,
+			kref_read(&buffer->refcount), buffer->size, 2, buffer->target, 9, buffer->owner);
 		if (copy_to_user(&buf[total], &header[*f_pos % line_length], l))
 			return -EFAULT;
 		*f_pos += l;
@@ -486,13 +599,12 @@ static int simaai_memory_probe(struct platform_device *pdev)
 		dev_warn(dev, "Could not obtain simaai,target property\n");
 	}
 
-	if(target != SIMAAI_TARGET_ALLOCATOR_DRAM) {
-		ret = of_reserved_mem_device_init(dev);
-		if(ret) {
-			dev_err(dev, "Could not get reserved memory\n");
-			return ret;
-		}
+	ret = of_reserved_mem_device_init(dev);
+	if(ret) {
+		dev_err(dev, "Could not get reserved memory\n");
+		return ret;
 	}
+
 	memdev->target = target;
 
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
