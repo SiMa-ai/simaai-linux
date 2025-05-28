@@ -60,10 +60,6 @@
 /* ZQ register bit field definitions */
 #define T_ZQ_DDRMODE_MASK		0x2
 
-/* ECC control register bit field definitions */
-#define ECC_CTRL_CLR_CE_ERR		0x2
-#define ECC_CTRL_CLR_UE_ERR		0x1
-
 /* ECC correctable/uncorrectable error log register definitions */
 #define LOG_VALID			0x1
 #define CE_LOG_BITPOS_MASK		0xFE
@@ -92,6 +88,7 @@
 #define DDR_ECC_MULTIPLE_INTRS		BIT(3)
 #define DDR_ECC_SKIP_REG_ADDR8		BIT(4)
 #define DDR_ECC_DUMP_IN_CHECK		BIT(5)
+#define DDR5_ECC_REG_MAP		BIT(6)
 
 /* ZynqMP Enhanced DDR memory controller registers that are relevant to ECC */
 /* ECC Configuration Registers */
@@ -142,6 +139,38 @@
 /* Control register bitfield definitions */
 #define ECC_CTRL_BUSWIDTH_MASK		0x3000
 #define ECC_CTRL_BUSWIDTH_SHIFT		12
+
+/* DDR5 controller register offsets */
+#define DDR5_ECC_CFG0_OFST		0x600
+#define DDR5_ECC_CFG1_OFST		0x604
+#define DDR5_ECC_STAT_OFST		0x608
+#define DDR5_ECC_CTL_OFST		0x60C
+#define DDR5_ECC_ERRCNT_OFST		0x610
+#define DDR5_ECC_CEADDR0_OFST		0x614
+#define DDR5_ECC_CEADDR1_OFST		0x618
+#define DDR5_ECC_CSYND0_OFST		0x61C
+#define DDR5_ECC_CSYND1_OFST		0x620
+#define DDR5_ECC_CSYND2_OFST		0x624
+#define DDR5_ECC_BITMASK0_OFST		0x628
+#define DDR5_ECC_BITMASK1_OFST		0x62C
+#define DDR5_ECC_BITMASK2_OFST		0x630
+#define DDR5_ECC_UEADDR0_OFST		0x634
+#define DDR5_ECC_UEADDR1_OFST		0x638
+#define DDR5_ECC_UESYND0_OFST		0x63C
+#define DDR5_ECC_UESYND1_OFST		0x640
+#define DDR5_ECC_UESYND2_OFST		0x644
+#define DDR5_ECC_POISON0_OFST		0x648
+#define DDR5_ECC_POISON1_OFST		0x64C
+#define DDR5_ECC_APSTAT_OFST		0x664
+#define DDR5_DDRC_SWCTL			0xC80
+#define DDR5_ECC_CEADDR1_BLKNR_MASK	GENMASK(10, 0)
+#define DDR5_ECC_ADDRMAP0_OFFSET	0x20000
+#define DDR5_RANK_MAX_VAL_MASK		GENMASK(5, 0)
+#define DDR5_BANK_MAX_VAL_MASK		GENMASK(5, 0)
+#define DDR5_BANKGRP_MAX_VAL_MASK	GENMASK(5, 0)
+#define DDR5_COL_MAX_VAL_MASK		GENMASK(4, 0)
+#define DDR5_ROW_MAX_VAL_MASK		GENMASK(4, 0)
+#define MEM_TYPE_LPDDR5			BIT(3)
 
 /* DDR Control Register width definitions  */
 #define DDRCTL_EWDTH_16			2
@@ -504,6 +533,76 @@ out:
 	return 0;
 }
 
+static int simaai_ddr5_get_error_info(struct synps_edac_priv *priv)
+{
+	struct synps_ecc_status *p;
+	u32 regval, clearval = 0, i;
+	void __iomem *base;
+	void __iomem *phybase;
+	void __iomem *bytebase;
+
+	base = priv->baseaddr;
+	phybase = priv->phyaddr;
+	p = &priv->stat;
+
+	regval = readl(base + DDR5_ECC_ERRCNT_OFST);
+
+	p->ce_cnt = (regval & ECC_ERRCNT_CECNT_MASK) >> ECC_ERRCNT_CECNT_SHIFT;
+	p->ue_cnt = (regval & ECC_ERRCNT_UECNT_MASK) >> ECC_ERRCNT_UECNT_SHIFT;
+	if (!p->ce_cnt)
+		goto ue_err;
+
+	regval = readl(base + DDR5_ECC_STAT_OFST);
+	p->ceinfo.bitpos = (regval & ECC_STAT_BITNUM_MASK);
+
+	regval = readl(base + DDR5_ECC_CEADDR0_OFST);
+	p->ceinfo.row = (regval & ECC_CEADDR0_RW_MASK);
+	p->ceinfo.rank = (regval & ECC_CEADDR0_RNK_MASK) >>
+					ECC_CEADDR0_RNK_SHIFT;
+	regval = readl(base + DDR5_ECC_CEADDR1_OFST);
+	p->ceinfo.bank = (regval & ECC_CEADDR1_BNKNR_MASK) >>
+					ECC_CEADDR1_BNKNR_SHIFT;
+	p->ceinfo.bankgrpnr = (regval &	ECC_CEADDR1_BNKGRP_MASK) >>
+					ECC_CEADDR1_BNKGRP_SHIFT;
+	p->ceinfo.blknr = (regval & DDR5_ECC_CEADDR1_BLKNR_MASK);
+	p->ceinfo.col = regval & DDR5_ECC_CEADDR1_BLKNR_MASK;
+	p->ceinfo.syndrome[0] = readl(base + DDR5_ECC_CSYND0_OFST);
+	p->ceinfo.syndrome[1] = readl(base + DDR5_ECC_CSYND1_OFST);
+	p->ceinfo.syndrome[2] = readl(base + DDR5_ECC_CSYND2_OFST);
+	p->ueinfo.bitmask[0] = readl(base + DDR5_ECC_BITMASK0_OFST);
+	p->ueinfo.bitmask[1] = readl(base + DDR5_ECC_BITMASK1_OFST);
+	p->ueinfo.bitmask[2] = readl(base + DDR5_ECC_BITMASK2_OFST);
+ue_err:
+	if (!p->ue_cnt)
+		goto out;
+
+	regval = readl(base + DDR5_ECC_UEADDR0_OFST);
+	p->ueinfo.row = (regval & ECC_CEADDR0_RW_MASK);
+	p->ueinfo.rank = (regval & ECC_CEADDR0_RNK_MASK) >>
+					ECC_CEADDR0_RNK_SHIFT;;
+	regval = readl(base + DDR5_ECC_UEADDR1_OFST);
+	p->ueinfo.bankgrpnr = (regval & ECC_CEADDR1_BNKGRP_MASK) >>
+					ECC_CEADDR1_BNKGRP_SHIFT;
+	p->ueinfo.bank = (regval & ECC_CEADDR1_BNKNR_MASK) >>
+					ECC_CEADDR1_BNKNR_SHIFT;
+	p->ueinfo.blknr = (regval & DDR5_ECC_CEADDR1_BLKNR_MASK);
+	p->ueinfo.col = regval & DDR5_ECC_CEADDR1_BLKNR_MASK;
+	p->ueinfo.syndrome[0] = readl(base + DDR5_ECC_UESYND0_OFST);
+	p->ueinfo.syndrome[1] = readl(base + DDR5_ECC_UESYND1_OFST);
+	p->ueinfo.syndrome[2] = readl(base + DDR5_ECC_UESYND2_OFST);
+	p->ueinfo.bitmask[0] = readl(base + DDR5_ECC_BITMASK0_OFST);
+	p->ueinfo.bitmask[1] = readl(base + DDR5_ECC_BITMASK1_OFST);
+	p->ueinfo.bitmask[2] = readl(base + DDR5_ECC_BITMASK2_OFST);
+out:
+	clearval = readl(base + DDR5_ECC_CTL_OFST);
+	clearval |= ECC_CTRL_CLR_CE_ERR | ECC_CTRL_CLR_CE_ERRCNT;
+	clearval |= ECC_CTRL_CLR_UE_ERR | ECC_CTRL_CLR_UE_ERRCNT;
+	clearval |= ECC_CTRL_CLR_AP_ERR;
+	writel(clearval, base + DDR5_ECC_CTL_OFST);
+
+	return 0;
+}
+
 /**
  * simaai_get_error_info - Get the current ECC error info.
  * @priv:	DDR memory controller private instance data.
@@ -674,6 +773,11 @@ static void enable_intr(struct synps_edac_priv *priv)
 		ctrl_clr |= ECC_CTRL_CLR_CE_INTR_EN | ECC_CTRL_CLR_UE_INTR_EN
 				| ECC_CTRL_CLR_AP_INTR_EN;
 		writel(ctrl_clr, priv->baseaddr + ECC_CLR_OFST);
+	} else if (priv->p_data->quirks & DDR5_ECC_REG_MAP) {
+		ctrl_clr = readl(priv->baseaddr + DDR5_ECC_CTL_OFST);
+		ctrl_clr |= ECC_CTRL_CLR_CE_INTR_EN | ECC_CTRL_CLR_UE_INTR_EN
+				| ECC_CTRL_CLR_AP_INTR_EN;
+		writel(ctrl_clr, priv->baseaddr + DDR5_ECC_CTL_OFST);
 	} else
 		writel(DDR_QOSUE_MASK | DDR_QOSCE_MASK,
 		       priv->baseaddr + DDR_QOS_IRQ_EN_OFST);
@@ -693,6 +797,11 @@ static void disable_intr(struct synps_edac_priv *priv)
 		ctrl_clr &= ~(ECC_CTRL_CLR_CE_INTR_EN | ECC_CTRL_CLR_UE_INTR_EN
 				| ECC_CTRL_CLR_AP_INTR_EN);
 		writel(ctrl_clr, priv->baseaddr + ECC_CLR_OFST);
+	} else if (priv->p_data->quirks & DDR5_ECC_REG_MAP) {
+		ctrl_clr = readl(priv->baseaddr + DDR5_ECC_CTL_OFST);
+		ctrl_clr &= ~(ECC_CTRL_CLR_CE_INTR_EN | ECC_CTRL_CLR_UE_INTR_EN
+				| ECC_CTRL_CLR_AP_INTR_EN);
+		writel(ctrl_clr, priv->baseaddr + DDR5_ECC_CTL_OFST);
 	} else
 		writel(DDR_QOSUE_MASK | DDR_QOSCE_MASK,
 		       priv->baseaddr + DDR_QOS_IRQ_DB_OFST);
@@ -727,6 +836,13 @@ static irqreturn_t intr_handler(int irq, void *dev_id)
 					| ECC_APSTAT_APERR_MASK);
 			if (!regval)
 				return IRQ_NONE;
+		} else if(priv->p_data->quirks & DDR5_ECC_REG_MAP) {
+			regval = readl(priv->baseaddr + DDR5_ECC_STAT_OFST) |
+					readl(priv->baseaddr + DDR5_ECC_APSTAT_OFST);
+			regval &= (ECC_STAT_CE_ERR_MASK | ECC_STAT_UE_ERR_MASK
+					| ECC_APSTAT_APERR_MASK);
+			if (!regval)
+				return IRQ_NONE;
 		} else {
 			regval = readl(priv->baseaddr + DDR_QOS_IRQ_STAT_OFST);
 			regval &= (DDR_QOSCE_MASK | DDR_QOSUE_MASK);
@@ -751,6 +867,10 @@ static irqreturn_t intr_handler(int irq, void *dev_id)
 			regval = readl(priv->baseaddr + ECC_CLR_OFST) | ECC_CTRL_CLR_CE_ERR
 				       | ECC_CTRL_CLR_UE_ERR | ECC_CTRL_CLR_AP_ERR;
 			writel(regval, priv->baseaddr + ECC_CLR_OFST);
+		} else if (priv->p_data->quirks & DDR5_ECC_REG_MAP) {
+			regval = readl(priv->baseaddr + DDR5_ECC_CTL_OFST) | ECC_CTRL_CLR_CE_ERR
+					| ECC_CTRL_CLR_UE_ERR | ECC_CTRL_CLR_AP_ERR;
+			writel(regval, priv->baseaddr + DDR5_ECC_CTL_OFST);
 		} else
 			writel(regval, priv->baseaddr + DDR_QOS_IRQ_STAT_OFST);
 	} else
@@ -905,6 +1025,23 @@ static bool zynqmp_get_ecc_state(void __iomem *base)
 	return false;
 }
 
+static bool simaai_ddr5_get_ecc_state(void __iomem *base)
+{
+	enum dev_type dt;
+	u32 ecctype;
+
+	dt = zynqmp_get_dtype(base);
+	if (dt == DEV_UNKNOWN)
+		return false;
+
+	ecctype = readl(base + DDR5_ECC_CFG0_OFST) & SCRUB_MODE_MASK;
+	if ((ecctype == SCRUB_MODE_SECDED) &&
+	    ((dt == DEV_X2) || (dt == DEV_X4) || (dt == DEV_X8)))
+		return true;
+
+	return false;
+}
+
 /**
  * get_memsize - Read the size of the attached memory device.
  *
@@ -971,6 +1108,18 @@ static enum mem_type zynqmp_get_mtype(const void __iomem *base)
 	return mt;
 }
 
+static enum mem_type simaai_ddr5_get_mtype(const void __iomem *base)
+{
+	u32 memtype;
+
+	memtype = readl(base + CTRL_OFST);
+
+	if (memtype & MEM_TYPE_LPDDR5)
+		return MEM_DDR5;
+	else
+		return MEM_EMPTY;
+}
+
 /**
  * init_csrows - Initialize the csrow data.
  * @mci:	EDAC memory controller instance.
@@ -1022,7 +1171,7 @@ static void mc_init(struct mem_ctl_info *mci, struct platform_device *pdev)
 	platform_set_drvdata(pdev, mci);
 
 	/* Initialize controller capabilities and configuration */
-	mci->mtype_cap = MEM_FLAG_LRDDR4 | MEM_FLAG_DDR4 | MEM_FLAG_DDR3 | MEM_FLAG_DDR2;
+	mci->mtype_cap = MEM_FLAG_DDR5| MEM_FLAG_LRDDR4 | MEM_FLAG_DDR4 | MEM_FLAG_DDR3 | MEM_FLAG_DDR2;
 	mci->edac_ctl_cap = EDAC_FLAG_NONE | EDAC_FLAG_SECDED;
 	mci->scrub_cap = SCRUB_HW_SRC;
 	mci->scrub_mode = SCRUB_NONE;
@@ -1135,6 +1284,19 @@ static const struct synps_platform_data simaai_edac_def = {
 			  ),
 };
 
+static const struct synps_platform_data simaai_ddr5_edac_def = {
+	.get_error_info	= simaai_ddr5_get_error_info,
+	.get_mtype	= simaai_ddr5_get_mtype,
+	.get_dtype	= zynqmp_get_dtype,
+	.get_ecc_state	= simaai_ddr5_get_ecc_state,
+	.quirks         = (DDR_ECC_INTR_SUPPORT | DDR_ECC_DUMP_IN_CHECK
+			| DDR5_ECC_REG_MAP
+#ifdef CONFIG_EDAC_DEBUG
+			  | DDR_ECC_DATA_POISON_SUPPORT
+#endif
+			  ),
+};
+
 static const struct of_device_id synps_edac_match[] = {
 	{
 		.compatible = "xlnx,zynq-ddrc-a05",
@@ -1151,6 +1313,10 @@ static const struct of_device_id synps_edac_match[] = {
 	{
 		.compatible = "simaai,ddrc-4.50a",
 		.data = (void *)&simaai_edac_def
+	},
+	{
+		.compatible = "simaai,ddrc-5.110",
+		.data = (void *)&simaai_ddr5_edac_def
 	},
 	{
 		/* end of table */
@@ -1214,12 +1380,20 @@ static void ddr_poison_setup(struct synps_edac_priv *priv)
 
 	regval = (rank << ECC_POISON0_RANK_SHIFT) & ECC_POISON0_RANK_MASK;
 	regval |= (col << ECC_POISON0_COLUMN_SHIFT) & ECC_POISON0_COLUMN_MASK;
-	writel(regval, priv->baseaddr + ECC_POISON0_OFST);
+
+	if (priv->p_data->quirks & DDR5_ECC_REG_MAP)
+		writel(regval, priv->baseaddr + DDR5_ECC_POISON0_OFST);
+	else
+		writel(regval, priv->baseaddr + ECC_POISON0_OFST);
 
 	regval = (bankgrp << ECC_POISON1_BG_SHIFT) & ECC_POISON1_BG_MASK;
 	regval |= (bank << ECC_POISON1_BANKNR_SHIFT) & ECC_POISON1_BANKNR_MASK;
 	regval |= (row << ECC_POISON1_ROW_SHIFT) & ECC_POISON1_ROW_MASK;
-	writel(regval, priv->baseaddr + ECC_POISON1_OFST);
+
+	if (priv->p_data->quirks & DDR5_ECC_REG_MAP)
+		writel(regval, priv->baseaddr + DDR5_ECC_POISON1_OFST);
+	else
+		writel(regval, priv->baseaddr + ECC_POISON1_OFST);
 }
 
 static ssize_t inject_data_error_show(struct device *dev,
@@ -1229,7 +1403,14 @@ static ssize_t inject_data_error_show(struct device *dev,
 	struct mem_ctl_info *mci = to_mci(dev);
 	struct synps_edac_priv *priv = mci->pvt_info;
 
-	return sprintf(data, "Poison0 Addr: 0x%08x\n\rPoison1 Addr: 0x%08x\n\r"
+	if (priv->p_data->quirks & DDR5_ECC_REG_MAP)
+		return sprintf(data, "Poison0 Addr: 0x%08x\n\rPoison1 Addr: 0x%08x\n\r"
+			"Error injection Address: 0x%lx\n\r",
+			readl(priv->baseaddr + DDR5_ECC_POISON0_OFST),
+			readl(priv->baseaddr + DDR5_ECC_POISON1_OFST),
+			priv->poison_addr);
+	else
+		return sprintf(data, "Poison0 Addr: 0x%08x\n\rPoison1 Addr: 0x%08x\n\r"
 			"Error injection Address: 0x%lx\n\r",
 			readl(priv->baseaddr + ECC_POISON0_OFST),
 			readl(priv->baseaddr + ECC_POISON1_OFST),
@@ -1258,7 +1439,12 @@ static ssize_t inject_data_poison_show(struct device *dev,
 	struct mem_ctl_info *mci = to_mci(dev);
 	struct synps_edac_priv *priv = mci->pvt_info;
 
-	return sprintf(data, "Data Poisoning: %s\n\r",
+	if (priv->p_data->quirks & DDR5_ECC_REG_MAP)
+		return sprintf(data, "Data Poisoning: %s\n\r",
+			(((readl(priv->baseaddr + DDR5_ECC_CFG1_OFST)) & 0x3) == 0x3)
+			? ("Correctable Error") : ("UnCorrectable Error"));
+	else
+		return sprintf(data, "Data Poisoning: %s\n\r",
 			(((readl(priv->baseaddr + ECC_CFG1_OFST)) & 0x3) == 0x3)
 			? ("Correctable Error") : ("UnCorrectable Error"));
 }
@@ -1270,12 +1456,21 @@ static ssize_t inject_data_poison_store(struct device *dev,
 	struct mem_ctl_info *mci = to_mci(dev);
 	struct synps_edac_priv *priv = mci->pvt_info;
 
-	writel(0, priv->baseaddr + DDRC_SWCTL);
-	if (strncmp(data, "CE", 2) == 0)
-		writel(ECC_CEPOISON_MASK, priv->baseaddr + ECC_CFG1_OFST);
-	else
-		writel(ECC_UEPOISON_MASK, priv->baseaddr + ECC_CFG1_OFST);
-	writel(1, priv->baseaddr + DDRC_SWCTL);
+	if (priv->p_data->quirks & DDR5_ECC_REG_MAP) {
+		writel(0, priv->baseaddr + DDR5_DDRC_SWCTL);
+		if (strncmp(data, "CE", 2) == 0)
+			writel(ECC_CEPOISON_MASK, priv->baseaddr + DDR5_ECC_CFG1_OFST);
+		else
+			writel(ECC_UEPOISON_MASK, priv->baseaddr + DDR5_ECC_CFG1_OFST);
+		writel(1, priv->baseaddr + DDR5_DDRC_SWCTL);
+	} else {
+		writel(0, priv->baseaddr + DDRC_SWCTL);
+		if (strncmp(data, "CE", 2) == 0)
+			writel(ECC_CEPOISON_MASK, priv->baseaddr + ECC_CFG1_OFST);
+		else
+			writel(ECC_UEPOISON_MASK, priv->baseaddr + ECC_CFG1_OFST);
+		writel(1, priv->baseaddr + DDRC_SWCTL);
+	}
 
 	return count;
 }
@@ -1300,6 +1495,48 @@ static void edac_remove_sysfs_attributes(struct mem_ctl_info *mci)
 {
 	device_remove_file(&mci->dev, &dev_attr_inject_data_error);
 	device_remove_file(&mci->dev, &dev_attr_inject_data_poison);
+}
+
+static void setup_ddr5_row_address_map(struct synps_edac_priv *priv, u32 *addrmap)
+{
+	priv->row_shift[0] = (addrmap[11] & DDR5_ROW_MAX_VAL_MASK) + ROW_B0_BASE;
+	priv->row_shift[1] = ((addrmap[11] >> 8) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B1_BASE;
+	priv->row_shift[2] = (addrmap[10] & DDR5_ROW_MAX_VAL_MASK) + ROW_B2_BASE;
+	priv->row_shift[3] = ((addrmap[10] >> 8) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B3_BASE;
+	priv->row_shift[4] = ((addrmap[10] >> 16) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B4_BASE;
+	priv->row_shift[5] = ((addrmap[10] >> 24) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B5_BASE;
+	priv->row_shift[6] = (addrmap[9] & DDR5_ROW_MAX_VAL_MASK) + ROW_B6_BASE;
+	priv->row_shift[7] = ((addrmap[9] >> 8) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B7_BASE;
+	priv->row_shift[8] = ((addrmap[9] >> 16) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B8_BASE;
+	priv->row_shift[9] = ((addrmap[9] >> 24) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B9_BASE;
+	priv->row_shift[10] = (addrmap[8] & DDR5_ROW_MAX_VAL_MASK) + ROW_B10_BASE;
+	priv->row_shift[11] = ((addrmap[8] >> 8) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B11_BASE;
+	priv->row_shift[12] = ((addrmap[8] >> 16) & DDR5_ROW_MAX_VAL_MASK) ==
+				DDR5_ROW_MAX_VAL_MASK ? 0 : ((addrmap[8] >> 16) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B12_BASE;
+	priv->row_shift[13] = ((addrmap[8] >> 24) & DDR5_ROW_MAX_VAL_MASK) ==
+				DDR5_ROW_MAX_VAL_MASK ? 0 : ((addrmap[8] >> 24) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B13_BASE;
+	priv->row_shift[14] = (addrmap[7] & DDR5_ROW_MAX_VAL_MASK) ==
+				DDR5_ROW_MAX_VAL_MASK ? 0 : (addrmap[7] &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B14_BASE;
+	priv->row_shift[15] = ((addrmap[7] >> 8) & DDR5_ROW_MAX_VAL_MASK) ==
+				DDR5_ROW_MAX_VAL_MASK ? 0 : ((addrmap[7] >> 8) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B15_BASE;
+	priv->row_shift[16] = ((addrmap[7] >> 16) & DDR5_ROW_MAX_VAL_MASK) ==
+				DDR5_ROW_MAX_VAL_MASK ? 0 : ((addrmap[7] >> 16) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B16_BASE;
+	priv->row_shift[17] = ((addrmap[7] >> 24) & DDR5_ROW_MAX_VAL_MASK) ==
+				DDR5_ROW_MAX_VAL_MASK ? 0 : ((addrmap[7] >> 24) &
+				DDR5_ROW_MAX_VAL_MASK) + ROW_B17_BASE;
 }
 
 static void setup_row_address_map(struct synps_edac_priv *priv, u32 *addrmap)
@@ -1359,6 +1596,34 @@ static void setup_row_address_map(struct synps_edac_priv *priv, u32 *addrmap)
 	priv->row_shift[17] = (((addrmap[7] >> 8) & ROW_MAX_VAL_MASK) ==
 				ROW_MAX_VAL_MASK) ? 0 : (((addrmap[7] >> 8) &
 				ROW_MAX_VAL_MASK) + ROW_B17_BASE);
+}
+
+static void setup_ddr5_column_address_map(struct synps_edac_priv *priv, u32 *addrmap)
+{
+	priv->col_shift[0] = 0;
+	priv->col_shift[1] = 1;
+	priv->col_shift[2] = 2;
+	priv->col_shift[3] = (addrmap[6] & COL_MAX_VAL_MASK) + COL_B3_BASE;
+	priv->col_shift[4] = ((addrmap[6] >> 8) &
+			COL_MAX_VAL_MASK) + COL_B4_BASE;
+	priv->col_shift[5] = (((addrmap[6] >> 16) & COL_MAX_VAL_MASK) ==
+			COL_MAX_VAL_MASK) ? 0 : (((addrmap[6] >> 16) &
+					COL_MAX_VAL_MASK) + COL_B5_BASE);
+	priv->col_shift[6] = (((addrmap[6] >> 24) & COL_MAX_VAL_MASK) ==
+			COL_MAX_VAL_MASK) ? 0 : (((addrmap[6] >> 24) &
+					COL_MAX_VAL_MASK) + COL_B6_BASE);
+	priv->col_shift[7] = ((addrmap[5] & DDR5_COL_MAX_VAL_MASK) ==
+				DDR5_COL_MAX_VAL_MASK) ? 0 : (addrmap[5] &
+					DDR5_COL_MAX_VAL_MASK) + COL_B7_BASE;
+	priv->col_shift[8] = (((addrmap[5] >> 8) & DDR5_COL_MAX_VAL_MASK) ==
+			DDR5_COL_MAX_VAL_MASK) ? 0 : (((addrmap[5] >> 8) &
+					DDR5_COL_MAX_VAL_MASK) + COL_B8_BASE);
+	priv->col_shift[9] = (((addrmap[5] >> 16) & DDR5_COL_MAX_VAL_MASK) ==
+			DDR5_COL_MAX_VAL_MASK) ? 0 : (((addrmap[5] >> 16) &
+					DDR5_COL_MAX_VAL_MASK) + COL_B9_BASE);
+	priv->col_shift[10] = (((addrmap[5] >> 24) & DDR5_COL_MAX_VAL_MASK) ==
+			DDR5_COL_MAX_VAL_MASK) ? 0 : (((addrmap[5] >> 24) &
+					DDR5_COL_MAX_VAL_MASK) + COL_B10_BASE);
 }
 
 static void setup_column_address_map(struct synps_edac_priv *priv, u32 *addrmap)
@@ -1479,6 +1744,18 @@ static void setup_bank_address_map(struct synps_edac_priv *priv, u32 *addrmap)
 
 }
 
+static void setup_ddr5_bank_address_map(struct synps_edac_priv *priv, u32 *addrmap)
+{
+	priv->bank_shift[0] = (addrmap[3] & DDR5_BANK_MAX_VAL_MASK) +
+				(BANK_B0_BASE + 1);
+	priv->bank_shift[1] = ((addrmap[3] >> 8) &
+				DDR5_BANK_MAX_VAL_MASK) + (BANK_B1_BASE + 1);
+	priv->bank_shift[2] = (((addrmap[3] >> 16) &
+				DDR5_BANK_MAX_VAL_MASK) == DDR5_BANK_MAX_VAL_MASK) ? 0 :
+				(((addrmap[3] >> 16) & DDR5_BANK_MAX_VAL_MASK) +
+				 (BANK_B2_BASE + 1));
+}
+
 static void setup_bg_address_map(struct synps_edac_priv *priv, u32 *addrmap)
 {
 	priv->bankgrp_shift[0] = (addrmap[8] &
@@ -1489,11 +1766,53 @@ static void setup_bg_address_map(struct synps_edac_priv *priv, u32 *addrmap)
 
 }
 
+static void setup_ddr5_bg_address_map(struct synps_edac_priv *priv, u32 *addrmap)
+{
+	priv->bankgrp_shift[0] = (addrmap[4] &
+				DDR5_BANKGRP_MAX_VAL_MASK) + BANKGRP_B0_BASE + 1;
+	priv->bankgrp_shift[1] = (((addrmap[4] >> 8) & DDR5_BANKGRP_MAX_VAL_MASK) ==
+				DDR5_BANKGRP_MAX_VAL_MASK) ? 0 : (((addrmap[4] >> 8)
+				& DDR5_BANKGRP_MAX_VAL_MASK) + BANKGRP_B1_BASE + 1);
+}
+
 static void setup_rank_address_map(struct synps_edac_priv *priv, u32 *addrmap)
 {
 	priv->rank_shift[0] = ((addrmap[0] & RANK_MAX_VAL_MASK) ==
 				RANK_MAX_VAL_MASK) ? 0 : ((addrmap[0] &
 				RANK_MAX_VAL_MASK) + RANK_B0_BASE);
+}
+
+static void setup_ddr5_rank_address_map(struct synps_edac_priv *priv, u32 *addrmap)
+{
+	priv->rank_shift[0] = ((addrmap[1] & DDR5_RANK_MAX_VAL_MASK) ==
+				DDR5_RANK_MAX_VAL_MASK) ? 0 : ((addrmap[1] &
+				DDR5_RANK_MAX_VAL_MASK) + RANK_B0_BASE);
+}
+
+static void setup_ddr5_address_map(struct synps_edac_priv *priv)
+{
+	u32 addrmap[12];
+	int index;
+
+	for (index = 0; index < 12; index++) {
+		u32 addrmap_offset;
+
+		if ((index == 0) || (index == 2))
+			continue;
+
+		addrmap_offset = DDR5_ECC_ADDRMAP0_OFFSET + (index * 4);
+		addrmap[index] = readl(priv->baseaddr + addrmap_offset);
+	}
+
+	setup_ddr5_rank_address_map(priv, addrmap);
+
+	setup_ddr5_bank_address_map(priv, addrmap);
+
+	setup_ddr5_bg_address_map(priv, addrmap);
+
+	setup_ddr5_column_address_map(priv, addrmap);
+
+	setup_ddr5_row_address_map(priv, addrmap);
 }
 
 /**
@@ -1637,7 +1956,10 @@ static int mc_probe(struct platform_device *pdev)
 	}
 
 	if (priv->p_data->quirks & DDR_ECC_INTR_SUPPORT)
-		setup_address_map(priv);
+		if (priv->p_data->quirks & DDR5_ECC_REG_MAP)
+			setup_ddr5_address_map(priv);
+		else
+			setup_address_map(priv);
 #endif
 
 	/*

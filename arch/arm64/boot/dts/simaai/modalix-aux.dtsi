@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024 SiMa ai
+ */
+
+/ {
+
+	counter0: counter@0x040A4000 {
+		compatible = "snps,dw-apb-timer-counter-2.12a";
+		reg = <0x0 0x040A4000 0x0 0x000000B0>;
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 16 IRQ_TYPE_LEVEL_HIGH>;
+		snps,channels = <0x4>;
+		status = "okay";
+	};
+
+	watchdog@0x40a0000 {
+		compatible = "snps,dw-wdt";
+		reg = <0x0 0x40a0000 0x0 0x1000>;
+		clocks = <&timer_clk>;
+		clock-names = "core";
+		snps,force_irq_mode;
+		status = "okay";
+	};
+
+	dmac0: dma-controller@40b0000 {
+		compatible = "snps,axi-dma-1.01a";
+		#dma-cells = <1>;
+		reg = <0x0 0x40b0000 0x0 0x20a8>;
+		clocks = <&sdma0_axi_clk>, <&sdma0_apb_clk>;
+		clock-names = "core-clk", "cfgr-clk";
+		interrupts = <GIC_SPI 204 IRQ_TYPE_LEVEL_HIGH>;
+		dma-channels = <32>;
+		snps,dma-masters = <2>;
+		snps,data-width = <4>;
+		snps,block-size = <4096 4096 4096 4096 4096 4096 4096 4096
+				4096 4096 4096 4096 4096 4096 4096 4096
+				4096 4096 4096 4096 4096 4096 4096 4096
+				4096 4096 4096 4096 4096 4096 4096 4096>;
+		snps,priority = <0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+				0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>;
+		snps,axi-max-burst-len = <15>;
+		snps,transfer-mode = <3>;
+		snps,lms-axi-master = <1>;
+		snps,rdwr-back-feature = <0>;
+		status = "okay";
+	};
+
+	dmac1: dma-controller@40b4000 {
+		compatible = "snps,axi-dma-1.01a";
+		#dma-cells = <1>;
+		reg = <0x0 0x40b4000 0x0 0x4a8>;
+		clocks = <&sdma1_axi_clk>, <&sdma1_apb_clk>;
+		clock-names = "core-clk", "cfgr-clk";
+		interrupts = <GIC_SPI 238 IRQ_TYPE_LEVEL_HIGH>;
+		dma-channels = <4>;
+		snps,dma-masters = <2>;
+		snps,data-width = <4>;
+		snps,block-size = <4096 4096 4096 4096>;
+		snps,priority = <0 0 0 0>;
+		snps,axi-max-burst-len = <15>;
+		snps,transfer-mode = <3>;
+		snps,lms-axi-master = <1>;
+		snps,rdwr-back-feature = <0>;
+		status = "okay";
+	};
+
+	dmatest0: dmatest@0 {
+		compatible = "simaai,dmatest";
+		dmas = <&dmac0 0>;
+		dma-names = "sdma";
+		status = "disabled";
+	};
+
+	dmatest1: dmatest@1 {
+		compatible = "simaai,dmatest";
+		dmas = <&dmac1 0>;
+		dma-names = "sdma";
+		status = "disabled";
+	};
+};

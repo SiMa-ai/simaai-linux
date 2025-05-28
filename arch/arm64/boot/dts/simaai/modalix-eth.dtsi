@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2023 SiMa ai
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	stmmac_axi_config: axi_config {
+		snps,wr_osr_lmt = <0x1f>;
+		snps,rd_osr_lmt = <0xf>;
+		snps,blen = <0 0 0 32 16 8 4>;
+	};
+
+	xgmac0: ethernet@a800000 {
+		compatible = "snps,dwxgmac-2.10", "snps,dwxgmac";
+		reg = <0x0 0xa800000 0x0 0x3180>,
+		      <0x0 0xa040000 0x0 0x7c0000>;
+		reg-names = "gmac", "xpcs";
+		interrupts = <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq", "xpcs_irq";
+		snps,multicast-filter-bins = <256>;
+		snps,perfect-filter-entries = <128>;
+		rx-fifo-depth = <16384>;
+		tx-fifo-depth = <16384>;
+		snps,pbl = <32>;
+		//max-frame-size = <3800>;
+		snps,axi-config = <&stmmac_axi_config>;
+		clocks = <&eth_clk>;
+		clock-names = "stmmaceth";
+		phy-mode = "xgmii";
+		snps,apbxpcs;
+		snps,xpcs_skip_reset;
+		status = "disabled";
+	};
+
+	xgmac1: ethernet@b800000 {
+		compatible = "snps,dwxgmac-2.10", "snps,dwxgmac";
+		reg = <0x0 0xb800000 0x0 0x3180>,
+		      <0x0 0xb040000 0x0 0x7c0000>;
+		reg-names = "gmac", "xpcs";
+		interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq";
+		snps,multicast-filter-bins = <256>;
+		snps,perfect-filter-entries = <128>;
+		rx-fifo-depth = <16384>;
+		tx-fifo-depth = <16384>;
+		snps,pbl = <32>;
+		//max-frame-size = <3800>;
+		snps,axi-config = <&stmmac_axi_config>;
+		clocks = <&eth_clk>;
+		clock-names = "stmmaceth";
+		phy-mode = "xgmii";
+		snps,apbxpcs;
+		snps,xpcs_skip_reset;
+		status = "disabled";
+	};
+
+	xgmac2: ethernet@c800000 {
+		compatible = "snps,dwxgmac-2.10", "snps,dwxgmac";
+		reg = <0x0 0xc800000 0x0 0x3180>,
+		      <0x0 0xc040000 0x0 0x7c0000>;
+		reg-names = "gmac", "xpcs";
+		interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq", "xpcs_irq";
+		snps,multicast-filter-bins = <256>;
+		snps,perfect-filter-entries = <128>;
+		rx-fifo-depth = <16384>;
+		tx-fifo-depth = <16384>;
+		snps,pbl = <32>;
+		//max-frame-size = <3800>;
+		snps,axi-config = <&stmmac_axi_config>;
+		clocks = <&eth_clk>;
+		clock-names = "stmmaceth";
+		phy-mode = "xgmii";
+		snps,apbxpcs;
+		snps,xpcs_skip_reset;
+		status = "disabled";
+	};
+
+	xgmac3: ethernet@d800000 {
+		compatible = "snps,dwxgmac-2.10", "snps,dwxgmac";
+		reg = <0x0 0xd800000 0x0 0x3180>,
+		      <0x0 0xd040000 0x0 0x7c0000>;
+		reg-names = "gmac", "xpcs";
+		interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 149 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq", "xpcs_irq";
+		snps,multicast-filter-bins = <256>;
+		snps,perfect-filter-entries = <128>;
+		rx-fifo-depth = <16384>;
+		tx-fifo-depth = <16384>;
+		snps,pbl = <32>;
+		//max-frame-size = <3800>;
+		snps,axi-config = <&stmmac_axi_config>;
+		clocks = <&eth_clk>;
+		clock-names = "stmmaceth";
+		phy-mode = "xgmii";
+		//managed = "in-band-status";
+		snps,apbxpcs;
+		snps,xpcs_skip_reset;
+		status = "disabled";
+	};
+};

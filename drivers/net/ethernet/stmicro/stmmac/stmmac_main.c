@@ -1003,6 +1003,9 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 		case SPEED_2500:
 			ctrl |= priv->hw->link.xgmii.speed2500;
 			break;
+		case SPEED_1000:
+			ctrl |= priv->hw->link.speed1000;
+			break;
 		default:
 			return;
 		}
@@ -7106,7 +7109,7 @@ static int stmmac_apbxpcs_setup(struct stmmac_priv *priv)
 {
 
 	priv->hw->xpcs = xpcs_create(priv->xpcs_addr, priv->plat->interface,
-					priv->plat->xpcs_skip_reset);
+					priv->plat->xpcs_skip_reset, priv->xpcs_irq);
 
 	if (IS_ERR_OR_NULL(priv->hw->xpcs)) {
 		dev_warn(priv->device, "Cannot create XPCS");

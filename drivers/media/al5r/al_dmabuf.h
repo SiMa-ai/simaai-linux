@@ -8,7 +8,7 @@
 #include "al_alloc.h"
 
 struct al5_buffer_info {
-	u32 bus_address;
+	dma_addr_t bus_address;
 	u32 size;
 };
 

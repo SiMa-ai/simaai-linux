@@ -1,0 +1,364 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+* Copyright (c) 2024 SiMa ai
+*/
+
+/ {
+	arteris@ff20000{
+		compatible="arteris,flex-noc";
+		reg = <0x0 0xff20000 0x8000>;
+
+		transaction-probes {
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			prb_apu_cfg_dat_trn: prb_apu_cfg_dat_trn@ff24000{
+				reg = <0xff24000 0x2a0>;
+				probe-id= <0>;
+				num-counters = <10>;
+				label="apu_cfg_dat_trn";
+				profiler {
+					reg = <0xff27A00 0x7C>;
+					observed-sel-cnt = <2>;
+				};
+				filters {
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <3>;
+					flt@ff21f80{
+						reg = <0xFF21F80 0x34>;
+						flt-id = <2>;
+						label="apu_noc_gic_axi";
+					};
+					flt@ff22000{
+						reg = <0xFF22000 0x34>;
+						flt-id = <0>;
+						label="apu_noc_axi0";
+					};
+					flt@ff22080{
+						reg = <0xFF22080 0x34>;
+						flt-id = <1>;
+						label="apu_noc_axi1";
+					};
+				};
+			};
+			prb_bsu_nvs_trn:prb_bsu_nvs_trn@ff24800{
+				reg = <0xff24800 0x2a0>;
+				probe-id = <1>;
+				num-counters = <10>;
+				label = "prb_bsu_nvs_trn";
+				profiler{
+					reg = <0xff27a80 0x7c>;
+					observed-sel-cnt = <2>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <3>;
+					flt@ff22a00{
+						reg = <0xFF22a00 0x34>;
+						flt-id = <0>;
+						label = "nvs_noc_dma_axi";
+					};
+					flt@ff22a80{
+						reg = <0xFF22a80 0x34>;
+						flt-id = <1>;
+						label = "nvs_noc_emmc_axi";
+					};
+					flt@ff22b00{
+						reg = <0xFF22b00 0x34>;
+						flt-id = <2>;
+						label = "nvs_noc_sdio_axi";
+					};
+				};
+			};
+			prb_cvu_trn:prb_cvu_trn@ff24c00{
+				reg = <0xff24c00 0x2a0>;
+				probe-id = <2>;
+				num-counters = <10>;
+				label = "prb_cvu_trn";
+				profiler{
+					reg = <0xff27b00 0x7c>;
+					observed-sel-cnt = <2>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <6>;
+					flt@ff22700{
+						reg = <0xFF22700 0x34>;
+						flt-id = <0>;
+						label = "cvu_noc_cbu_axi";
+					};
+					flt@ff22780{
+						reg = <0xFF22780 0x34>;
+						flt-id = <1>;
+						label = "cvu_noc_lbu_axi";
+					};
+					flt@ff22100{
+						reg = <0xFF22100 0x34>;
+						flt-id = <2>;
+						label = "cvu_noc_stu0_axi";
+					};
+					flt@ff22180{
+						reg = <0xFF22180 0x34>;
+						flt-id = <3>;
+						label = "cvu_noc_stu1_axi";
+					};
+					flt@ff22200{
+						reg = <0xFF22200 0x34>;
+						flt-id = <4>;
+						label = "cvu_noc_stu2_axi";
+					};
+					flt@ff22280{
+						reg = <0xFF22280 0x34>;
+						flt-id = <5>;
+						label = "cvu_noc_stu3_axi";
+					};
+				};
+			};
+			prb_eth_trn:prb_eth_trn@ff26000{
+				reg = <0xff26000 0x250>;
+				probe-id = <3>;
+				num-counters = <5>;
+				label = "prb_eth_trn";
+				profiler{
+					reg = <0xff27b80 0x7c>;
+					observed-sel-cnt = <1>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <4>;
+					flt@ff22800{
+						reg = <0xFF22800 0x34>;
+						flt-id = <0>;
+						label = "eth_noc_axi0";
+					};
+					flt@ff22880{
+						reg = <0xFF22880 0x34>;
+						flt-id = <1>;
+						label = "eth_noc_axi1";
+					};
+					flt@ff22900{
+						reg = <0xFF22900 0x34>;
+						flt-id = <2>;
+						label = "eth_noc_axi2";
+					};
+					flt@ff22980{
+						reg = <0xFF22980 0x34>;
+						flt-id = <3>;
+						label = "eth_noc_axi3";
+					};
+				};
+			};
+			prb_isp_trn:prb_isp_trn@ff25000{
+				reg = <0xff25000 0x2a0>;
+				probe-id = <4>;
+				num-counters = <10>;
+				label = "prb_isp_trn";
+				profiler{
+					reg = <0xff27c00 0x7c>;
+					observed-sel-cnt = <2>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <2>;
+					flt@ff22300{
+						reg = <0xFF22300 0x34>;
+						flt-id = <0>;
+						label = "isp_noc_in_axi";
+					};
+					flt@ff22380{
+						reg = <0xFF22380 0x34>;
+						flt-id = <1>;
+						label = "isp_noc_out_axi";
+					};
+				};
+			};
+			prb_mla_dma_trn:prb_mla_dma_trn@ff25400{
+				reg = <0xff25400 0x2a0>;
+				probe-id = <5>;
+				num-counters = <10>;
+				label = "prb_mla_dma_trn";
+				profiler{
+					reg = <0xff27c80 0x7c>;
+					observed-sel-cnt = <2>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <6>;
+					flt@FF22400{
+						reg = <0xFF22400 0x34>;
+						flt-id = <0>;
+						label = "mla_noc_dma_axi0";
+					};
+					flt@ff22480{
+						reg = <0xFF22480 0x34>;
+						flt-id = <1>;
+						label = "mla_noc_dma_axi1";
+					};
+					flt@ff22500{
+						reg = <0xff22500 0x34>;
+						flt-id = <2>;
+						label = "mla_noc_dma_axi2";
+					};
+					flt@ff22580{
+						reg = <0xff22580 0x34>;
+						flt-id = <3>;
+						label = "mla_noc_dma_axi3";
+					};
+					flt@ff22600{
+						reg = <0xff22600 0x34>;
+						flt-id = <4>;
+						label = "mla_noc_mim_axi0";
+					};
+					flt@ff22680{
+						reg = <0xff22680 0x34>;
+						flt-id = <5>;
+						label = "mla_noc_mim_axi1";
+					};
+				};
+			};
+			prb_pnoc_trn:prb_pnoc_trn@ff26400{
+				reg = <0xff26400 0x2a0>;
+				probe-id = <6>;
+				num-counters = <10>;
+				label = "prb_pnoc_trn";
+				profiler{
+					reg = <0xff27d00 0x7c>;
+					observed-sel-cnt = <2>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <2>;
+					flt@ff22b80{
+						reg = <0xFF22B80 0x34>;
+						flt-id = <0>;
+						label = "pnoc_noc_nsp0";
+					};
+					flt@ff22c00{
+						reg = <0xFF22c00 0x34>;
+						flt-id = <1>;
+						label = "pnoc_noc_nsp1";
+					};
+				};
+			};
+			prb_sdma_trn:prb_sdma_trn@ff26800{
+				reg = <0xff26800 0x2a0>;
+				probe-id = <7>;
+				num-counters = <10>;
+				label = "prb_sdma_trn";
+				profiler{
+					reg = <0xff27d80 0x7c>;
+					observed-sel-cnt = <2>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <4>;
+					flt@ff22c80{
+						reg = <0xFF22c80 0x34>;
+						flt-id = <0>;
+						label = "sdma0_noc_axi0";
+					};
+					flt@ff22d00{
+						reg = <0xFF22d00 0x34>;
+						flt-id = <1>;
+						label = "sdma0_noc_axi1";
+					};
+					flt@ff22d80{
+						reg = <0xFF22d80 0x34>;
+						flt-id = <2>;
+						label = "sdma1_noc_axi0";
+					};
+					flt@ff22e80{
+						reg = <0xFF22e80 0x34>;
+						flt-id = <3>;
+						label = "sdma1_noc_axi1";
+					};
+				};
+			};
+			prb_vdec_trn:prb_vdec_trn@ff26c00{
+				reg = <0xff26c00 0x250>;
+				probe-id = <8>;
+				num-counters = <5>;
+				label = "prb_vdec_trn";
+				profiler{
+					reg = <0xff27e00 0x7c>;
+					observed-sel-cnt = <1>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <1>;
+					flt@ff22e00{
+						reg = <0xFF22e00 0x34>;
+						flt-id = <0>;
+						label = "vdec_noc_axi";
+					};
+				};
+			};
+			prb_venc_trn:prb_venc_trn@ff27000{
+				reg = <0xff27000 0x250>;
+				probe-id = <9>;
+				num-counters = <5>;
+				label = "prb_venc_trn";
+				profiler{
+					reg = <0xff27e00 0x7c>;
+					observed-sel-cnt = <1>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <1>;
+					flt@ff22f00{
+						reg = <0xFF22f00 0x34>;
+						flt-id = <0>;
+						label = "venc_noc_axi";
+					};
+				};
+			};
+			prb_vis_trn:prb_vis_trn@ff27400{
+				reg = <0xff27400 0x250>;
+				probe-id = <10>;
+				num-counters = <5>;
+				label = "prb_vis_trn";
+				profiler{
+					reg = <0xff27f00 0x7c>;
+					observed-sel-cnt = <1>;
+				};
+				filters{
+					#address-cells = <1>;
+					#size-cells = <1>;
+					flt-cnt = <4>;
+					flt@ff23000{
+						reg = <0xFF23000 0x34>;
+						flt-id = <0>;
+						label = "vis_noc_dma_axi0";
+					};
+					flt@ff23080{
+						reg = <0xFF23080 0x34>;
+						flt-id = <1>;
+						label = "vis_noc_dma_axi1";
+					};
+					flt@ff23100{
+						reg = <0xFF23100 0x34>;
+						flt-id = <2>;
+						label = "vis_noc_dma_axi2";
+					};
+					flt@ff23180{
+						reg = <0xFF23180 0x34>;
+						flt-id = <3>;
+						label = "vis_noc_dma_axi3";
+					};
+				};
+			};
+
+		};
+	};
+
+};

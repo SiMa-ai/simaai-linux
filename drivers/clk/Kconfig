@@ -164,6 +164,17 @@ config COMMON_CLK_SI570
 	  This driver supports Silicon Labs 570/571/598/599 programmable
 	  clock generators.
 
+config COMMON_CLK_SIMAAI_SIODIV
+	tristate "Clock driver for SiMa.ai SIO clock divider"
+	depends on OF
+	depends on HAS_IOMEM
+	depends on ARCH_SIMAAI || COMPILE_TEST
+	help
+	  This enables the SIO (Low Speed CMOS Input Output) clock driver
+	  for SiMa.ai Inc Modalix SoCs. Say Y if you want to control clock
+	  provided by SIO for SPI, UART, I2C.
+	  When clock is not used, driver disables it.
+
 config COMMON_CLK_BM1880
 	bool "Clock driver for Bitmain BM1880 SoC"
 	depends on ARCH_BITMAIN || COMPILE_TEST

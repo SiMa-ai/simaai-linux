@@ -215,6 +215,7 @@ menu "Media controller options"
 	visible if MEDIA_CONTROLLER
 
 source "drivers/media/mc/Kconfig"
+source "drivers/media/isp/Kconfig"
 endmenu
 
 menu "Digital TV options"

@@ -801,6 +801,14 @@ config DMATEST
 	  Simple DMA test client. Say N unless you're debugging a
 	  DMA Device driver.
 
+config DMATEST_SIMA
+        tristate "sima's SDMA Test client"
+        depends on DMA_ENGINE
+        select DMA_ENGINE_RAID
+        help
+          Sima's DMA test client. Say N unless you're debugging a
+          DMA Device driver
+
 config DMA_ENGINE_RAID
 	bool
 

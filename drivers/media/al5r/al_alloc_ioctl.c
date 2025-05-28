@@ -98,9 +98,7 @@ int al5_ioctl_get_dma_mmap(struct device *dev, struct al5r_codec_chan *chan,
 		return -ENOMEM;
 	/* offset for mmap needs to be a multiple of page size */
 	info.fd = info.fd << PAGE_SHIFT;
-
-	info.phy_addr = (__u32)(buf->dma_handle - dma_offset);
-
+	info.phy_addr = (__u64)(buf->dma_handle - dma_offset);
 	pr_info("allocated buffer cpu: %p, phy:%d, offset:%d\n", buf->cpu_handle,
 		info.phy_addr, info.fd);
 

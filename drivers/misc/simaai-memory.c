@@ -8,6 +8,7 @@
 #include <linux/cdev.h>
 #include <linux/dma-map-ops.h>
 #include <linux/dma-mapping.h>
+#include <linux/dmaengine.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -18,7 +19,11 @@
 #include <uapi/linux/simaai/simaai_memory_ioctl.h>
 #include <linux/of_reserved_mem.h>
 
+#include <linux/simaai-stu.h>
+#include <linux/simaai-memcpy.h>
+
 #define SIMAAI_MEMOERY_DEV_NAME "simaai-mem"
+
 
 struct simaai_memory_buffer {
 	struct device		*dev;
@@ -52,6 +57,10 @@ struct simaai_memdev {
 	u32			target;
 	struct device		*dev;
 	struct list_head	node;
+
+	/* simaai stu driver handle */
+	struct simaai_stu *stu;
+
 };
 
 struct simaai_memory_device {
@@ -323,10 +332,10 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 	struct simaai_alloc_args aargs;
 	struct simaai_free_args fargs;
 	struct simaai_memory_info info;
+	struct simaai_memcpy_args cp_args;
 	long ret;
 	u32 buffer_size = 0;
 	unsigned int iter = 0;
-
 	switch (cmd) {
 	case SIMAAI_IOC_MEM_ALLOC_COHERENT:
 		if (copy_from_user(&aargs, argp, sizeof(aargs)))
@@ -339,6 +348,7 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 				break;
 			}
 		}
+
 		mutex_unlock(&dev_lock);
 		if (dev == NULL)
 			return -EINVAL;
@@ -356,6 +366,17 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 			dev_err(dev, "Could not allocate buffer\n");
 			return -ENOMEM;
 		}
+
+		if (cur->stu) {
+			int res = simaai_stu_get_bus_address(cur->stu, buffer->phys_addr,
+						&buffer->bus_addr);
+			if (res != 0) {
+				dev_err(dev, "Error getting Bus address\n");
+				simaai_free_buffer(buffer->phys_addr);
+				return -EFAULT;
+			}
+		}
+
 		aargs.aligned_size = buffer->aligned_size;
 		aargs.phys_addr[0] = buffer->phys_addr;
 		aargs.bus_addr[0] = buffer->bus_addr;
@@ -374,7 +395,16 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 				free_segment_buffers(filp, &aargs, iter);
 				return -ENOMEM;
 			}
-								
+
+			if (cur->stu) {
+			  int res = simaai_stu_get_bus_address(cur->stu, child->phys_addr,
+							       &child->bus_addr);
+			  if (res != 0) {
+			    dev_err(dev, "Error getting Child Bus address\n");
+			    simaai_free_buffer(child->phys_addr);
+			    return -EFAULT;
+			  }
+			}
 			child->parent = buffer;
 			kref_get(&child->parent->refcount);
 			aargs.aligned_size = child->aligned_size;
@@ -431,6 +461,17 @@ static long simaai_memory_dev_ioctl(struct file *filp, unsigned int cmd,
 		if (copy_to_user(argp, &info, sizeof(info)))
 			return -EFAULT;
 		break;
+
+	case SIMAAI_IOC_MEMCPY:
+		if (copy_from_user(&cp_args, argp, sizeof(cp_args)))
+			return -EFAULT;
+
+		ret = simaai_sdma_memcpy(&cp_args);
+		if(ret != 0)
+			return ret;
+
+		break;
+
 	default:
 		pr_info("simaai-mem: Bad ioctl number\n");
 		return -EINVAL;
@@ -477,28 +518,55 @@ static int simaai_memory_dev_mmap(struct file *filp, struct vm_area_struct *vma)
 ssize_t simaai_memory_dev_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 {
 	char header [] = "| Physical address |      Parent      | #Ref |       Size       | Target |   Owner   |\n";
+	char line [sizeof(header)];
 	int line_length = sizeof(header);
-	int l;
+	int l, total_count = 0;
 	ssize_t total = 0;
+	unsigned long long total_size = 0;
 	struct simaai_memory_buffer *buffer;
 	struct radix_tree_iter iter;
 	unsigned long index = 0;
 	void __rcu **slot;
-	loff_t offset;
+	loff_t offset = 0;
 
+	mutex_lock(&simaaimem.buffer_lock);
 	if (*f_pos < line_length) {
+		radix_tree_for_each_slot(slot, &simaaimem.buffer_root, &iter, index) {
+			buffer = *((struct simaai_memory_buffer **)slot);
+			if(!buffer->parent) {
+				total_size += buffer->size;
+				total_count++;
+			}
+		}
 		l = line_length - *f_pos;
 		if (l > count)
 			l = count;
-		if (copy_to_user(&buf[total], &header[*f_pos], l))
+		sprintf(line, "| Total buffers allocated: %*d | Total allocated size: 0x%010llx           |\n",
+			10, total_count, total_size);
+		if (copy_to_user(&buf[total], &line[*f_pos], l)) {
+			mutex_unlock(&simaaimem.buffer_lock);
 			return -EFAULT;
+		}
 		*f_pos += l;
 		total += l;
 		count -= l;
 		offset += line_length;
 	}
 
-	mutex_lock(&simaaimem.buffer_lock);
+	if (*f_pos < line_length * 2) {
+		l = 2 * line_length - *f_pos;
+		if (l > count)
+			l = count;
+		if (copy_to_user(&buf[total], &header[*f_pos - line_length], l)) {
+			mutex_unlock(&simaaimem.buffer_lock);
+			return -EFAULT;
+		}
+		*f_pos += l;
+		total += l;
+		count -= l;
+		offset += line_length;
+	}
+
 	radix_tree_for_each_slot(slot, &simaaimem.buffer_root, &iter, index) {
 		l = line_length - (*f_pos % line_length);
 		l = l < count ? l : count;
@@ -506,11 +574,13 @@ ssize_t simaai_memory_dev_read(struct file *filp, char *buf, size_t count, loff_
 		if(*f_pos > offset)
 			continue;
 		buffer = *((struct simaai_memory_buffer **)slot);
-		sprintf(header, "|   0x%010llx   |   0x%010llx   |  %*d  |   0x%010lx   |   %*d   | %*d |\n",
+		sprintf(line, "|   0x%010llx   |   0x%010llx   |  %*d  |   0x%010lx   |   %*d   | %*d |\n",
 			buffer->phys_addr, (buffer->parent) ? (buffer->parent->phys_addr) : 0, 2,
 			kref_read(&buffer->refcount), buffer->size, 2, buffer->target, 9, buffer->owner);
-		if (copy_to_user(&buf[total], &header[*f_pos % line_length], l))
+		if (copy_to_user(&buf[total], &line[*f_pos % line_length], l)) {
+			mutex_unlock(&simaaimem.buffer_lock);
 			return -EFAULT;
+		}
 		*f_pos += l;
 		total += l;
 		count -= l;
@@ -599,6 +669,7 @@ static int simaai_memory_probe(struct platform_device *pdev)
 		dev_warn(dev, "Could not obtain simaai,target property\n");
 	}
 
+
 	ret = of_reserved_mem_device_init(dev);
 	if(ret) {
 		dev_err(dev, "Could not get reserved memory\n");
@@ -607,12 +678,21 @@ static int simaai_memory_probe(struct platform_device *pdev)
 
 	memdev->target = target;
 
-	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+	memdev->stu = simaai_stu_get_by_phandle(dev->of_node, "simaai,stu");
+	if (IS_ERR(memdev->stu)) {
+		if (PTR_ERR(memdev->stu) != -EPROBE_DEFER)
+			memdev->stu = NULL;
+		else
+			return PTR_ERR(memdev->stu);
+	} else
+		dev_info(dev, "Success getting STU handle\n");
+
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
 	if (ret) {
 		dev_err(dev, "Could not set DMA mask: %d\n", ret);
 		return ret;
 	}
-
+	memdev->target = target;
 	mutex_lock(&dev_lock);
 	if (!simaaimem.exist) {
 		INIT_LIST_HEAD(&simaaimem.dev_head);
@@ -622,19 +702,19 @@ static int simaai_memory_probe(struct platform_device *pdev)
 		if (!ret)
 			simaaimem.exist = true;
 	}
+
 	if (!ret)
 		list_add(&memdev->node, &simaaimem.dev_head);
 	mutex_unlock(&dev_lock);
-	
+
 	if (ret) {
 		dev_err(dev, "Could not create character device %s\n",
-			SIMAAI_MEMOERY_DEV_NAME);
+				SIMAAI_MEMOERY_DEV_NAME);
 		return ret;
 	}
 
 	platform_set_drvdata(pdev, memdev);
 	dev_info(dev, "Registered memory %s\n", of_node_full_name(dev->of_node));
-
 	return 0;
 }
 

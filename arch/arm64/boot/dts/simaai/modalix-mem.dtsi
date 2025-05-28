@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024,2025 SiMa ai
+ */
+
+/ {
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		cma_reserved: linux,cma {
+			compatible = "shared-dma-pool";
+			reusable;
+			linux,cma-default;
+			reg = <0x00000012 0x00000000 0x00000000 0x6FC00000>;
+		};
+
+		ev_vdev0vring0: vdev0vring0@EFFF4000 {
+			reg = <0x0 0xEFFF4000 0x0 0x2000>;
+			no-map;
+		};
+
+		ev_vdev0vring1: vdev0vring1@EFFF6000 {
+			reg = <0x0 0xEFFF6000 0x0 0x2000>;
+			no-map;
+		};
+
+		ev_vdev0buffer: vdev0buffer@126FFF8000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00000012 0x6FFF8000 0x00000000 0x8000>;
+			no-map;
+			alignment = <0x1000>;
+		};
+
+		evmem_rsvd: evmem@F0000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x0 0xF0000000 0x0 0x4000000>;
+			no-map;
+			simaai,skip-memset-in-alloc;
+		};
+
+		ocm_reserved: ocm@0 {
+                compatible = "shared-dma-pool";
+                no-map;
+                simaai,skip-memset-in-alloc;
+                reg = <0x0 0x0 0x0 0x600000>;
+		};
+
+		dms0_reserved: dms@0x1400000000 {
+			compatible = "shared-dma-pool";
+			no-map;
+			simaai,skip-memset-in-alloc;
+			reg = <0x00000014 0x00000000 0x00000008 0x00000000>;
+		};
+
+		ocm_pcie_reserved: ocm@600000 {
+			compatible = "simaai,shared-pcie-ocm";
+			no-map;
+			reg = <0x0 0x600000 0x0 0x200000>;
+		};
+
+                vid_reserved: vid@0x1280000000 {
+                      compatible = "shared-dma-pool";
+                      no-map;
+                      reg = <0x12 0x80000000 0x0 0x80000000>;
+                 };
+	};
+
+	simaai,memcpy-manager {
+		compatible = "simaai,memcpy-manager";
+		dmas = <&dmac1 0>,<&dmac0 0>,<&dmac1 1>,<&dmac0 1>,
+		     <&dmac1 2>,<&dmac0 2>,<&dmac1 3>,<&dmac0 3>;
+		dma-names = "ch0","ch1","ch2","ch3",
+			"ch4","ch5","ch6","ch7";
+		status = "okay";
+	};
+
+	simaai,memory-manager {
+		compatible = "simaai,memory-manager";
+		memory-region = <&cma_reserved>;
+		simaai,stu = <&evxx_stu>;
+		simaai,target = <0>;
+		status = "okay";
+	};
+
+	simaai,ocm-manager {
+		compatible = "simaai,memory-manager";
+		memory-region = <&ocm_reserved>;
+		simaai,target = <1>;
+		status = "okay";
+	};
+
+	simaai,dms0-manager {
+		compatible = "simaai,memory-manager";
+		memory-region = <&dms0_reserved>;
+		simaai,target = <2>;
+		status = "okay";
+	};
+
+	dms0_0: memory-controller@10000000 {
+		compatible = "simaai,ddrc-5.110";
+		reg = <0x0 0x10010000 0x0 0x20034>,  // DDRC
+			<0x0 0x12040000 0x0 0x8000>;  // PHY
+		reg-names = "ddrc", "phy";
+		interrupts = <GIC_SPI 157 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+
+	dms0_1: memory-controller@11000000 {
+		compatible = "simaai,ddrc-5.110";
+		reg = <0x0 0x11010000 0x0 0x20034>,  // DDRC
+			<0x0 0x12048000 0x0 0x8000>;  // PHY
+		reg-names = "ddrc", "phy";
+		interrupts = <GIC_SPI 158 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+
+	dms1_0: memory-controller@14000000 {
+		compatible = "simaai,ddrc-5.110";
+		reg = <0x0 0x14010000 0x0 0x20034>,  // DDRC
+			<0x0 0x16040000 0x0 0x8000>;  // PHY
+		reg-names = "ddrc", "phy";
+		interrupts = <GIC_SPI 170 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+
+	dms1_1: memory-controller@15000000 {
+		compatible = "simaai,ddrc-5.110";
+		reg = <0x0 0x15010000 0x0 0x20034>,  // DDRC
+			<0x0 0x16048000 0x0 0x8000>;  // PHY
+		reg-names = "ddrc", "phy";
+		interrupts = <GIC_SPI 171 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+
+	dms2_0: memory-controller@18000000 {
+		compatible = "simaai,ddrc-5.110";
+		reg = <0x0 0x18010000 0x0 0x20034>,  // DDRC
+			<0x0 0x1a040000 0x0 0x8000>;  // PHY
+		reg-names = "ddrc", "phy";
+		interrupts = <GIC_SPI 183 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+
+	dms2_1: memory-controller@19000000 {
+		compatible = "simaai,ddrc-5.110";
+		reg = <0x0 0x19010000 0x0 0x20034>,  // DDRC
+			<0x0 0x1a048000 0x0 0x8000>;  // PHY
+		reg-names = "ddrc", "phy";
+		interrupts = <GIC_SPI 184 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+
+	dms3_0: memory-controller@1c000000 {
+		compatible = "simaai,ddrc-5.110";
+		reg = <0x0 0x1c010000 0x0 0x20034>,  // DDRC
+			<0x0 0x1e040000 0x0 0x8000>;  // PHY
+		reg-names = "ddrc", "phy";
+		interrupts = <GIC_SPI 196 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+
+	dms3_1: memory-controller@1d000000 {
+		compatible = "simaai,ddrc-5.110";
+		reg = <0x0 0x1d010000 0x0 0x20034>,  // DDRC
+			<0x0 0x1e048000 0x0 0x8000>;  // PHY
+		reg-names = "ddrc", "phy";
+		interrupts = <GIC_SPI 197 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+};

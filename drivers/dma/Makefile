@@ -88,3 +88,5 @@ obj-y += mediatek/
 obj-y += qcom/
 obj-y += ti/
 obj-y += xilinx/
+#sima dmatest
+obj-$(CONFIG_DMATEST_SIMA) += dmatest_sima.o

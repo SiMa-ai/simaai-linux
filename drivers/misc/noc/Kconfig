@@ -1,0 +1,5 @@
+config SIMAAI_NOC
+       tristate"SiMa.ai Modalix family NoC controller support"
+       default n
+       help
+	This option enables Arteris Flex-NoC control on Modalix family devices

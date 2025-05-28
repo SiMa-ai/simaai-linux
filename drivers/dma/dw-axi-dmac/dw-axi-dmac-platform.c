@@ -32,6 +32,9 @@
 #include "../dmaengine.h"
 #include "../virt-dma.h"
 
+struct axi_dma_desc *writeback_desc = NULL;
+struct axi_dma_desc *shadow_reg_desc = NULL;
+void shadow_reg_work(void);
 /*
  * The set of bus widths supported by the DMA controller. DW AXI DMAC supports
  * master data bus width up to 512 bits (for both AXI master interfaces), but
@@ -57,6 +60,11 @@ static inline u32 axi_dma_ioread32(struct axi_dma_chip *chip, u32 reg)
 	return ioread32(chip->regs + reg);
 }
 
+static inline u64 axi_dma_ioread64(struct axi_dma_chip *chip, u32 reg)
+{
+	return ioread64(chip->regs + reg);
+}
+
 static inline void
 axi_chan_iowrite32(struct axi_dma_chan *chan, u32 reg, u32 val)
 {
@@ -66,6 +74,11 @@ axi_chan_iowrite32(struct axi_dma_chan *chan, u32 reg, u32 val)
 static inline u32 axi_chan_ioread32(struct axi_dma_chan *chan, u32 reg)
 {
 	return ioread32(chan->chan_regs + reg);
+}
+
+static inline u64 axi_chan_ioread64(struct axi_dma_chan *chan, u32 reg)
+{
+	return ioread64(chan->chan_regs + reg);
 }
 
 static inline void
@@ -85,14 +98,16 @@ static inline void axi_chan_config_write(struct axi_dma_chan *chan,
 	u32 cfg_lo, cfg_hi;
 
 	cfg_lo = (config->dst_multblk_type << CH_CFG_L_DST_MULTBLK_TYPE_POS |
-		  config->src_multblk_type << CH_CFG_L_SRC_MULTBLK_TYPE_POS);
+				config->src_multblk_type << CH_CFG_L_SRC_MULTBLK_TYPE_POS | 
+				config->wr_uid << CH_CFG_L_WR_UID_POS);
 	if (chan->chip->dw->hdata->reg_map_8_channels) {
 		cfg_hi = config->tt_fc << CH_CFG_H_TT_FC_POS |
 			 config->hs_sel_src << CH_CFG_H_HS_SEL_SRC_POS |
 			 config->hs_sel_dst << CH_CFG_H_HS_SEL_DST_POS |
 			 config->src_per << CH_CFG_H_SRC_PER_POS |
 			 config->dst_per << CH_CFG_H_DST_PER_POS |
-			 config->prior << CH_CFG_H_PRIORITY_POS;
+			 config->prior << CH_CFG_H_PRIORITY_POS |
+			 config->dst_osr_limit << CH_CFG_H_DST_OSR_LIMIT_POS;
 	} else {
 		cfg_lo |= config->src_per << CH_CFG2_L_SRC_PER_POS |
 			  config->dst_per << CH_CFG2_L_DST_PER_POS;
@@ -101,6 +116,7 @@ static inline void axi_chan_config_write(struct axi_dma_chan *chan,
 			 config->hs_sel_dst << CH_CFG2_H_HS_SEL_DST_POS |
 			 config->prior << CH_CFG2_H_PRIORITY_POS;
 	}
+	cfg_hi |= (0xf << CH_CFG_H_SRC_OSR_LIMIT_POS) | (0xf << CH_CFG_H_DST_OSR_LIMIT_POS);
 	axi_chan_iowrite32(chan, CH_CFG_L, cfg_lo);
 	axi_chan_iowrite32(chan, CH_CFG_H, cfg_hi);
 }
@@ -154,24 +170,24 @@ static inline void axi_chan_irq_disable(struct axi_dma_chan *chan, u32 irq_mask)
 	}
 }
 
-static inline void axi_chan_irq_set(struct axi_dma_chan *chan, u32 irq_mask)
+static inline void axi_chan_irq_set(struct axi_dma_chan *chan, u64 irq_mask)
 {
-	axi_chan_iowrite32(chan, CH_INTSTATUS_ENA, irq_mask);
+	axi_chan_iowrite64(chan, CH_INTSTATUS_ENA, irq_mask);
 }
 
-static inline void axi_chan_irq_sig_set(struct axi_dma_chan *chan, u32 irq_mask)
+static inline void axi_chan_irq_sig_set(struct axi_dma_chan *chan, u64 irq_mask)
 {
-	axi_chan_iowrite32(chan, CH_INTSIGNAL_ENA, irq_mask);
+	axi_chan_iowrite64(chan, CH_INTSIGNAL_ENA, irq_mask);
 }
 
-static inline void axi_chan_irq_clear(struct axi_dma_chan *chan, u32 irq_mask)
+static inline void axi_chan_irq_clear(struct axi_dma_chan *chan, u64 irq_mask)
 {
-	axi_chan_iowrite32(chan, CH_INTCLEAR, irq_mask);
+	axi_chan_iowrite64(chan, CH_INTCLEAR, irq_mask);
 }
 
-static inline u32 axi_chan_irq_read(struct axi_dma_chan *chan)
+static inline u64 axi_chan_irq_read(struct axi_dma_chan *chan)
 {
-	return axi_chan_ioread32(chan, CH_INTSTATUS);
+	return axi_chan_ioread64(chan, CH_INTSTATUS);
 }
 
 static inline void axi_chan_disable(struct axi_dma_chan *chan)
@@ -254,6 +270,8 @@ static struct axi_dma_desc *axi_desc_alloc(u32 num)
 		return NULL;
 	}
 
+	INIT_LIST_HEAD(&desc->node);
+
 	return desc;
 }
 
@@ -296,9 +314,37 @@ static void axi_desc_put(struct axi_dma_desc *desc)
 		atomic_read(&chan->descs_allocated));
 }
 
+static void axi_vdesc_put(struct axi_dma_desc *desc)
+{
+	struct axi_dma_chan *chan = desc->chan;
+	struct axi_dma_hw_desc *hw_desc;
+
+	hw_desc = &desc->hw_desc[0];
+	dma_pool_free(chan->desc_pool, hw_desc->lli, hw_desc->llp);
+
+	atomic_sub(1, &chan->descs_allocated);
+	dev_dbg(chan2dev(chan), "%s: desc %#llx deleted\n", axi_chan_name(chan), hw_desc->lli);
+
+	list_del(&desc->node);
+	kfree(desc->hw_desc);
+	kfree(desc);
+}
+
 static void vchan_desc_put(struct virt_dma_desc *vdesc)
 {
-	axi_desc_put(vd_to_axi_desc(vdesc));
+	struct axi_dma_desc *desc = vd_to_axi_desc(vdesc);
+	struct axi_dma_chan *chan = NULL;
+
+	if(!desc)
+		return;
+
+	chan = desc->chan;
+
+	if(chan->is_video_mode) {
+		axi_vdesc_put(desc);
+	} else {
+		axi_desc_put(desc);
+	}
 }
 
 static enum dma_status
@@ -408,24 +454,58 @@ static int get_next_hwdesc_number(struct axi_dma_desc *dma_desc)
 	return -1;
 }
 
+static void axi_chan_dump_lli(struct axi_dma_chan *chan,
+			      struct axi_dma_hw_desc *desc)
+{
+	if (!desc->lli) {
+		dev_err(dchan2dev(&chan->vc.chan), "LLI is empty\n");
+		return;
+	}
+
+	dev_info(dchan2dev(&chan->vc.chan), "SAR: 0x%llx DAR: 0x%llx LLP: 0x%llx BTS 0x%x "
+		"CTL: 0x%x:%08x SSTAT: %#x DSTAT: %#x STATUS: %#x:%08x",
+		le64_to_cpu(desc->lli->sar), le64_to_cpu(desc->lli->dar), le64_to_cpu(desc->lli->llp),
+		le32_to_cpu(desc->lli->block_ts_lo), le32_to_cpu(desc->lli->ctl_hi),
+		le32_to_cpu(desc->lli->ctl_lo), le32_to_cpu(desc->lli->sstat),
+		le32_to_cpu(desc->lli->dstat), le32_to_cpu(desc->lli->status_hi),
+		le32_to_cpu(desc->lli->status_lo));
+}
+
+static void axi_chan_list_dump_lli(struct axi_dma_chan *chan,
+				   struct axi_dma_desc *desc_head)
+{
+	int count = atomic_read(&chan->descs_allocated);
+	int i;
+
+	for (i = 0; i < count; i++)
+		axi_chan_dump_lli(chan, &desc_head->hw_desc[i]);
+}
+
 /* Called in chan locked context */
 static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 				      struct axi_dma_desc *first)
 {
 	u32 priority = chan->chip->dw->hdata->priority[chan->id];
 	struct axi_dma_chan_config config = {};
-	u32 irq_mask;
+	u64 irq_mask;
 	u8 lms = 0; /* Select AXI0 master for LLI fetching */
 	u32 i;
+	lms = chan->chip->dw->hdata->lms_axi_master;
 
 	if (unlikely(axi_chan_is_hw_enable(chan))) {
-		dev_err(chan2dev(chan), "%s is non-idle!\n",
+		dev_dbg(chan2dev(chan), "%s is non-idle!\n",
 			axi_chan_name(chan));
 
 		return;
 	}
 
 	axi_dma_enable(chan->chip);
+	axi_dma_irq_enable(chan->chip);
+	if (chan->is_video_mode) {
+		dev_info(chan->chip->dev, "video mode setting SSTATA");
+		axi_chan_iowrite64(chan, CH_SSTATAR, (chan->id * CH_LLI_SRC_START_ADDR) +
+			CH_SSTATAR_START_ADDR);
+	}
 
 	config.dst_multblk_type = chan->chip->dw->hdata->xfer_mode;
 	config.src_multblk_type = chan->chip->dw->hdata->xfer_mode;
@@ -452,6 +532,16 @@ static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 			config.src_per = chan->id;
 		else
 			config.src_per = chan->hw_handshake_num;
+
+		if (chan->is_video_mode) {
+			dev_info(chan->chip->dev, "hs sel tt func video mode");
+			config.hs_sel_dst = DWAXIDMAC_HS_SEL_SW;
+			config.hs_sel_src = DWAXIDMAC_HS_SEL_HW;
+			config.tt_fc = DWAXIDMAC_TT_FC_PER_TO_MEM_SRC;
+			config.src_per = chan->id;
+			config.wr_uid = CH_CFG_L_WR_UID_VAL;
+			config.dst_osr_limit = CH_CFG_H_DST_OST_LIMIT_VAL; 
+		}
 		break;
 	default:
 		break;
@@ -473,16 +563,27 @@ static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 		irq_mask = DWAXIDMAC_IRQ_BLOCK_TRF | DWAXIDMAC_IRQ_DMA_TRF | DWAXIDMAC_IRQ_ALL_ERR;
 	} else {
 		write_chan_llp(chan, first->hw_desc[0].llp | lms);
-		irq_mask = DWAXIDMAC_IRQ_DMA_TRF | DWAXIDMAC_IRQ_ALL_ERR;
+		if (chan->is_video_mode)
+			irq_mask = DWAXIDMAC_IRQ_ALL & (~DWAXIDMAC_IRQ_SRC_TRAN);
+		else
+			irq_mask = DWAXIDMAC_IRQ_DMA_TRF | DWAXIDMAC_IRQ_ALL_ERR;
 	}
 
 	axi_chan_irq_sig_set(chan, irq_mask);
 
 	/* Generate 'suspend' status but don't generate interrupt */
-	irq_mask |= DWAXIDMAC_IRQ_SUSPENDED;
+	if (chan->is_video_mode)
+		irq_mask &= (~DWAXIDMAC_IRQ_DST_TRAN);
+	else
+		irq_mask |= DWAXIDMAC_IRQ_SUSPENDED;
+
 	axi_chan_irq_set(chan, irq_mask);
 
-	axi_chan_enable(chan);
+	if (chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_SHADOW_REG)
+                axi_chan_enable(chan);
+
+        if (chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_SHADOW_REG)
+                shadow_reg_work();
 }
 
 static void axi_chan_start_first_queued(struct axi_dma_chan *chan)
@@ -574,7 +675,7 @@ static void dw_axi_dma_set_hw_channel(struct axi_dma_chan *chan, bool set)
 	unsigned long reg_value, val;
 
 	if (!chip->apb_regs) {
-		dev_err(chip->dev, "apb_regs not initialized\n");
+		dev_vdbg(chip->dev, "apb_regs not initialized\n");
 		return;
 	}
 
@@ -613,6 +714,15 @@ static void set_desc_last(struct axi_dma_hw_desc *desc)
 
 	val = le32_to_cpu(desc->lli->ctl_hi);
 	val |= CH_CTL_H_LLI_LAST;
+	desc->lli->ctl_hi = cpu_to_le32(val);
+}
+
+static void unset_desc_last(struct axi_dma_hw_desc *desc)
+{
+	u32 val;
+
+	val = le32_to_cpu(desc->lli->ctl_hi);
+	val &= ~CH_CTL_H_LLI_LAST;
 	desc->lli->ctl_hi = cpu_to_le32(val);
 }
 
@@ -678,7 +788,7 @@ static int dw_axi_dma_set_hw_desc(struct axi_dma_chan *chan,
 	switch (chan->direction) {
 	case DMA_MEM_TO_DEV:
 		reg_width = __ffs(chan->config.dst_addr_width);
-		device_addr = chan->config.dst_addr;
+		device_addr = chan->config.dst_addr & chan->chip->dw->hdata->dev_addr_mask;
 		ctllo = reg_width << CH_CTL_L_DST_WIDTH_POS |
 			mem_width << CH_CTL_L_SRC_WIDTH_POS |
 			DWAXIDMAC_CH_CTL_L_NOINC << CH_CTL_L_DST_INC_POS |
@@ -687,7 +797,7 @@ static int dw_axi_dma_set_hw_desc(struct axi_dma_chan *chan,
 		break;
 	case DMA_DEV_TO_MEM:
 		reg_width = __ffs(chan->config.src_addr_width);
-		device_addr = chan->config.src_addr;
+		device_addr = chan->config.src_addr & chan->chip->dw->hdata->dev_addr_mask;
 		ctllo = reg_width << CH_CTL_L_SRC_WIDTH_POS |
 			mem_width << CH_CTL_L_DST_WIDTH_POS |
 			DWAXIDMAC_CH_CTL_L_INC << CH_CTL_L_DST_INC_POS |
@@ -726,8 +836,8 @@ static int dw_axi_dma_set_hw_desc(struct axi_dma_chan *chan,
 
 	hw_desc->lli->block_ts_lo = cpu_to_le32(block_ts - 1);
 
-	ctllo |= DWAXIDMAC_BURST_TRANS_LEN_4 << CH_CTL_L_DST_MSIZE_POS |
-		 DWAXIDMAC_BURST_TRANS_LEN_4 << CH_CTL_L_SRC_MSIZE_POS;
+	ctllo |= DWAXIDMAC_BURST_TRANS_LEN_32 << CH_CTL_L_DST_MSIZE_POS |
+		 DWAXIDMAC_BURST_TRANS_LEN_8 << CH_CTL_L_SRC_MSIZE_POS;
 	hw_desc->lli->ctl_lo = cpu_to_le32(ctllo);
 
 	set_desc_src_master(hw_desc);
@@ -763,6 +873,115 @@ static size_t calculate_block_len(struct axi_dma_chan *chan,
 	}
 
 	return block_len;
+}
+
+static struct dma_async_tx_descriptor *
+dw_axi_dma_chan_prep_interleaved(struct dma_chan *dchan,
+									struct dma_interleaved_template *xt,
+									unsigned long flags)
+{
+	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	struct axi_dma_hw_desc *hw_desc = NULL;
+	struct axi_dma_desc *desc = NULL;
+
+	unsigned int i;
+	int status;
+	u64 llp = 0;
+	unsigned int iter = 0;
+
+	dma_addr_t device_addr;
+	size_t axi_block_ts;
+	size_t block_ts;
+	u32 ctllo, ctlhi;
+	u32 burst_len;
+	struct axi_dma_desc *desc_iter = NULL;
+	struct axi_dma_desc *prev_desc = NULL;
+
+	if (!is_slave_direction(xt->dir)) {
+		dev_err(chan->chip->dev, "slave direction is wrong\n");
+		return NULL;
+	}
+
+	if (!xt->numf || !xt->sgl[0].size) {
+		dev_err(chan->chip->dev, "Failed in numf %u and size %u\n", xt->numf, xt->sgl[0].size);
+		return NULL;
+	}
+
+	if(xt->frame_size != 1) {
+		dev_err(chan->chip->dev, "Frame size is not 1\n");
+		return NULL;
+	}
+
+	desc = axi_desc_alloc(1);
+	if (unlikely(!desc)) {
+		dev_err(chan->chip->dev, "axi desc alloc failed\n");
+		goto err_desc_get;
+	}
+
+	if (chan->desc == NULL) {
+		dev_info(chan->chip->dev, "First time init of descriptor list\n");
+		chan->desc = desc;
+	}
+
+	chan->direction = xt->dir;
+	desc->chan = chan;
+	desc->length = 0;
+	chan->is_video_mode = true;
+	hw_desc = &desc->hw_desc[0];
+
+	hw_desc->lli = axi_desc_get(chan, &hw_desc->llp);
+	if (unlikely(!hw_desc->lli))
+		return -ENOMEM;
+
+	write_desc_sar(hw_desc, (chan->id) * CH_LLI_SRC_START_ADDR);
+	write_desc_dar(hw_desc, xt->dst_start);
+
+	block_ts = (xt->sgl[0].size + FRAME_METADATA_SIZE)/8 -1;
+	hw_desc->lli->block_ts_lo = cpu_to_le32(block_ts);
+
+	ctllo =	CH_CTL_L_LAST_WRITE_EN |
+			DWAXIDMAC_BURST_TRANS_LEN_32 << CH_CTL_L_DST_MSIZE_POS |
+			DWAXIDMAC_BURST_TRANS_LEN_8 << CH_CTL_L_SRC_MSIZE_POS |
+ 			chan->chip->dw->hdata->m_data_width << CH_CTL_L_SRC_WIDTH_POS |
+			chan->chip->dw->hdata->m_data_width << CH_CTL_L_DST_WIDTH_POS |
+			DWAXIDMAC_CH_CTL_L_INC << CH_CTL_L_DST_INC_POS |
+			DWAXIDMAC_CH_CTL_L_NOINC << CH_CTL_L_SRC_INC_POS |
+			DWAXIDMAC_CH_CTL_L_MAST_2_INTF << CH_CTL_L_DST_MAST_POS |
+			DWAXIDMAC_CH_CTL_L_MAST_1_INTF << CH_CTL_L_SRC_MAST_POS;
+
+	hw_desc->lli->ctl_lo = cpu_to_le32(ctllo);
+
+	ctlhi = CH_CTL_H_LLI_VALID |
+			CH_CTL_H_IOC_BLK_TFR_EN |	
+			CH_CTL_H_SRC_STAT_EN |
+			(DWAXIDMAC_ARWLEN_32 << CH_CTL_H_AWLEN_POS) |
+			CH_CTL_H_AWLEN_EN |
+			(DWAXIDMAC_ARWLEN_8 << CH_CTL_H_ARLEN_POS) |
+			CH_CTL_H_ARLEN_EN;
+ 
+	hw_desc->lli->ctl_hi = cpu_to_le32(ctlhi);
+	desc->length += hw_desc->len;
+
+	//axi_chan_dump_lli(chan, hw_desc);
+	list_add_tail(&desc->node, &chan->desc_list);
+
+	list_for_each_entry(desc_iter, &chan->desc_list, node) {
+		if(prev_desc != NULL) {
+			llp = desc_iter->hw_desc->llp;
+			write_desc_llp(prev_desc->hw_desc, llp);
+		}
+		prev_desc = desc_iter;
+	}
+
+	dw_axi_dma_set_hw_channel(chan, true);
+
+	return vchan_tx_prep(&chan->vc, &desc->vd, flags);
+
+err_desc_get:
+	if (desc)
+		axi_desc_put(desc);
+
+	return NULL;
 }
 
 static struct dma_async_tx_descriptor *
@@ -922,6 +1141,42 @@ err_desc_get:
 	return NULL;
 }
 
+void shadow_reg_work(void)
+{
+        struct axi_dma_hw_desc *hw_desc = NULL;
+        u32 num = 0;
+        hw_desc = &shadow_reg_desc->hw_desc[num];
+        while(!(hw_desc->lli->ctl_hi & CH_CTL_H_LLI_LAST)) {
+                axi_chan_iowrite64(shadow_reg_desc->chan, CH_BLOCK_TS, hw_desc->lli->block_ts_lo);
+                axi_chan_iowrite64(shadow_reg_desc->chan, CH_SAR, hw_desc->lli->sar);
+                axi_chan_iowrite64(shadow_reg_desc->chan, CH_DAR, hw_desc->lli->dar);
+                axi_chan_iowrite32(shadow_reg_desc->chan, CH_CTL_L, hw_desc->lli->ctl_lo);
+                axi_chan_iowrite32(shadow_reg_desc->chan, CH_CTL_H, hw_desc->lli->ctl_hi);
+                /*in shadow reg mode channel will be automatically disabled by DMAC after every block transfer
+                 * hence enable the channel
+                 */
+                axi_chan_enable(shadow_reg_desc->chan);
+                axi_chan_iowrite32(shadow_reg_desc->chan, CH_BLK_TFR_RESUMEREQ, 0x1);
+
+                while((axi_chan_ioread32(shadow_reg_desc->chan, CH_CTL_H) & CH_CTL_H_LLI_VALID) !=0);
+                num++;
+                hw_desc = &shadow_reg_desc->hw_desc[num];
+        }
+        /* complete last block */
+        axi_chan_iowrite64(shadow_reg_desc->chan, CH_BLOCK_TS, hw_desc->lli->block_ts_lo);
+        axi_chan_iowrite64(shadow_reg_desc->chan, CH_SAR, hw_desc->lli->sar);
+        axi_chan_iowrite64(shadow_reg_desc->chan, CH_DAR, hw_desc->lli->dar);
+        axi_chan_iowrite32(shadow_reg_desc->chan, CH_CTL_L, hw_desc->lli->ctl_lo);
+        axi_chan_iowrite32(shadow_reg_desc->chan, CH_CTL_H, hw_desc->lli->ctl_hi);
+        /*in shadow reg mode channel will be automatically disabled by DMAC after every block transfer
+         * hence enable the channel
+         */
+        axi_chan_enable(shadow_reg_desc->chan);
+        axi_chan_iowrite32(shadow_reg_desc->chan, CH_BLK_TFR_RESUMEREQ, 0x1);
+
+        while((axi_chan_ioread32(shadow_reg_desc->chan, CH_CTL_H) & CH_CTL_H_LLI_VALID) !=0);
+}
+
 static struct dma_async_tx_descriptor *
 dma_chan_prep_dma_memcpy(struct dma_chan *dchan, dma_addr_t dst_adr,
 			 dma_addr_t src_adr, size_t len, unsigned long flags)
@@ -938,6 +1193,7 @@ dma_chan_prep_dma_memcpy(struct dma_chan *dchan, dma_addr_t dst_adr,
 		axi_chan_name(chan), &src_adr, &dst_adr, len, flags);
 
 	max_block_ts = chan->chip->dw->hdata->block_size[chan->id];
+	lms = chan->chip->dw->hdata->lms_axi_master;
 	xfer_width = axi_chan_get_xfer_width(chan, src_adr, dst_adr, len);
 	num = DIV_ROUND_UP(len, max_block_ts << xfer_width);
 	desc = axi_desc_alloc(num);
@@ -998,8 +1254,8 @@ dma_chan_prep_dma_memcpy(struct dma_chan *dchan, dma_addr_t dst_adr,
 			hw_desc->lli->reserved_lo = DMAC_DESC_SUBMITTED;
 			hw_desc->lli->reserved_hi = 0;
 		} else
-			reg = (DWAXIDMAC_BURST_TRANS_LEN_4 << CH_CTL_L_DST_MSIZE_POS |
-			       DWAXIDMAC_BURST_TRANS_LEN_4 << CH_CTL_L_SRC_MSIZE_POS |
+			reg = (DWAXIDMAC_BURST_TRANS_LEN_256 << CH_CTL_L_DST_MSIZE_POS |
+			       DWAXIDMAC_BURST_TRANS_LEN_256 << CH_CTL_L_SRC_MSIZE_POS |
 			       xfer_width << CH_CTL_L_DST_WIDTH_POS |
 			       xfer_width << CH_CTL_L_SRC_WIDTH_POS |
 			       DWAXIDMAC_CH_CTL_L_INC << CH_CTL_L_DST_INC_POS |
@@ -1027,6 +1283,11 @@ dma_chan_prep_dma_memcpy(struct dma_chan *dchan, dma_addr_t dst_adr,
 		llp = hw_desc->llp;
 	} while (num);
 
+	if(chan->chip->dw->hdata->rdwr_back_feature)
+                writeback_desc = desc;
+	if(chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_SHADOW_REG) {
+                shadow_reg_desc = desc;
+        }
 	return vchan_tx_prep(&chan->vc, &desc->vd, flags);
 
 err_desc_get:
@@ -1043,34 +1304,6 @@ static int dw_axi_dma_chan_slave_config(struct dma_chan *dchan,
 	memcpy(&chan->config, config, sizeof(*config));
 
 	return 0;
-}
-
-static void axi_chan_dump_lli(struct axi_dma_chan *chan,
-			      struct axi_dma_hw_desc *desc)
-{
-	if (!desc->lli) {
-		dev_err(dchan2dev(&chan->vc.chan), "NULL LLI\n");
-		return;
-	}
-
-	dev_err(dchan2dev(&chan->vc.chan),
-		"SAR: 0x%llx DAR: 0x%llx LLP: 0x%llx BTS 0x%x CTL: 0x%x:%08x",
-		le64_to_cpu(desc->lli->sar),
-		le64_to_cpu(desc->lli->dar),
-		le64_to_cpu(desc->lli->llp),
-		le32_to_cpu(desc->lli->block_ts_lo),
-		le32_to_cpu(desc->lli->ctl_hi),
-		le32_to_cpu(desc->lli->ctl_lo));
-}
-
-static void axi_chan_list_dump_lli(struct axi_dma_chan *chan,
-				   struct axi_dma_desc *desc_head)
-{
-	int count = atomic_read(&chan->descs_allocated);
-	int i;
-
-	for (i = 0; i < count; i++)
-		axi_chan_dump_lli(chan, &desc_head->hw_desc[i]);
 }
 
 static noinline void axi_chan_handle_err(struct axi_dma_chan *chan, u32 status)
@@ -1107,7 +1340,7 @@ out:
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
 }
 
-static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
+static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 {
 	int count = atomic_read(&chan->descs_allocated);
 	struct axi_dma_hw_desc *hw_desc;
@@ -1116,6 +1349,8 @@ static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 	unsigned long flags;
 	u64 llp;
 	int i;
+
+	dev_dbg(chan2dev(chan), "DMA XFER complete");
 
 	spin_lock_irqsave(&chan->vc.lock, flags);
 	if (unlikely(axi_chan_is_hw_enable(chan))) {
@@ -1173,6 +1408,71 @@ static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 out:
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
 }
+static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
+{
+	struct virt_dma_desc *vd;
+	unsigned long flags;
+
+	dev_dbg(chan2dev(chan), "block transfer complete\n");
+
+	spin_lock_irqsave(&chan->vc.lock, flags);
+
+	/* The completed descriptor currently is in the head of vc list */
+	vd = vchan_next_desc(&chan->vc);
+	if (!vd) {
+		dev_err(chan2dev(chan), "BUG: %s, IRQ with no descriptors\n",
+			axi_chan_name(chan));
+		goto out;
+	}
+
+	if(chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) {
+		/* Remove the completed descriptor from issued list before completing */
+		list_del(&vd->node);
+		vchan_cookie_complete(vd);
+	}
+out:
+	spin_unlock_irqrestore(&chan->vc.lock, flags);
+}
+
+static void dw_axi_dma_process_interrupt(struct axi_dma_chan *chan)
+{
+	u64 status;
+
+	/* Poll, clear and process this channel interrupt status */
+	status = axi_chan_irq_read(chan);
+
+	if(chan->chip->dw->hdata->rdwr_back_feature)
+	{
+                if (status) {
+                        dev_dbg(chan2dev(chan) ,"size of lli:%d \n", sizeof(struct axi_dma_lli));
+                        struct axi_dma_hw_desc *cur_hw_desc = NULL;
+                        u32 *tmp_hw_desc = NULL;
+                        for (int j=0; j<16; j++) {
+                                cur_hw_desc = &writeback_desc->hw_desc[j];
+                                tmp_hw_desc = (u32 *)(cur_hw_desc->lli);
+                                int k=0;
+                                dev_dbg(chan2dev(chan), "**LLI:%d DATA**\n", j);
+                                dev_dbg(chan2dev(chan), "LLI:%d transfer size from writeback reg:0x%x, requested size:0x%x \n",j,
+						(cur_hw_desc->lli->status_lo)&WRITEBACK_MASK, cur_hw_desc->lli->block_ts_lo);
+                                while(k < 16) {
+                                        dev_dbg(chan2dev(chan), "addr:0x%x val:0x%x \n", tmp_hw_desc, *tmp_hw_desc);
+                                        k++;
+                                        tmp_hw_desc++;
+                                }
+                                dev_dbg(chan2dev(chan) ,"***************\n");
+
+                        }
+                }
+	}
+	axi_chan_irq_clear(chan, status);
+
+	if (status & DWAXIDMAC_IRQ_ALL_ERR)
+		axi_chan_handle_err(chan, status);
+	else if (status & (DWAXIDMAC_IRQ_DMA_TRF))
+		axi_chan_dma_xfer_complete(chan);
+	else if (status & (DWAXIDMAC_IRQ_BLOCK_TRF))
+		axi_chan_block_xfer_complete(chan);
+}
 
 static irqreturn_t dw_axi_dma_interrupt(int irq, void *dev_id)
 {
@@ -1180,7 +1480,7 @@ static irqreturn_t dw_axi_dma_interrupt(int irq, void *dev_id)
 	struct dw_axi_dma *dw = chip->dw;
 	struct axi_dma_chan *chan;
 
-	u32 status, i;
+	u32 i;
 
 	/* Disable DMAC interrupts. We'll enable them after processing channels */
 	axi_dma_irq_disable(chip);
@@ -1188,20 +1488,30 @@ static irqreturn_t dw_axi_dma_interrupt(int irq, void *dev_id)
 	/* Poll, clear and process every channel interrupt status */
 	for (i = 0; i < dw->hdata->nr_channels; i++) {
 		chan = &dw->chan[i];
-		status = axi_chan_irq_read(chan);
-		axi_chan_irq_clear(chan, status);
-
-		dev_vdbg(chip->dev, "%s %u IRQ status: 0x%08x\n",
-			axi_chan_name(chan), i, status);
-
-		if (status & DWAXIDMAC_IRQ_ALL_ERR)
-			axi_chan_handle_err(chan, status);
-		else if (status & DWAXIDMAC_IRQ_DMA_TRF)
-			axi_chan_block_xfer_complete(chan);
+		dw_axi_dma_process_interrupt(chan);
 	}
 
 	/* Re-enable interrupts */
 	axi_dma_irq_enable(chip);
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t dw_axi_dma_ch_interrupt(int irq, void *dev_id)
+{
+	struct axi_dma_chan *chan = dev_id;
+
+	dev_dbg(chan->chip->dev, "handling channel %u interrupt\n", chan->id);
+
+	/* Disable per channel interrupt */
+	axi_chan_irq_sig_set(chan, DWAXIDMAC_IRQ_NONE);
+
+	dw_axi_dma_process_interrupt(chan);
+
+	/* Re-enable interrupts */
+	axi_chan_irq_sig_set(chan, DWAXIDMAC_IRQ_ALL & 
+								(~DWAXIDMAC_IRQ_SRC_TRAN) &
+								(~DWAXIDMAC_IRQ_DST_TRAN));
 
 	return IRQ_HANDLED;
 }
@@ -1367,13 +1677,29 @@ static struct dma_chan *dw_axi_dma_of_xlate(struct of_phandle_args *dma_spec,
 	struct dw_axi_dma *dw = ofdma->of_dma_data;
 	struct axi_dma_chan *chan;
 	struct dma_chan *dchan;
+	unsigned int index;
 
-	dchan = dma_get_any_slave_channel(&dw->dma);
-	if (!dchan)
+	if (dma_spec->args_count != 1)
 		return NULL;
 
-	chan = dchan_to_axi_dma_chan(dchan);
-	chan->hw_handshake_num = dma_spec->args[0];
+	index = dma_spec->args[0];
+
+	if (dw->hdata->hardcoded_handshake) {
+		dchan = dma_get_slave_channel(&dw->chan[index].vc.chan);
+		if (!dchan)
+			return NULL;
+
+		dw->chan[index].hw_handshake_num = index;
+	} else {
+		dchan = dma_get_any_slave_channel(&dw->dma);
+		if (!dchan)
+			return NULL;
+
+		chan = dchan_to_axi_dma_chan(dchan);
+		chan->hw_handshake_num = index;
+	}
+
+	dev_dbg(chan->chip->dev, "handshake num : %#x\n", index);
 	return dchan;
 }
 
@@ -1381,6 +1707,7 @@ static int parse_device_properties(struct axi_dma_chip *chip)
 {
 	struct device *dev = chip->dev;
 	u32 tmp, carr[DMAC_MAX_CHANNELS];
+	u64 dev_addr_mask;
 	int ret;
 
 	ret = device_property_read_u32(dev, "dma-channels", &tmp);
@@ -1454,6 +1781,25 @@ static int parse_device_properties(struct axi_dma_chip *chip)
 	} else
 		chip->dw->hdata->xfer_mode = DWAXIDMAC_MBLK_TYPE_LL;
 
+	/* dev-addr-mask is optional property */
+	ret = device_property_read_u64(dev, "simaai,device-addr-mask", &dev_addr_mask);
+	if (!ret)
+		chip->dw->hdata->dev_addr_mask = dev_addr_mask;
+	else
+		chip->dw->hdata->dev_addr_mask = ULONG_MAX;
+
+	chip->dw->hdata->hardcoded_handshake =
+		device_property_read_bool(dev, "simaai,hardcoded-handshake");
+
+	chip->dw->hdata->perch_irq = device_property_read_bool(dev, "snps,perch_irq");
+	/* lms-axi_master is optional property */
+	ret = device_property_read_u32(dev, "snps,lms-axi-master", &tmp);
+	chip->dw->hdata->lms_axi_master = 0;
+	if(!ret) {
+		chip->dw->hdata->lms_axi_master = tmp;
+	}
+	/* read write back feature is optional property */
+	chip->dw->hdata->rdwr_back_feature = device_property_read_bool(dev, "snps,rdwr-back-feature");
 	return 0;
 }
 
@@ -1483,10 +1829,6 @@ static int dw_probe(struct platform_device *pdev)
 	chip->dev = &pdev->dev;
 	chip->dw->hdata = hdata;
 
-	chip->irq = platform_get_irq(pdev, 0);
-	if (chip->irq < 0)
-		return chip->irq;
-
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	chip->regs = devm_ioremap_resource(chip->dev, mem);
 	if (IS_ERR(chip->regs))
@@ -1515,10 +1857,29 @@ static int dw_probe(struct platform_device *pdev)
 	if (!dw->chan)
 		return -ENOMEM;
 
-	ret = devm_request_irq(chip->dev, chip->irq, dw_axi_dma_interrupt,
+	if (hdata->perch_irq) {
+		for (i = 0; i < hdata->nr_channels; i++) {
+			dw->chan[i].irq = platform_get_irq(pdev, i);
+			if (dw->chan[i].irq < 0)
+				return dw->chan[i].irq;
+
+			dev_info(chip->dev, "channel: %u interrupt number: %u\n", i, dw->chan[i].irq); 
+
+			ret = devm_request_irq(chip->dev, dw->chan[i].irq, dw_axi_dma_ch_interrupt,
+					IRQF_SHARED, KBUILD_MODNAME, &dw->chan[i]);
+			if (ret)
+				return ret;
+		}
+	} else {
+		chip->irq = platform_get_irq(pdev, 0);
+		if (chip->irq < 0)
+			return chip->irq;
+
+		ret = devm_request_irq(chip->dev, chip->irq, dw_axi_dma_interrupt,
 			       IRQF_SHARED, KBUILD_MODNAME, chip);
-	if (ret)
-		return ret;
+		if (ret)
+			return ret;
+	}
 
 	INIT_LIST_HEAD(&dw->dma.channels);
 	for (i = 0; i < hdata->nr_channels; i++) {
@@ -1531,12 +1892,14 @@ static int dw_probe(struct platform_device *pdev)
 
 		chan->vc.desc_free = vchan_desc_put;
 		vchan_init(&chan->vc, &dw->dma);
+		INIT_LIST_HEAD(&chan->desc_list);
 	}
 
 	/* Set capabilities */
 	dma_cap_set(DMA_MEMCPY, dw->dma.cap_mask);
 	dma_cap_set(DMA_SLAVE, dw->dma.cap_mask);
 	dma_cap_set(DMA_CYCLIC, dw->dma.cap_mask);
+	dma_cap_set(DMA_INTERLEAVE, dw->dma.cap_mask);
 
 	/* DMA capabilities */
 	dw->dma.chancnt = hdata->nr_channels;
@@ -1562,6 +1925,7 @@ static int dw_probe(struct platform_device *pdev)
 	dw->dma.device_config = dw_axi_dma_chan_slave_config;
 	dw->dma.device_prep_slave_sg = dw_axi_dma_chan_prep_slave_sg;
 	dw->dma.device_prep_dma_cyclic = dw_axi_dma_chan_prep_cyclic;
+	dw->dma.device_prep_interleaved_dma = dw_axi_dma_chan_prep_interleaved;
 
 	/*
 	 * Synopsis DesignWare AxiDMA datasheet mentioned Maximum

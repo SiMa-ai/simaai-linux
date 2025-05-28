@@ -206,6 +206,15 @@ config RESET_SCMI
 	  This driver uses SCMI Message Protocol to interact with the
 	  firmware controlling all the reset signals.
 
+config RESET_SIMAAI_SIO
+	tristate "SiMa.ai SIO Reset Driver"
+	depends on ARCH_SIMAAI || COMPILE_TEST
+	help
+	  This enables the SIO (Low Speed CMOS Input Output)
+	  reset driver for SiMa.ai Inc Modalix SoCs.
+	  Say Y if you want to control reset signals provided by SIO
+	  for SPI, UART, I2C.
+
 config RESET_SIMPLE
 	bool "Simple Reset Controller Driver" if COMPILE_TEST || EXPERT
 	default ARCH_ASPEED || ARCH_BCMBCA || ARCH_BITMAIN || ARCH_REALTEK || ARCH_STM32 || (ARCH_INTEL_SOCFPGA && ARM64) || ARCH_SUNXI || ARC

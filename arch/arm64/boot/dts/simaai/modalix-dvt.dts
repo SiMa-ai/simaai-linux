@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix.dtsi"
+
+/ {
+	model = "SiMa.ai Modalix DVT Board";
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs";
+		linux,initrd-start = <0x10 0x08000000>;
+		linux,initrd-end = <0x10 0x09400000>;
+	};
+
+	aliases {
+		console = &uart12;
+		mmc0 = &nvs_sdhci0;
+		mmc1 = &nvs_sdhci1;
+	};
+
+	memory@1000000000 {
+		device_type = "memory";
+		reg = <0x10 0x00000000 0x02 0x6FC00000
+				0x12 0x74000000 0x09 0xAC000000
+				0x1C 0x80000000 0x01 0x80000000>;
+	};
+
+	thermal-zones {
+		board {
+			polling-delay = <30000>;
+			polling-delay-passive = <5000>;
+			thermal-sensors = <&board_edge_sensor>, <&power_supply_sensor>;
+
+			trips {
+				board_alert: board-alert {
+					temperature = <50000>;
+					hysteresis = <3000>;
+					type = "active";
+				};
+				board_crit: board-crit {
+					temperature = <70000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&board_alert>;
+				};
+				map1 {
+					trip = <&board_crit>;
+				};
+			};
+		};
+	};
+
+};
+
+&nvs_sdhci0 {
+	status = "okay";
+};
+
+&nvs_sdhci1 {
+	status = "okay";
+};
+
+&sio0 {
+	status = "okay";
+};
+
+&sio1 {
+	status = "okay";
+};
+
+&sio4 {
+	status = "okay";
+};
+
+&sio5 {
+	status = "okay";
+};
+
+&gpio50 {
+	pinctrl-0 = <&pins_gpio50_deafult>, <&pins_gpio51_deafult>,
+		    <&pins_gpio52_deafult>, <&pins_gpio53_deafult>,
+		    <&pins_gpio54_deafult>, <&pins_gpio55_deafult>,
+		    <&pins_gpio56_deafult>, <&pins_gpio57_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&sio6 {
+	status = "okay";
+};
+
+&gpio60 {
+	pinctrl-0 = <&pins_gpio60_deafult>, <&pins_gpio61_deafult>,
+		    <&pins_gpio62_deafult>, <&pins_gpio63_deafult>,
+		    <&pins_gpio64_deafult>, <&pins_gpio65_deafult>,
+		    <&pins_gpio66_deafult>, <&pins_gpio67_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&sio7 {
+	status = "okay";
+};
+
+&gpio70 {
+	pinctrl-0 = <&pins_gpio70_deafult>, <&pins_gpio71_deafult>,
+		    <&pins_gpio72_deafult>, <&pins_gpio73_deafult>,
+		    <&pins_gpio74_deafult>, <&pins_gpio75_deafult>,
+		    <&pins_gpio76_deafult>, <&pins_gpio77_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&xgmac0 {
+	phy-mode = "sgmii";
+	managed = "in-band-status";
+	snps,ps-speed = <1000>;
+	snps,reset-gpio = <&pcal6534 8 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 50000 50000>;
+	phy-handle = <&ethernet_phy0>;
+	status = "okay";
+	mdio0 {
+		compatible = "snps,dwmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ethernet_phy0: ethernet-phy@0 {
+			reg = <0>;
+		};
+	};
+};
+
+&xgmac1 {
+	phy-mode = "usxgmii";
+	managed = "in-band-status";
+	snps,reset-gpio = <&pcal6534 15 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 50000 50000>;
+	phy-handle = <&ethernet_phy1>;
+	status = "okay";
+	mdio1 {
+		compatible = "snps,dwmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ethernet_phy1: ethernet-phy@1 {
+			compatible = "ethernet-phy-ieee802.3-c45";
+			reg = <1>;
+		};
+	};
+};
+
+&xgmac2 {
+	phy-mode = "10gbase-kr";
+	status = "okay";
+	fixed-link {
+		speed = <10000>;
+		full-duplex;
+	};
+};
+
+&xgmac3 {
+	phy-mode = "10gbase-kr";
+	status = "okay";
+	fixed-link {
+		speed = <10000>;
+		full-duplex;
+	};
+};
+
+&i2c03 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	board_edge_sensor: sensor@48 {
+		compatible = "ti,tmp101";
+		reg = <0x48>;
+		#thermal-sensor-cells = <0>;
+	};
+
+	power_supply_sensor: sensor@4A {
+		compatible = "ti,tmp101";
+		reg = <0x4A>;
+		#thermal-sensor-cells = <0>;
+	};
+
+	eeprom@50 {
+		compatible = "atmel,24c1024";
+		reg = <0x50>;
+		pagesize = <256>;
+	};
+
+	tca6416a: gpio@20 {
+		compatible = "ti,tca6416";
+		reg = <0x20>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+
+	pcal6534: gpio@22 {
+		compatible = "nxp,pcal6534";
+		reg = <0x22>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+
+	i2c-switch@77 {
+		compatible = "nxp,pca9546";
+		reg = <0x77>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+};
+
+&uart12 {
+	status = "okay";
+};
+
+&uart13 {
+	status = "okay";
+};
+
+&sio10_clk {
+	simaai,ignore-unused = <0x200>;
+};
+
+&i2c43 {
+	status = "okay";
+
+	sc18is606@2f {
+		compatible = "nxp,sc18is606";
+		reg = <0x2f>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+};
+
+&pcie0_ep {
+	status = "okay";
+};

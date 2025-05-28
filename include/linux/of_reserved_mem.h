@@ -16,7 +16,7 @@ struct reserved_mem {
 	phys_addr_t			base;
 	phys_addr_t			size;
 	void				*priv;
-	bool		skip_memset_in_alloc
+	bool		skip_memset_in_alloc;
 };
 
 struct reserved_mem_ops {

@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: GPL-2.0
+
+comment "Sima-ai media platform drivers"
+
+config CSI_VIDEO_PLATFORM
+       tristate "Designware Cores CSI-2 VIDEO PLATFORM"
+       select DWC_MIPI_CSI2_HOST
+       select CSI_VIDEO_DEVICE
+       select VIDEO_V4L2
+       select VIDEO_V4L2_SUBDEV_API
+       select HAS_DMA
+       select V4L2_FWNODE
+       help
+         This a V4L2 driver to support the DesignWare Cores CSI-2 Host Video
+         Platform.
+
+         To compile this driver as a module, choose M here
+
+if CSI_VIDEO_PLATFORM
+
+config DWC_MIPI_CSI2_HOST
+       tristate "SNPS DWC MIPI CSI2 Host"
+       select GENERIC_PHY
+       help
+         This is a V4L2 driver for Synopsys Designware MIPI CSI-2 Host.
+
+config CSI_VIDEO_DEVICE
+       tristate "DWC VIDEO DEVICE"
+       select VIDEO_DWC_DMA_CONTIG
+       depends on CSI_VIDEO_PLATFORM
+       help
+         This is a V4L2 driver for the CSI-2 Video platform video device
+
+config VIDEO_DWC_DMA_CONTIG
+       tristate "Support Videobuf2 DMA CONTIG"
+       select VIDEOBUF2_DMA_CONTIG
+       help
+         Use DMA CONTIG in CSI Video Device
+
+config VIDEO_DWC_VMALLOC
+       tristate "Support Videobuf2 VMALLOC"
+       select VIDEOBUF2_VMALLOC
+       help
+         Use VMALLOC in CSI Video Device
+
+config DWC_MIPI_DPHY_GEN3
+	tristate "DesignWare platform support using a Gen3 D-PHY"
+	depends on DWC_MIPI_CSI2_HOST
+	select GENERIC_PHY
+	help
+	 Synopsys MIPI D-PHY Generation 3 reference driver.
+
+	  If unsure, say N.
+
+if DWC_MIPI_DPHY_GEN3
+
+config DWC_MIPI_TC_DPHY_GEN3
+	bool "Platform support using a Synopsys Test Chip"
+	help
+	 Synopsys Test Chip is for prototyping purposes.
+
+	 If unsure, say N.
+
+endif # DWC_MIPI_DPHY_GEN3
+endif # CSI_VIDEO_PLATFORM

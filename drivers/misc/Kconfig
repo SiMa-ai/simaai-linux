@@ -496,19 +496,35 @@ config VCPU_STALL_DETECTOR
 
 	  If you do not intend to run this kernel as a guest, say N.
 
+config SIMAAI_MEMCPY
+	bool "SiMa.ai memory copy through sdma for Modalix board"
+	depends on ARCH_SIMAAI
+	help
+		This option enables efficient memory copy operations
+		through sdma for large memory buffers.
+
 config SIMAAI_MEMORY
 	bool "SiMa.ai DaVinci family memory management support"
-	depends on ARCH_SIMAAI_DAVINCI
+	depends on ARCH_SIMAAI
 	help
 	  This option enables memory management on SiMa.ai DaVinci family.
 
 config SIMAAI_THERMAL
 	tristate "SiMa.ai DaVinci family thermal sensor support"
 	default y
-	depends on ARCH_SIMAAI_DAVINCI
+	depends on ARCH_SIMAAI
 	help
 	  This option enables thermal sensor support on
 	  SiMa.ai DaVinci family.
+
+config SIMAAI_STU
+	bool "SIMAAI STU driver for Modalix board"
+	depends on ARCH_SIMAAI
+	help
+		This option enables driver for SIMAAI STU block present in Modalix chip.
+		STU block is used by all the 32 bit cores for accessing DDR beyond
+		32 bit address space.
+		This is being used CVU and ISP on SiMa.ai Modalix chip
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
@@ -528,4 +544,5 @@ source "drivers/misc/habanalabs/Kconfig"
 source "drivers/misc/uacce/Kconfig"
 source "drivers/misc/pvpanic/Kconfig"
 source "drivers/misc/mchp_pci1xxxx/Kconfig"
+source "drivers/misc/noc/Kconfig"
 endmenu

@@ -17,19 +17,80 @@
 #include <linux/dma-mapping.h>
 #include "remoteproc_internal.h"
 
-// Use this for bus_addr kludge
-#define M4_SRAM_ADDR 	0x1d00000
-#define PRC_BASE 		0x30100000
-#define PRC_REG__CKG_RST_REG__MLA_CK_RST_ADDR 0x00000150
-
 #define NOC_REG_READ(x)                         (readl(x))
 #define NOC_REG_WRITE(reg, val)         (writel(val, reg))
 
 // work with only the M4-SRAM
 #define SIMA_MAX_MEM_REGIONS 1
 
+#define DAVINCI_MLA_CLK_EN           BIT(0)
+#define DAVINCI_MLA_AHB_CLK_EN       BIT(1)
+#define DAVINCI_MLA_APB_CLK_EN       BIT(2)
+#define DAVINCI_MLA_AXI_CLK_EN       BIT(3)
+#define DAVINCI_MLA_DBG_CLK_EN       BIT(4)
+#define DAVINCI_MLA_AHB_RESET_N      BIT(5)
+#define DAVINCI_MLA_APB_RESET_N      BIT(6)
+#define DAVINCI_MLA_AXI_RESET_N      BIT(7)
+#define DAVINCI_MLA_POR_RST          BIT(8)
+#define DAVINCI_MLA_UCTRL_POR_RST    BIT(9)
+#define DAVINCI_MLA_UCTRL_SYS_RST    BIT(10)
+#define DAVINCI_MLA_DBG_RST_N        BIT(11)
+
+#define DAVINCI_MLA_CLK_EN_MASK (DAVINCI_MLA_CLK_EN | DAVINCI_MLA_AHB_CLK_EN | \
+							DAVINCI_MLA_APB_CLK_EN | DAVINCI_MLA_AXI_CLK_EN | \
+							DAVINCI_MLA_DBG_CLK_EN)
+#define DAVINCI_MLA_RESET_MASK (DAVINCI_MLA_AHB_RESET_N | DAVINCI_MLA_APB_RESET_N | \
+							DAVINCI_MLA_AXI_RESET_N | DAVINCI_MLA_POR_RST | \
+							DAVINCI_MLA_DBG_RST_N)
+
+#define DAVINCI_M4_RESET_MASK (DAVINCI_MLA_UCTRL_POR_RST | DAVINCI_MLA_UCTRL_SYS_RST)
+
+#define MODALIX_MLA_CLK_EN            BIT(0)
+#define MODALIX_MLA_DBG_CLK_EN        BIT(1)
+#define MODALIX_MLA_XXX_RESET_N       BIT(2)
+#define MODALIX_MLA_UCTRL_POR_RST     BIT(3)
+#define MODALIX_MLA_UCTRL_SYS_RST     BIT(4)
+#define MODALIX_MLA_DBG_RST_N         BIT(5)
+
+#define MODALIX_MLA_CLK_EN_MASK (MODALIX_MLA_CLK_EN | MODALIX_MLA_DBG_CLK_EN)
+#define MODALIX_MLA_RESET_MASK (MODALIX_MLA_XXX_RESET_N | MODALIX_MLA_DBG_RST_N)
+#define MODALIX_M4_RESET_MASK (MODALIX_MLA_UCTRL_SYS_RST | MODALIX_MLA_UCTRL_POR_RST)
+
 const char *m4_mem_names[SIMA_MAX_MEM_REGIONS] = {
 		"m4_sram"
+};
+
+struct simaai_rproc_config {
+	phys_addr_t		prc_base_addr;
+	phys_addr_t		m4_sram_base_addr;
+	uint32_t		m4_sram_size;
+	uint32_t		prc_mla_ck_rst_offset;
+	uint32_t		mla_clk_en_mask;
+	uint32_t		mla_reset_mask;
+	uint32_t		m4_reset_mask;
+	uint32_t		reset_bit_pos;
+};
+
+static const struct simaai_rproc_config davinci_rproc_config = {
+	.prc_base_addr         = 0x30100000,
+	.m4_sram_base_addr     = 0x01d00000,
+	.m4_sram_size          = 0x00080000,
+	.prc_mla_ck_rst_offset = 0x00000150,
+	.mla_clk_en_mask       = DAVINCI_MLA_CLK_EN_MASK,
+	.mla_reset_mask        = DAVINCI_MLA_RESET_MASK,
+	.m4_reset_mask         = DAVINCI_M4_RESET_MASK,
+	.reset_bit_pos         = 8u
+};
+
+static const struct simaai_rproc_config modalix_rproc_config = {
+	.prc_base_addr         = 0x0ff00000,
+	.m4_sram_base_addr     = 0x05100000,
+	.m4_sram_size          = 0x00080000,
+	.prc_mla_ck_rst_offset = 0x00000594,
+	.mla_clk_en_mask       = MODALIX_MLA_CLK_EN_MASK,
+	.mla_reset_mask        = MODALIX_MLA_RESET_MASK,
+	.m4_reset_mask         = MODALIX_M4_RESET_MASK,
+	.reset_bit_pos         = 31u // in mx there are no active high reset bits
 };
 
 /**
@@ -54,6 +115,7 @@ struct sima_mem {
 struct sima_rproc {
 	struct sima_mem mem[SIMA_MAX_MEM_REGIONS];
 	int is_rtc_only;
+	struct simaai_rproc_config *config;
 };
 
 // TODO: Fix this, stub until mailbox & virtio are brought into dts
@@ -62,65 +124,47 @@ static void sima_rproc_kick(struct rproc *rproc, int vqid)
 	return;
 }
 
-struct __attribute__((__packed__)) ResetControl {
-	uint32_t A65_POR;
-	uint32_t A65_WarmReset;
-	uint32_t A65_OtherReset;
-	uint32_t M4_Reset;
-	uint32_t padding[12];
-	uint64_t A65_C0T0_ResetVector;
-	uint64_t A65_C0T1_ResetVector;
-	uint64_t A65_C1T0_ResetVector;
-	uint64_t A65_C1T1_ResetVector;
-	uint64_t A65_C2T0_ResetVector;
-	uint64_t A65_C2T1_ResetVector;
-	uint64_t A65_C3T0_ResetVector;
-	uint64_t A65_C3T1_ResetVector;
-};
-
-typedef struct __attribute__ ((packed)) {
-	uint32_t mla_clk_en : 1;
-	uint32_t mla_ahb_clk_en : 1;
-	uint32_t mla_apb_clk_en : 1;
-	uint32_t mla_axi_clk_en : 1;
-	uint32_t mla_dbg_clk_en : 1;
-	uint32_t mla_ahb_resetn : 1;
-	uint32_t mla_apb_resetn : 1;
-	uint32_t mla_axi_resetn : 1;
-	uint32_t mla_por_rst : 1;
-	uint32_t mla_uctrl_por_rst : 1;
-	uint32_t mla_uctrl_sys_rst : 1;
-	uint32_t mla_dbg_rstn : 1;
-	uint32_t reserved0 : 20;
-} mla_ck_rst_s;
-
-typedef union __attribute__ ((packed)) {
-	mla_ck_rst_s reg;
-	uint32_t u32;
-} mla_ck_rst_u;
-
 static int sima_rproc_start(struct rproc *rproc)
 {
+	uint32_t val = 0;
+	void __iomem *addr;
 	struct device *dev = rproc->dev.parent;
-	uint32_t offset = PRC_REG__CKG_RST_REG__MLA_CK_RST_ADDR;
-	void __iomem *addr = ioremap(PRC_BASE, 0x1000);
+	const struct simaai_rproc_config *data = of_device_get_match_data(dev);
+	if (!data) {
+		dev_err(dev, "No device match data found\n");
+		return -ENODEV;
+	}
+	addr = ioremap(data->prc_base_addr + data->prc_mla_ck_rst_offset, 0x1000);
 
-	mla_ck_rst_u mla_s = {0};
-
-	mla_s.u32 = NOC_REG_READ(addr + offset);
-	mla_s.reg.mla_uctrl_por_rst = 0;
-	mla_s.reg.mla_uctrl_sys_rst = 0;
-	NOC_REG_WRITE(addr + offset, mla_s.u32);
-
-	dev_info(dev, "Started M4");
+	val = readl(addr);
+	writel(val & (~(data->m4_reset_mask)), addr);
+	dev_dbg(dev, "Started M4.\n");
 
 	iounmap(addr);
 	return 0;
 }
 
-/* TODO:[SRIRAM] Understand more of power states, deep sleep for M4 */
 static int sima_rproc_stop(struct rproc *rproc)
 {
+	uint32_t val = 0;
+	void __iomem *addr;
+	struct device *dev = rproc->dev.parent;
+	const struct simaai_rproc_config *data = of_device_get_match_data(dev);
+	if (!data) {
+		dev_err(dev, "No device match data found\n");
+		return -ENODEV;
+	}
+	addr = ioremap(data->prc_base_addr + data->prc_mla_ck_rst_offset, 0x1000);
+
+	val = readl(addr);
+	val &= ~data->mla_reset_mask;
+	val |= data->m4_reset_mask;
+	val |= BIT(data->reset_bit_pos);
+	writel(val, addr);
+
+	dev_dbg(dev, "Stopped M4 and MLA.\n");
+
+	iounmap(addr);
 	return 0;
 }
 
@@ -135,47 +179,48 @@ static int sima_rproc_elf_load_rsc_table(struct rproc *rproc,
 	return 0;
 }
 
-static void simaai_rproc_m4_clk_en(struct rproc *rproc)
-{
-	/* m4 program not loaded in its SRAM at this point */
-	struct sima_rproc *sproc = rproc->priv;
-	struct device *dev = rproc->dev.parent;
-	void __iomem *addr = ioremap(PRC_BASE, 0x1000);
-	uint32_t offset = PRC_REG__CKG_RST_REG__MLA_CK_RST_ADDR;
-
-	mla_ck_rst_u mla_s = {0};
-
-	mla_s.u32 = NOC_REG_READ(addr + offset);
-	mla_s.reg.mla_clk_en = 1;
-	mla_s.reg.mla_ahb_clk_en = 1;
-	mla_s.reg.mla_apb_clk_en = 1;
-	mla_s.reg.mla_axi_clk_en = 1;
-	mla_s.reg.mla_dbg_clk_en = 1;
-	//mla_s.u32 = 0x6ff;
-	NOC_REG_WRITE(addr + offset, mla_s.u32);
-
-	udelay(1000);
-
-	mla_s.u32 = NOC_REG_READ(addr + offset);
-	mla_s.reg.mla_ahb_resetn = 1;
-	mla_s.reg.mla_apb_resetn = 1;
-	mla_s.reg.mla_axi_resetn = 1;
-	mla_s.reg.mla_por_rst = 0;
-	mla_s.reg.mla_uctrl_por_rst = 1;
-	mla_s.reg.mla_uctrl_sys_rst = 1;
-	mla_s.reg.mla_dbg_rstn = 0;
-	NOC_REG_WRITE(addr + offset, mla_s.u32);
-
-	dev_dbg(dev, "Enabled M4 clock");
-
-	iounmap(addr);
-	return;
-}
-
 static int sima_rproc_elf_load(struct rproc *rproc, const struct firmware *fw)
 {
-	// Enable clock before writing.
-	simaai_rproc_m4_clk_en(rproc);
+	uint32_t val = 0;
+	const struct simaai_rproc_config *data;
+	void __iomem *addr = NULL;
+	void __iomem *sram = NULL;
+	struct device *dev = rproc->dev.parent;
+
+	data = of_device_get_match_data(dev);
+	if (!data) {
+		dev_err(dev, "No device match data found\n");
+		return -ENODEV;
+	}
+	addr = ioremap(data->prc_base_addr, 0x1000);
+
+	val = readl(addr + data->prc_mla_ck_rst_offset);
+	val |= data->mla_clk_en_mask;
+	writel(val, addr + data->prc_mla_ck_rst_offset);
+	dev_dbg(dev, "MLA clock enabled., 0x%08x\n", val);
+
+	udelay(1);
+
+	val |= (data->mla_reset_mask);
+	val &= ~(BIT(data->reset_bit_pos));
+	dev_dbg(dev, "Starting MLA., 0x%08x\n", val);
+	writel(val, addr + data->prc_mla_ck_rst_offset);
+
+	iounmap(addr);
+
+	udelay(1);
+
+	// workaround for SWMLA-4552
+	dev_dbg(dev, "M4 SRAM zero init...\n");
+	sram = ioremap(data->m4_sram_base_addr, data->m4_sram_size);
+	dev_dbg(dev, "M4 SRAM %lx\n", sram);
+	memset_io(sram, 0, data->m4_sram_size);
+	if (!sram) {
+		dev_err(dev, "Sram addr null\n");
+		return -ENODEV;
+	}
+
+	iounmap(sram);
 	return rproc_elf_load_segments(rproc, fw);
 }
 
@@ -193,7 +238,7 @@ static int simaai_rproc_mem_alloc(struct rproc *rproc,
 	}
 
 	/* Update memory entry va */
-	dev_info(dev, "da:0x%llx, len:%u va:0x%llx\n", mem->dma, mem->len, va);
+	dev_dbg(dev, "da:0x%llx, len:%lu va:0x%p\n", mem->dma, mem->len, va);
 	mem->va = va;
 	return 0;
 }
@@ -225,11 +270,11 @@ static int sima_parse_fw(struct rproc *rproc, const struct firmware *fw)
 			return -ENOMEM;
 		}
 
-		dev_info(dev, "region_name:[%s],phys_addr:[0x%lx],size:[0x%x],"
+		dev_dbg(dev, "region_name:[%s],phys_addr:[0x%x],size:[0x%lx],"
 						"bus_addr:[0x%llx],cpu_addr:[0x%llx]",
 						srproc->mem[i].name, srproc->mem[i].dev_addr,
 						srproc->mem[i].size, srproc->mem[i].bus_addr,
-						srproc->mem[i].cpu_addr);
+						(uint64_t)srproc->mem[i].cpu_addr);
 
     	rproc_add_carveout(rproc, mem);
 
@@ -251,7 +296,8 @@ static const struct rproc_ops sima_rproc_ops = {
 };
 
 static const struct of_device_id sima_rproc_of_match[] = {
-	{ .compatible = "simaai,m4-rproc" },
+	{ .compatible = "simaai,davinci-m4-rproc", .data = &davinci_rproc_config},
+	{ .compatible = "simaai,modalix-m4-rproc", .data = &modalix_rproc_config},
 	{},
 };
 MODULE_DEVICE_TABLE(of, sima_rproc_of_match);
@@ -260,19 +306,24 @@ static int sima_rproc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct sima_rproc *sproc;
-	struct device_node *np = dev->of_node;
 	const char *fw_name;
+	const char *cpu_name;
 	struct rproc *rproc;
 	struct resource *res;
 	int ret, i;
 
-	ret = of_property_read_string(dev->of_node, "sima,pm-firmware", &fw_name);
+	ret = of_property_read_string(dev->of_node, "simaai,pm-firmware", &fw_name);
 	if (ret) {
 		dev_err(dev, "ERROR : Firmware name is missing\n");
 		return -ENODEV;
 	}
+	ret = of_property_read_string(dev->of_node, "cpu-name", &cpu_name);
+	if (ret) {
+			dev_err(dev, "ERROR : cpu name is missing\n");
+			return -ENODEV;
+	}
 
-	rproc = rproc_alloc(dev, np->name, &sima_rproc_ops, fw_name,
+	rproc = rproc_alloc(dev, cpu_name, &sima_rproc_ops, fw_name,
 							sizeof(*sproc));
 	if (!rproc) {
 		dev_err(dev, "ERROR : allocating rproc handle\n");

@@ -272,10 +272,10 @@ config ARCH_SEATTLE
 	help
 	  This enables support for AMD Seattle SOC Family
 
-config ARCH_SIMAAI_DAVINCI
-	bool "Sima.ai Davinci family"
+config ARCH_SIMAAI
+	bool "Sima.ai SoC Family"
 	help
-	  This enables support for the Sima Davinci SoC family.
+	  This enables support for the SiMa.ai SoC Family.
 
 config ARCH_INTEL_SOCFPGA
 	bool "Intel's SoCFPGA ARMv8 Families"

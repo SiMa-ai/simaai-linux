@@ -1,0 +1,100 @@
+/*
+*
+* SPDX-License-Identifier: GPL-2.0
+*
+* Copyright (C) 2011-2021 ARM or its affiliates
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; version 2.
+* This program is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+* or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+* for more details.
+* You should have received a copy of the GNU General Public License along
+* with this program; if not, write to the Free Software Foundation, Inc.,
+* 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+*
+*/
+
+#ifndef __ACAMERA_CONFIGURATION_H__
+#define __ACAMERA_CONFIGURATION_H__
+
+
+// stub-linux-split-dual-r1-1T-dummy-1M-dummy.set
+#define FIRMWARE_CONTEXT_NUMBER 4
+#define HW_REVISION 101397
+#define PHY_ADDR_ISP 0x04220000
+#define PHY_ADDR_FPGA 0x60600000
+#define PHY_ADDR_CDMA 0x1C20000000
+#define LEN_ADDR_ISP 0x20000
+#define LEN_ADDR_FPGA 0x2000
+#define LEN_ADDR_META 0x1000
+#define ISP_HAS_SENSOR_FSM 1
+#define ISP_HAS_CONTROL_FSM 0
+#define ISP_HAS_DECOMPANDER_FSM 0
+#define ISP_HAS_FRAME_STITCH_FSM 0
+#define ISP_HAS_OUTPUT_FORMATTER_FSM 1
+#define ISP_HAS_CROP_FSM 0
+#define ISP_HAS_CMOS_FSM 1
+#define ISP_HAS_AE_MANUAL_FSM 0
+#define ISP_HAS_HISTOGRAM_FSM 0
+#define ISP_HAS_AWB_MANUAL_FSM 1
+#define ISP_HAS_COLOR_MATRIX_FSM 0
+#define ISP_HAS_MESH_SHADING_FSM 0
+#define ISP_HAS_IRIDIX8_MANUAL_FSM 0
+#define ISP_HAS_MCFE_FSM 1
+#define ISP_HAS_FRAME_CHECK_FSM 0
+#define ISP_HAS_METADATA_FSM 0
+#define ISP_HAS_SHARPENING_FSM 0
+#define ISP_HAS_NOISE_REDUCTION_FSM 0
+#define ISP_HAS_DEFECT_PIXEL_FSM 0
+#define ISP_HAS_SBUF_FSM 0
+#define ISP_HAS_ISP_WRAPPER_DUMMY_FSM 0
+#define ISP_HAS_CAC_FSM 0
+#define ISP_HAS_RADIAL_SHADING_FSM 0
+#define ISP_HAS_NOISE_PROFILE_FSM 0
+#define ISP_HAS_DEMOSAIC_FSM 1
+#define ISP_HAS_ML_BIST_FSM 0
+#define ISP_HAS_RAW_FE_FSM 1
+#define KERNEL_MODULE 1
+#define ISP_HAS_CONNECTION_BUFFER 1
+#define FW_HAS_CONTROL_CHANNEL 1
+#define ISP_RTL_VERSION_R 1
+#define ISP_RTL_VERSION_P 2
+// project_defaults.set
+#define FIXED_INTEGRATION_TIME 0
+#define ISP_HAS_CONNECTION_CHARDEV 0
+#define ISP_HAS_CONNECTION_SOCKET 0
+#define ISP_HAS_CONNECTION_SOCKET_PORT 0
+#define ISP_HAS_CONNECTION_UART 0
+#define ACAMERA_ISP_PROFILING 0
+#define ACAMERA_ISP_PROFILING_INIT 0
+#define ISP_HISTOGRAM_POSITION_IS_BE 1
+#define ISP_HISTOGRAM_BE_POSITION AE_HISTOGRAM_TAP_AFTER_DECOMPANDER
+#define ISP_PROCESS_NUM_EVENTS_QUANT 5
+#define ACAMERA_EVENT_QUEUE_SIZE 512
+#define CONNECTION_BUFFER_SIZE ( 4 * 8192 )
+#define DEBUG_FRAME_COUNT 0
+#define FPGA_DDR_OFFSET 0x8000
+#define ISPAS_MINUS_SYSPHY 0
+#define LOG2_GAIN_SHIFT 18
+//#define PHY_ADDR_BUFF_POOL 0x60800000
+#define SENSOR_SEQ_BINARY_AND_EXTERNAL 0
+#define STATISTICS_BUFFER_DATA_LOCALLY 0
+#define SYSTEM_EXPOSURE_RATIO_DEFAULT 16
+#define SYSTEM_LOG_DEFAULT_VALUE LOG_LEVEL_ERROR
+#define SYSTEM_LOG_USE_COLOR 1
+#define USER_MODULE 0
+#define MODEL_MODULE 0
+#define FRAME_STREAM_MAX_FRAMES 10
+#define STATS_PROCESSING_RATIO 1
+#define FRAME_STREAM_RAW_FRAME_COUNT_MANUAL 4
+#define FRAME_STREAM_RAW_FRAME_COUNT_TDMF 2
+#define FRAME_STREAM_RAW_FRAME_COUNT_M2M_REMOTE 4
+#define FRAME_STREAM_RAW_FRAME_COUNT_M2M_V4L2 1
+#define FRAME_STREAM_OUT_FRAME_COUNT_TDMF 2
+#define FRAME_STREAM_OUT_FRAME_COUNT_M2M 5
+#define FRAME_STREAM_META_FRAME_COUNT 1
+#define V4L2_INTERFACE_BUILD 1
+#endif

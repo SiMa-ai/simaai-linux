@@ -1,0 +1,2552 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2023-2024 SiMa ai
+ */
+
+#include <dt-bindings/pinctrl/pinctrl-simaai-sio.h>
+
+/ {
+	sio0: sio@0 {
+		compatible = "simple-bus";
+		status = "disabled";
+		ranges;
+
+		pinmux00: pinmux@0x04000000 {
+			compatible = "simaai,pinctrl-sio";
+			reg = <0x0 0x04000000 0 0x208>, <0x0 0x04001008 0 0x4>;
+			reg-names = "ctl", "gpio";
+
+			pins_spi00_deafult: pins_spi00 {
+				function = "spi";
+				groups = "spi0_group";
+			};
+
+			pins_spi01_deafult: pins_spi01 {
+				function = "spi";
+				groups = "spi1_group";
+			};
+
+			pins_i2c00_deafult: pins_i2c00 {
+				function = "i2c";
+				groups = "i2c0_group";
+			};
+
+			pins_i2c01_deafult: pins_i2c01 {
+				function = "i2c";
+				groups = "i2c1_group";
+			};
+
+			pins_i2c02_deafult: pins_i2c02 {
+				function = "i2c";
+				groups = "i2c2_group";
+			};
+
+			pins_i2c03_deafult: pins_i2c03 {
+				function = "i2c";
+				groups = "i2c3_group";
+			};
+
+			pins_uart00_deafult: pins_uart00 {
+				function = "uart";
+				groups = "uart0_group";
+			};
+
+			pins_uart01_deafult: pins_uart01 {
+				function = "uart";
+				groups = "uart1_group";
+			};
+
+			pins_uart02_deafult: pins_uart02 {
+				function = "uart";
+				groups = "uart2_group";
+			};
+
+			pins_uart03_deafult: pins_uart03 {
+				function = "uart";
+				groups = "uart3_group";
+			};
+
+			pins_gpio00_deafult: pins_gpio00 {
+				function = "gpio";
+				groups = "gpio0_group";
+			};
+
+			pins_gpio01_deafult: pins_gpio01 {
+				function = "gpio";
+				groups = "gpio1_group";
+			};
+
+			pins_gpio02_deafult: pins_gpio02 {
+				function = "gpio";
+				groups = "gpio2_group";
+			};
+
+			pins_gpio03_deafult: pins_gpio03 {
+				function = "gpio";
+				groups = "gpio3_group";
+			};
+
+			pins_gpio04_deafult: pins_gpio04 {
+				function = "gpio";
+				groups = "gpio4_group";
+			};
+
+			pins_gpio05_deafult: pins_gpio05 {
+				function = "gpio";
+				groups = "gpio5_group";
+			};
+
+			pins_gpio06_deafult: pins_gpio06 {
+				function = "gpio";
+				groups = "gpio6_group";
+			};
+
+			pins_gpio07_deafult: pins_gpio07 {
+				function = "gpio";
+				groups = "gpio7_group";
+			};
+		};
+
+		reset00: reset@0x04000210 {
+			compatible = "simaai,reset-sio";
+			reg = <0x0 0x04000210 0 0x8>;
+			#reset-cells = <1>;
+		};
+
+		gpio00: gpio@0x04001000 {
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x0 0x04001000 0 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			port0: gpio@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <2>;
+				snps,nr-gpios = <8>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				reg = <0>;
+				interrupts = <GIC_SPI 282 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 284 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 286 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 288 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 290 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 292 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 294 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 296 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+
+		dmac00: dma-controller@0x04002000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x04002000 0x0 0x1000>;
+			clocks = <&siodmac_clk>, <&siodmac_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 280 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <8>;
+			snps,dma-masters = <2>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152 2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0 0 0 0 0>;
+			snps,axi-max-burst-len = <7>;
+			simaai,device-addr-mask = <0x00000000 0x0000ffff>;
+			simaai,hardcoded-handshake;
+		};
+
+		spi00: spi@0x04003000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04003000 0x0 0x100>;
+			interrupts = <GIC_SPI 285 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_SPI0>, <&sio00_clk SIMAAI_SIO_DEV_SPI0>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset00 SIMAAI_SIO_DEV_SPI0>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi00_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac00 0>, <&dmac00 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		spi01: spi@0x04004000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04004000 0x0 0x100>;
+			interrupts = <GIC_SPI 293 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_SPI1>, <&sio00_clk SIMAAI_SIO_DEV_SPI1>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset00 SIMAAI_SIO_DEV_SPI1>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi01_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac00 4>, <&dmac00 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		i2c00: i2c@0x04005000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04005000 0x0 0x100>;
+			interrupts = <GIC_SPI 285 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_I2C0>;
+			resets = <&reset00 SIMAAI_SIO_DEV_I2C0>;
+			pinctrl-0 = <&pins_i2c00_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c01: i2c@0x04007000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04007000 0x0 0x100>;
+			interrupts = <GIC_SPI 289 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_I2C1>;
+			resets = <&reset00 SIMAAI_SIO_DEV_I2C1>;
+			pinctrl-0 = <&pins_i2c01_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c02: i2c@0x04009000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04009000 0x0 0x100>;
+			interrupts = <GIC_SPI 293 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_I2C2>;
+			resets = <&reset00 SIMAAI_SIO_DEV_I2C2>;
+			pinctrl-0 = <&pins_i2c02_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c03: i2c@0x0400b000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x0400b000 0x0 0x100>;
+			interrupts = <GIC_SPI 297 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_I2C3>;
+			resets = <&reset00 SIMAAI_SIO_DEV_I2C3>;
+			pinctrl-0 = <&pins_i2c03_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uart00: uart@0x04006000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04006000 0x0 0x100>;
+			interrupts = <GIC_SPI 285 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_UART0>;
+			resets = <&reset00 SIMAAI_SIO_DEV_UART0>;
+			pinctrl-0 = <&pins_uart00_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac00 0>, <&dmac00 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart01: uart@0x04008000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04008000 0x0 0x100>;
+			interrupts = <GIC_SPI 289 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_UART1>;
+			resets = <&reset00 SIMAAI_SIO_DEV_UART1>;
+			pinctrl-0 = <&pins_uart01_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac00 2>, <&dmac00 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart02: uart@0x0400a000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0400a000 0x0 0x100>;
+			interrupts = <GIC_SPI 293 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_UART2>;
+			resets = <&reset00 SIMAAI_SIO_DEV_UART2>;
+			pinctrl-0 = <&pins_uart02_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac00 4>, <&dmac00 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart03: uart@0x0400c000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0400c000 0x0 0x100>;
+			interrupts = <GIC_SPI 297 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio00_clk SIMAAI_SIO_DEV_UART3>;
+			resets = <&reset00 SIMAAI_SIO_DEV_UART3>;
+			pinctrl-0 = <&pins_uart03_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac00 6>, <&dmac00 7>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+	};
+
+	sio1: sio@1 {
+		compatible = "simple-bus";
+		status = "disabled";
+		ranges;
+
+		pinmux10: pinmux@0x04010000 {
+			compatible = "simaai,pinctrl-sio";
+			reg = <0x0 0x04010000 0 0x208>, <0x0 0x04011008 0 0x4>;
+			reg-names = "ctl", "gpio";
+
+			pins_spi10_deafult: pins_spi10 {
+				function = "spi";
+				groups = "spi0_group";
+			};
+
+			pins_spi11_deafult: pins_spi11 {
+				function = "spi";
+				groups = "spi1_group";
+			};
+
+			pins_i2c10_deafult: pins_i2c10 {
+				function = "i2c";
+				groups = "i2c0_group";
+			};
+
+			pins_i2c11_deafult: pins_i2c11 {
+				function = "i2c";
+				groups = "i2c1_group";
+			};
+
+			pins_i2c12_deafult: pins_i2c12 {
+				function = "i2c";
+				groups = "i2c2_group";
+			};
+
+			pins_i2c13_deafult: pins_i2c13 {
+				function = "i2c";
+				groups = "i2c3_group";
+			};
+
+			pins_uart10_deafult: pins_uart10 {
+				function = "uart";
+				groups = "uart0_group";
+			};
+
+			pins_uart11_deafult: pins_uart11 {
+				function = "uart";
+				groups = "uart1_group";
+			};
+
+			pins_uart12_deafult: pins_uart12 {
+				function = "uart";
+				groups = "uart2_group";
+			};
+
+			pins_uart13_deafult: pins_uart13 {
+				function = "uart";
+				groups = "uart3_group";
+			};
+
+			pins_gpio10_deafult: pins_gpio10 {
+				function = "gpio";
+				groups = "gpio0_group";
+			};
+
+			pins_gpio11_deafult: pins_gpio11 {
+				function = "gpio";
+				groups = "gpio1_group";
+			};
+
+			pins_gpio12_deafult: pins_gpio12 {
+				function = "gpio";
+				groups = "gpio2_group";
+			};
+
+			pins_gpio13_deafult: pins_gpio13 {
+				function = "gpio";
+				groups = "gpio3_group";
+			};
+
+			pins_gpio14_deafult: pins_gpio14 {
+				function = "gpio";
+				groups = "gpio4_group";
+			};
+
+			pins_gpio15_deafult: pins_gpio15 {
+				function = "gpio";
+				groups = "gpio5_group";
+			};
+
+			pins_gpio16_deafult: pins_gpio16 {
+				function = "gpio";
+				groups = "gpio6_group";
+			};
+
+			pins_gpio17_deafult: pins_gpio17 {
+				function = "gpio";
+				groups = "gpio7_group";
+			};
+		};
+
+		reset10: reset@0x04010210 {
+			compatible = "simaai,reset-sio";
+			reg = <0x0 0x04010210 0 0x8>;
+			#reset-cells = <1>;
+		};
+
+		gpio10: gpio@0x04011000 {
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x0 0x04011000 0 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			port1: gpio@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <2>;
+				snps,nr-gpios = <8>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				reg = <0>;
+				interrupts = <GIC_SPI 308 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 310 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 312 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 314 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 316 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 318 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 320 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 322 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+
+		dmac10: dma-controller@0x04012000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x04012000 0x0 0x1000>;
+			clocks = <&siodmac_clk>, <&siodmac_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 306 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <8>;
+			snps,dma-masters = <2>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152 2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0 0 0 0 0>;
+			snps,axi-max-burst-len = <7>;
+			simaai,device-addr-mask = <0x00000000 0x0000ffff>;
+			simaai,hardcoded-handshake;
+		};
+
+		spi10: spi@0x04013000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04013000 0x0 0x100>;
+			interrupts = <GIC_SPI 311 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_SPI0>, <&sio10_clk SIMAAI_SIO_DEV_SPI0>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset10 SIMAAI_SIO_DEV_SPI0>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi10_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac10 0>, <&dmac10 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		spi11: spi@0x04014000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04014000 0x0 0x100>;
+			interrupts = <GIC_SPI 319 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_SPI1>, <&sio10_clk SIMAAI_SIO_DEV_SPI1>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset10 SIMAAI_SIO_DEV_SPI1>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi11_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac10 4>, <&dmac10 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		i2c10: i2c@0x04015000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04015000 0x0 0x100>;
+			interrupts = <GIC_SPI 311 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_I2C0>;
+			resets = <&reset10 SIMAAI_SIO_DEV_I2C0>;
+			pinctrl-0 = <&pins_i2c10_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c11: i2c@0x04017000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04017000 0x0 0x100>;
+			interrupts = <GIC_SPI 315 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_I2C1>;
+			resets = <&reset10 SIMAAI_SIO_DEV_I2C1>;
+			pinctrl-0 = <&pins_i2c11_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c12: i2c@0x04019000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04019000 0x0 0x100>;
+			interrupts = <GIC_SPI 319 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_I2C2>;
+			resets = <&reset10 SIMAAI_SIO_DEV_I2C2>;
+			pinctrl-0 = <&pins_i2c12_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c13: i2c@0x0401b000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x0401b000 0x0 0x100>;
+			interrupts = <GIC_SPI 323 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_I2C3>;
+			resets = <&reset10 SIMAAI_SIO_DEV_I2C3>;
+			pinctrl-0 = <&pins_i2c13_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uart10: uart@0x04016000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04016000 0x0 0x100>;
+			interrupts = <GIC_SPI 311 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_UART0>;
+			resets = <&reset10 SIMAAI_SIO_DEV_UART0>;
+			pinctrl-0 = <&pins_uart10_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac10 0>, <&dmac10 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart11: uart@0x04018000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04018000 0x0 0x100>;
+			interrupts = <GIC_SPI 315 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_UART1>;
+			resets = <&reset10 SIMAAI_SIO_DEV_UART1>;
+			pinctrl-0 = <&pins_uart11_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac10 2>, <&dmac10 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart12: uart@0x0401a000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0401a000 0x0 0x100>;
+			interrupts = <GIC_SPI 319 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_UART2>;
+			resets = <&reset10 SIMAAI_SIO_DEV_UART2>;
+			pinctrl-0 = <&pins_uart12_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac10 4>, <&dmac10 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart13: uart@0x0401c000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0401c000 0x0 0x100>;
+			interrupts = <GIC_SPI 323 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio10_clk SIMAAI_SIO_DEV_UART3>;
+			resets = <&reset10 SIMAAI_SIO_DEV_UART3>;
+			pinctrl-0 = <&pins_uart13_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac10 6>, <&dmac10 7>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+	};
+
+	sio2: sio@2 {
+		compatible = "simple-bus";
+		status = "disabled";
+		ranges;
+
+		pinmux20: pinmux@0x04020000 {
+			compatible = "simaai,pinctrl-sio";
+			reg = <0x0 0x04020000 0 0x208>, <0x0 0x04021008 0 0x4>;
+			reg-names = "ctl", "gpio";
+
+			pins_spi20_deafult: pins_spi20 {
+				function = "spi";
+				groups = "spi0_group";
+			};
+
+			pins_spi21_deafult: pins_spi21 {
+				function = "spi";
+				groups = "spi1_group";
+			};
+
+			pins_i2c20_deafult: pins_i2c20 {
+				function = "i2c";
+				groups = "i2c0_group";
+			};
+
+			pins_i2c21_deafult: pins_i2c21 {
+				function = "i2c";
+				groups = "i2c1_group";
+			};
+
+			pins_i2c22_deafult: pins_i2c22 {
+				function = "i2c";
+				groups = "i2c2_group";
+			};
+
+			pins_i2c23_deafult: pins_i2c23 {
+				function = "i2c";
+				groups = "i2c3_group";
+			};
+
+			pins_uart20_deafult: pins_uart20 {
+				function = "uart";
+				groups = "uart0_group";
+			};
+
+			pins_uart21_deafult: pins_uart21 {
+				function = "uart";
+				groups = "uart1_group";
+			};
+
+			pins_uart22_deafult: pins_uart22 {
+				function = "uart";
+				groups = "uart2_group";
+			};
+
+			pins_uart23_deafult: pins_uart23 {
+				function = "uart";
+				groups = "uart3_group";
+			};
+
+			pins_gpio20_deafult: pins_gpio20 {
+				function = "gpio";
+				groups = "gpio0_group";
+			};
+
+			pins_gpio21_deafult: pins_gpio21 {
+				function = "gpio";
+				groups = "gpio1_group";
+			};
+
+			pins_gpio22_deafult: pins_gpio22 {
+				function = "gpio";
+				groups = "gpio2_group";
+			};
+
+			pins_gpio23_deafult: pins_gpio23 {
+				function = "gpio";
+				groups = "gpio3_group";
+			};
+
+			pins_gpio24_deafult: pins_gpio24 {
+				function = "gpio";
+				groups = "gpio4_group";
+			};
+
+			pins_gpio25_deafult: pins_gpio25 {
+				function = "gpio";
+				groups = "gpio5_group";
+			};
+
+			pins_gpio26_deafult: pins_gpio26 {
+				function = "gpio";
+				groups = "gpio6_group";
+			};
+
+			pins_gpio27_deafult: pins_gpio27 {
+				function = "gpio";
+				groups = "gpio7_group";
+			};
+		};
+
+		reset20: reset@0x04020210 {
+			compatible = "simaai,reset-sio";
+			reg = <0x0 0x04020210 0 0x8>;
+			#reset-cells = <1>;
+		};
+
+		gpio20: gpio@0x04021000 {
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x0 0x04021000 0 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			port2: gpio@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <2>;
+				snps,nr-gpios = <8>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				reg = <0>;
+				interrupts = <GIC_SPI 334 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 336 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 338 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 340 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 342 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 344 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 346 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 348 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+
+		dmac20: dma-controller@0x04022000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x04022000 0x0 0x1000>;
+			clocks = <&siodmac_clk>, <&siodmac_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 332 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <8>;
+			snps,dma-masters = <2>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152 2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0 0 0 0 0>;
+			snps,axi-max-burst-len = <7>;
+			simaai,device-addr-mask = <0x00000000 0x0000ffff>;
+			simaai,hardcoded-handshake;
+		};
+
+		spi20: spi@0x04023000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04023000 0x0 0x100>;
+			interrupts = <GIC_SPI 337 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_SPI0>, <&sio20_clk SIMAAI_SIO_DEV_SPI0>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset20 SIMAAI_SIO_DEV_SPI0>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi20_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac20 0>, <&dmac20 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		spi21: spi@0x04024000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04024000 0x0 0x100>;
+			interrupts = <GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_SPI1>, <&sio20_clk SIMAAI_SIO_DEV_SPI1>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset20 SIMAAI_SIO_DEV_SPI1>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi21_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac20 4>, <&dmac20 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		i2c20: i2c@0x04025000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04025000 0x0 0x100>;
+			interrupts = <GIC_SPI 337 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_I2C0>;
+			resets = <&reset20 SIMAAI_SIO_DEV_I2C0>;
+			pinctrl-0 = <&pins_i2c20_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c21: i2c@0x04027000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04027000 0x0 0x100>;
+			interrupts = <GIC_SPI 341 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_I2C1>;
+			resets = <&reset20 SIMAAI_SIO_DEV_I2C1>;
+			pinctrl-0 = <&pins_i2c21_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c22: i2c@0x04029000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04029000 0x0 0x100>;
+			interrupts = <GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_I2C2>;
+			resets = <&reset20 SIMAAI_SIO_DEV_I2C2>;
+			pinctrl-0 = <&pins_i2c22_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c23: i2c@0x0402b000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x0402b000 0x0 0x100>;
+			interrupts = <GIC_SPI 349 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_I2C3>;
+			resets = <&reset20 SIMAAI_SIO_DEV_I2C3>;
+			pinctrl-0 = <&pins_i2c23_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uart20: uart@0x04026000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04026000 0x0 0x100>;
+			interrupts = <GIC_SPI 337 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_UART0>;
+			resets = <&reset20 SIMAAI_SIO_DEV_UART0>;
+			pinctrl-0 = <&pins_uart20_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac20 0>, <&dmac20 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart21: uart@0x04028000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04028000 0x0 0x100>;
+			interrupts = <GIC_SPI 341 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_UART1>;
+			resets = <&reset20 SIMAAI_SIO_DEV_UART1>;
+			pinctrl-0 = <&pins_uart21_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac20 2>, <&dmac20 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart22: uart@0x0402a000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0402a000 0x0 0x100>;
+			interrupts = <GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_UART2>;
+			resets = <&reset20 SIMAAI_SIO_DEV_UART2>;
+			pinctrl-0 = <&pins_uart22_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac20 4>, <&dmac20 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart23: uart@0x0402c000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0402c000 0x0 0x100>;
+			interrupts = <GIC_SPI 349 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio20_clk SIMAAI_SIO_DEV_UART3>;
+			resets = <&reset20 SIMAAI_SIO_DEV_UART3>;
+			pinctrl-0 = <&pins_uart23_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac20 6>, <&dmac20 7>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+	};
+
+	sio3: sio@3 {
+		compatible = "simple-bus";
+		status = "disabled";
+		ranges;
+
+		pinmux30: pinmux@0x04030000 {
+			compatible = "simaai,pinctrl-sio";
+			reg = <0x0 0x04030000 0 0x208>, <0x0 0x04031008 0 0x4>;
+			reg-names = "ctl", "gpio";
+
+			pins_spi30_deafult: pins_spi30 {
+				function = "spi";
+				groups = "spi0_group";
+			};
+
+			pins_spi31_deafult: pins_spi31 {
+				function = "spi";
+				groups = "spi1_group";
+			};
+
+			pins_i2c30_deafult: pins_i2c30 {
+				function = "i2c";
+				groups = "i2c0_group";
+			};
+
+			pins_i2c31_deafult: pins_i2c31 {
+				function = "i2c";
+				groups = "i2c1_group";
+			};
+
+			pins_i2c32_deafult: pins_i2c32 {
+				function = "i2c";
+				groups = "i2c2_group";
+			};
+
+			pins_i2c33_deafult: pins_i2c33 {
+				function = "i2c";
+				groups = "i2c3_group";
+			};
+
+			pins_uart30_deafult: pins_uart30 {
+				function = "uart";
+				groups = "uart0_group";
+			};
+
+			pins_uart31_deafult: pins_uart31 {
+				function = "uart";
+				groups = "uart1_group";
+			};
+
+			pins_uart32_deafult: pins_uart32 {
+				function = "uart";
+				groups = "uart2_group";
+			};
+
+			pins_uart33_deafult: pins_uart33 {
+				function = "uart";
+				groups = "uart3_group";
+			};
+
+			pins_gpio30_deafult: pins_gpio30 {
+				function = "gpio";
+				groups = "gpio0_group";
+			};
+
+			pins_gpio31_deafult: pins_gpio31 {
+				function = "gpio";
+				groups = "gpio1_group";
+			};
+
+			pins_gpio32_deafult: pins_gpio32 {
+				function = "gpio";
+				groups = "gpio2_group";
+			};
+
+			pins_gpio33_deafult: pins_gpio33 {
+				function = "gpio";
+				groups = "gpio3_group";
+			};
+
+			pins_gpio34_deafult: pins_gpio34 {
+				function = "gpio";
+				groups = "gpio4_group";
+			};
+
+			pins_gpio35_deafult: pins_gpio35 {
+				function = "gpio";
+				groups = "gpio5_group";
+			};
+
+			pins_gpio36_deafult: pins_gpio36 {
+				function = "gpio";
+				groups = "gpio6_group";
+			};
+
+			pins_gpio37_deafult: pins_gpio37 {
+				function = "gpio";
+				groups = "gpio7_group";
+			};
+		};
+
+		reset30: reset@0x04030210 {
+			compatible = "simaai,reset-sio";
+			reg = <0x0 0x04030210 0 0x8>;
+			#reset-cells = <1>;
+		};
+
+		gpio30: gpio@0x04031000 {
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x0 0x04031000 0 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			port3: gpio@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <2>;
+				snps,nr-gpios = <8>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				reg = <0>;
+				interrupts = <GIC_SPI 360 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 362 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 364 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 366 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 368 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 370 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 372 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 374 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+
+		dmac30: dma-controller@0x04032000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x04032000 0x0 0x1000>;
+			clocks = <&siodmac_clk>, <&siodmac_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 358 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <8>;
+			snps,dma-masters = <2>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152 2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0 0 0 0 0>;
+			snps,axi-max-burst-len = <7>;
+			simaai,device-addr-mask = <0x00000000 0x0000ffff>;
+			simaai,hardcoded-handshake;
+		};
+
+		spi30: spi@0x04033000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04033000 0x0 0x100>;
+			interrupts = <GIC_SPI 363 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_SPI0>, <&sio30_clk SIMAAI_SIO_DEV_SPI0>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset30 SIMAAI_SIO_DEV_SPI0>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi30_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac30 0>, <&dmac30 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		spi31: spi@0x04034000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04034000 0x0 0x100>;
+			interrupts = <GIC_SPI 371 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_SPI1>, <&sio30_clk SIMAAI_SIO_DEV_SPI1>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset30 SIMAAI_SIO_DEV_SPI1>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi31_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac30 4>, <&dmac30 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		i2c30: i2c@0x04035000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04035000 0x0 0x100>;
+			interrupts = <GIC_SPI 363 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_I2C0>;
+			resets = <&reset30 SIMAAI_SIO_DEV_I2C0>;
+			pinctrl-0 = <&pins_i2c30_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c31: i2c@0x04037000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04037000 0x0 0x100>;
+			interrupts = <GIC_SPI 367 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_I2C1>;
+			resets = <&reset30 SIMAAI_SIO_DEV_I2C1>;
+			pinctrl-0 = <&pins_i2c31_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c32: i2c@0x04039000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04039000 0x0 0x100>;
+			interrupts = <GIC_SPI 371 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_I2C2>;
+			resets = <&reset30 SIMAAI_SIO_DEV_I2C2>;
+			pinctrl-0 = <&pins_i2c32_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c33: i2c@0x0403b000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x0403b000 0x0 0x100>;
+			interrupts = <GIC_SPI 375 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_I2C3>;
+			resets = <&reset30 SIMAAI_SIO_DEV_I2C3>;
+			pinctrl-0 = <&pins_i2c33_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uart30: uart@0x04036000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04036000 0x0 0x100>;
+			interrupts = <GIC_SPI 363 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_UART0>;
+			resets = <&reset30 SIMAAI_SIO_DEV_UART0>;
+			pinctrl-0 = <&pins_uart30_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac30 0>, <&dmac30 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart31: uart@0x04038000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04038000 0x0 0x100>;
+			interrupts = <GIC_SPI 367 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_UART1>;
+			resets = <&reset30 SIMAAI_SIO_DEV_UART1>;
+			pinctrl-0 = <&pins_uart31_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac30 2>, <&dmac30 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart32: uart@0x0403a000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0403a000 0x0 0x100>;
+			interrupts = <GIC_SPI 371 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_UART2>;
+			resets = <&reset30 SIMAAI_SIO_DEV_UART2>;
+			pinctrl-0 = <&pins_uart32_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac30 4>, <&dmac30 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart33: uart@0x0403c000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0403c000 0x0 0x100>;
+			interrupts = <GIC_SPI 375 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio30_clk SIMAAI_SIO_DEV_UART3>;
+			resets = <&reset30 SIMAAI_SIO_DEV_UART3>;
+			pinctrl-0 = <&pins_uart33_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac30 6>, <&dmac30 7>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+	};
+
+	sio4: sio@4 {
+		compatible = "simple-bus";
+		status = "disabled";
+		ranges;
+
+		pinmux40: pinmux@0x04040000 {
+			compatible = "simaai,pinctrl-sio";
+			reg = <0x0 0x04040000 0 0x208>, <0x0 0x04041008 0 0x4>;
+			reg-names = "ctl", "gpio";
+
+			pins_spi40_deafult: pins_spi40 {
+				function = "spi";
+				groups = "spi0_group";
+			};
+
+			pins_spi41_deafult: pins_spi41 {
+				function = "spi";
+				groups = "spi1_group";
+			};
+
+			pins_i2c40_deafult: pins_i2c40 {
+				function = "i2c";
+				groups = "i2c0_group";
+			};
+
+			pins_i2c41_deafult: pins_i2c41 {
+				function = "i2c";
+				groups = "i2c1_group";
+			};
+
+			pins_i2c42_deafult: pins_i2c42 {
+				function = "i2c";
+				groups = "i2c2_group";
+			};
+
+			pins_i2c43_deafult: pins_i2c43 {
+				function = "i2c";
+				groups = "i2c3_group";
+			};
+
+			pins_uart40_deafult: pins_uart40 {
+				function = "uart";
+				groups = "uart0_group";
+			};
+
+			pins_uart41_deafult: pins_uart41 {
+				function = "uart";
+				groups = "uart1_group";
+			};
+
+			pins_uart42_deafult: pins_uart42 {
+				function = "uart";
+				groups = "uart2_group";
+			};
+
+			pins_uart43_deafult: pins_uart43 {
+				function = "uart";
+				groups = "uart3_group";
+			};
+
+			pins_gpio40_deafult: pins_gpio40 {
+				function = "gpio";
+				groups = "gpio0_group";
+			};
+
+			pins_gpio41_deafult: pins_gpio41 {
+				function = "gpio";
+				groups = "gpio1_group";
+			};
+
+			pins_gpio42_deafult: pins_gpio42 {
+				function = "gpio";
+				groups = "gpio2_group";
+			};
+
+			pins_gpio43_deafult: pins_gpio43 {
+				function = "gpio";
+				groups = "gpio3_group";
+			};
+
+			pins_gpio44_deafult: pins_gpio44 {
+				function = "gpio";
+				groups = "gpio4_group";
+			};
+
+			pins_gpio45_deafult: pins_gpio45 {
+				function = "gpio";
+				groups = "gpio5_group";
+			};
+
+			pins_gpio46_deafult: pins_gpio46 {
+				function = "gpio";
+				groups = "gpio6_group";
+			};
+
+			pins_gpio47_deafult: pins_gpio47 {
+				function = "gpio";
+				groups = "gpio7_group";
+			};
+		};
+
+		reset40: reset@0x04040210 {
+			compatible = "simaai,reset-sio";
+			reg = <0x0 0x04040210 0 0x8>;
+			#reset-cells = <1>;
+		};
+
+		gpio40: gpio@0x04041000 {
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x0 0x04041000 0 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			port4: gpio@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <2>;
+				snps,nr-gpios = <8>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				reg = <0>;
+				interrupts = <GIC_SPI 386 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 388 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 390 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 392 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 394 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 396 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 398 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 400 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+
+		dmac40: dma-controller@0x04042000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x04042000 0x0 0x1000>;
+			clocks = <&siodmac_clk>, <&siodmac_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 384 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <8>;
+			snps,dma-masters = <2>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152 2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0 0 0 0 0>;
+			snps,axi-max-burst-len = <7>;
+			simaai,device-addr-mask = <0x00000000 0x0000ffff>;
+			simaai,hardcoded-handshake;
+		};
+
+		spi40: spi@0x04043000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04043000 0x0 0x100>;
+			interrupts = <GIC_SPI 389 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_SPI0>, <&sio40_clk SIMAAI_SIO_DEV_SPI0>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset40 SIMAAI_SIO_DEV_SPI0>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi40_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac40 0>, <&dmac40 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		spi41: spi@0x04044000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04044000 0x0 0x100>;
+			interrupts = <GIC_SPI 397 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_SPI1>, <&sio40_clk SIMAAI_SIO_DEV_SPI1>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset40 SIMAAI_SIO_DEV_SPI1>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi41_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac40 4>, <&dmac40 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		i2c40: i2c@0x04045000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04045000 0x0 0x100>;
+			interrupts = <GIC_SPI 389 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_I2C0>;
+			resets = <&reset40 SIMAAI_SIO_DEV_I2C0>;
+			pinctrl-0 = <&pins_i2c40_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c41: i2c@0x04047000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04047000 0x0 0x100>;
+			interrupts = <GIC_SPI 393 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_I2C1>;
+			resets = <&reset40 SIMAAI_SIO_DEV_I2C1>;
+			pinctrl-0 = <&pins_i2c41_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c42: i2c@0x04049000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04049000 0x0 0x100>;
+			interrupts = <GIC_SPI 397 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_I2C2>;
+			resets = <&reset40 SIMAAI_SIO_DEV_I2C2>;
+			pinctrl-0 = <&pins_i2c42_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c43: i2c@0x0404b000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x0404b000 0x0 0x100>;
+			interrupts = <GIC_SPI 401 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_I2C3>;
+			resets = <&reset40 SIMAAI_SIO_DEV_I2C3>;
+			pinctrl-0 = <&pins_i2c43_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uart40: uart@0x04046000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04046000 0x0 0x100>;
+			interrupts = <GIC_SPI 389 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_UART0>;
+			resets = <&reset40 SIMAAI_SIO_DEV_UART0>;
+			pinctrl-0 = <&pins_uart40_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac40 0>, <&dmac40 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart41: uart@0x04048000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04048000 0x0 0x100>;
+			interrupts = <GIC_SPI 393 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_UART1>;
+			resets = <&reset40 SIMAAI_SIO_DEV_UART1>;
+			pinctrl-0 = <&pins_uart41_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac40 2>, <&dmac40 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart42: uart@0x0404a000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0404a000 0x0 0x100>;
+			interrupts = <GIC_SPI 397 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_UART2>;
+			resets = <&reset40 SIMAAI_SIO_DEV_UART2>;
+			pinctrl-0 = <&pins_uart42_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac40 4>, <&dmac40 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart43: uart@0x0404c000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0404c000 0x0 0x100>;
+			interrupts = <GIC_SPI 401 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio40_clk SIMAAI_SIO_DEV_UART3>;
+			resets = <&reset40 SIMAAI_SIO_DEV_UART3>;
+			pinctrl-0 = <&pins_uart43_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac40 6>, <&dmac40 7>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+	};
+
+	sio5: sio@5 {
+		compatible = "simple-bus";
+		status = "disabled";
+		ranges;
+
+		pinmux50: pinmux@0x04050000 {
+			compatible = "simaai,pinctrl-sio";
+			reg = <0x0 0x04050000 0 0x208>, <0x0 0x04051008 0 0x4>;
+			reg-names = "ctl", "gpio";
+
+			pins_spi50_deafult: pins_spi50 {
+				function = "spi";
+				groups = "spi0_group";
+			};
+
+			pins_spi51_deafult: pins_spi51 {
+				function = "spi";
+				groups = "spi1_group";
+			};
+
+			pins_i2c50_deafult: pins_i2c50 {
+				function = "i2c";
+				groups = "i2c0_group";
+			};
+
+			pins_i2c51_deafult: pins_i2c51 {
+				function = "i2c";
+				groups = "i2c1_group";
+			};
+
+			pins_i2c52_deafult: pins_i2c52 {
+				function = "i2c";
+				groups = "i2c2_group";
+			};
+
+			pins_i2c53_deafult: pins_i2c53 {
+				function = "i2c";
+				groups = "i2c3_group";
+			};
+
+			pins_uart50_deafult: pins_uart50 {
+				function = "uart";
+				groups = "uart0_group";
+			};
+
+			pins_uart51_deafult: pins_uart51 {
+				function = "uart";
+				groups = "uart1_group";
+			};
+
+			pins_uart52_deafult: pins_uart52 {
+				function = "uart";
+				groups = "uart2_group";
+			};
+
+			pins_uart53_deafult: pins_uart53 {
+				function = "uart";
+				groups = "uart3_group";
+			};
+
+			pins_gpio50_deafult: pins_gpio50 {
+				function = "gpio";
+				groups = "gpio0_group";
+			};
+
+			pins_gpio51_deafult: pins_gpio51 {
+				function = "gpio";
+				groups = "gpio1_group";
+			};
+
+			pins_gpio52_deafult: pins_gpio52 {
+				function = "gpio";
+				groups = "gpio2_group";
+			};
+
+			pins_gpio53_deafult: pins_gpio53 {
+				function = "gpio";
+				groups = "gpio3_group";
+			};
+
+			pins_gpio54_deafult: pins_gpio54 {
+				function = "gpio";
+				groups = "gpio4_group";
+			};
+
+			pins_gpio55_deafult: pins_gpio55 {
+				function = "gpio";
+				groups = "gpio5_group";
+			};
+
+			pins_gpio56_deafult: pins_gpio56 {
+				function = "gpio";
+				groups = "gpio6_group";
+			};
+
+			pins_gpio57_deafult: pins_gpio57 {
+				function = "gpio";
+				groups = "gpio7_group";
+			};
+		};
+
+		reset50: reset@0x04050210 {
+			compatible = "simaai,reset-sio";
+			reg = <0x0 0x04050210 0 0x8>;
+			#reset-cells = <1>;
+		};
+
+		gpio50: gpio@0x04051000 {
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x0 0x04051000 0 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			port5: gpio@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <2>;
+				snps,nr-gpios = <8>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				reg = <0>;
+				interrupts = <GIC_SPI 412 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 414 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 416 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 418 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 420 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 422 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 424 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 426 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+
+		dmac50: dma-controller@0x04052000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x04052000 0x0 0x1000>;
+			clocks = <&siodmac_clk>, <&siodmac_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 410 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <8>;
+			snps,dma-masters = <2>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152 2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0 0 0 0 0>;
+			snps,axi-max-burst-len = <7>;
+			simaai,device-addr-mask = <0x00000000 0x0000ffff>;
+			simaai,hardcoded-handshake;
+		};
+
+		spi50: spi@0x04053000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04053000 0x0 0x100>;
+			interrupts = <GIC_SPI 415 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_SPI0>, <&sio50_clk SIMAAI_SIO_DEV_SPI0>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset50 SIMAAI_SIO_DEV_SPI0>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi50_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac50 0>, <&dmac50 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		spi51: spi@0x04054000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04054000 0x0 0x100>;
+			interrupts = <GIC_SPI 423 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_SPI1>, <&sio50_clk SIMAAI_SIO_DEV_SPI1>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset50 SIMAAI_SIO_DEV_SPI1>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi51_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac50 4>, <&dmac50 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		i2c50: i2c@0x04055000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04055000 0x0 0x100>;
+			interrupts = <GIC_SPI 415 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_I2C0>;
+			resets = <&reset50 SIMAAI_SIO_DEV_I2C0>;
+			pinctrl-0 = <&pins_i2c50_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c51: i2c@0x04057000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04057000 0x0 0x100>;
+			interrupts = <GIC_SPI 419 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_I2C1>;
+			resets = <&reset50 SIMAAI_SIO_DEV_I2C1>;
+			pinctrl-0 = <&pins_i2c51_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c52: i2c@0x04059000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04059000 0x0 0x100>;
+			interrupts = <GIC_SPI 423 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_I2C2>;
+			resets = <&reset50 SIMAAI_SIO_DEV_I2C2>;
+			pinctrl-0 = <&pins_i2c52_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c53: i2c@0x0405b000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x0405b000 0x0 0x100>;
+			interrupts = <GIC_SPI 427 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_I2C3>;
+			resets = <&reset50 SIMAAI_SIO_DEV_I2C3>;
+			pinctrl-0 = <&pins_i2c53_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uart50: uart@0x04056000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04056000 0x0 0x100>;
+			interrupts = <GIC_SPI 415 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_UART0>;
+			resets = <&reset50 SIMAAI_SIO_DEV_UART0>;
+			pinctrl-0 = <&pins_uart50_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac50 0>, <&dmac50 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart51: uart@0x04058000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04058000 0x0 0x100>;
+			interrupts = <GIC_SPI 419 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_UART1>;
+			resets = <&reset50 SIMAAI_SIO_DEV_UART1>;
+			pinctrl-0 = <&pins_uart51_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac50 2>, <&dmac50 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart52: uart@0x0405a000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0405a000 0x0 0x100>;
+			interrupts = <GIC_SPI 423 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_UART2>;
+			resets = <&reset50 SIMAAI_SIO_DEV_UART2>;
+			pinctrl-0 = <&pins_uart52_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac50 4>, <&dmac50 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart53: uart@0x0405c000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0405c000 0x0 0x100>;
+			interrupts = <GIC_SPI 427 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio50_clk SIMAAI_SIO_DEV_UART3>;
+			resets = <&reset50 SIMAAI_SIO_DEV_UART3>;
+			pinctrl-0 = <&pins_uart53_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac50 6>, <&dmac50 7>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+	};
+
+	sio6: sio@6 {
+		compatible = "simple-bus";
+		status = "disabled";
+		ranges;
+
+		pinmux60: pinmux@0x04060000 {
+			compatible = "simaai,pinctrl-sio";
+			reg = <0x0 0x04060000 0 0x208>, <0x0 0x04061008 0 0x4>;
+			reg-names = "ctl", "gpio";
+
+			pins_spi60_deafult: pins_spi60 {
+				function = "spi";
+				groups = "spi0_group";
+			};
+
+			pins_spi61_deafult: pins_spi61 {
+				function = "spi";
+				groups = "spi1_group";
+			};
+
+			pins_i2c60_deafult: pins_i2c60 {
+				function = "i2c";
+				groups = "i2c0_group";
+			};
+
+			pins_i2c61_deafult: pins_i2c61 {
+				function = "i2c";
+				groups = "i2c1_group";
+			};
+
+			pins_i2c62_deafult: pins_i2c62 {
+				function = "i2c";
+				groups = "i2c2_group";
+			};
+
+			pins_i2c63_deafult: pins_i2c63 {
+				function = "i2c";
+				groups = "i2c3_group";
+			};
+
+			pins_uart60_deafult: pins_uart60 {
+				function = "uart";
+				groups = "uart0_group";
+			};
+
+			pins_uart61_deafult: pins_uart61 {
+				function = "uart";
+				groups = "uart1_group";
+			};
+
+			pins_uart62_deafult: pins_uart62 {
+				function = "uart";
+				groups = "uart2_group";
+			};
+
+			pins_uart63_deafult: pins_uart63 {
+				function = "uart";
+				groups = "uart3_group";
+			};
+
+			pins_gpio60_deafult: pins_gpio60 {
+				function = "gpio";
+				groups = "gpio0_group";
+			};
+
+			pins_gpio61_deafult: pins_gpio61 {
+				function = "gpio";
+				groups = "gpio1_group";
+			};
+
+			pins_gpio62_deafult: pins_gpio62 {
+				function = "gpio";
+				groups = "gpio2_group";
+			};
+
+			pins_gpio63_deafult: pins_gpio63 {
+				function = "gpio";
+				groups = "gpio3_group";
+			};
+
+			pins_gpio64_deafult: pins_gpio64 {
+				function = "gpio";
+				groups = "gpio4_group";
+			};
+
+			pins_gpio65_deafult: pins_gpio65 {
+				function = "gpio";
+				groups = "gpio5_group";
+			};
+
+			pins_gpio66_deafult: pins_gpio66 {
+				function = "gpio";
+				groups = "gpio6_group";
+			};
+
+			pins_gpio67_deafult: pins_gpio67 {
+				function = "gpio";
+				groups = "gpio7_group";
+			};
+		};
+
+		reset60: reset@0x04060210 {
+			compatible = "simaai,reset-sio";
+			reg = <0x0 0x04060210 0 0x8>;
+			#reset-cells = <1>;
+		};
+
+		gpio60: gpio@0x04061000 {
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x0 0x04061000 0 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			port6: gpio@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <2>;
+				snps,nr-gpios = <8>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				reg = <0>;
+				interrupts = <GIC_SPI 438 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 440 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 442 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 444 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 446 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 448 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 450 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 452 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+
+		dmac60: dma-controller@0x04062000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x04062000 0x0 0x1000>;
+			clocks = <&siodmac_clk>, <&siodmac_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 436 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <8>;
+			snps,dma-masters = <2>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152 2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0 0 0 0 0>;
+			snps,axi-max-burst-len = <7>;
+			simaai,device-addr-mask = <0x00000000 0x0000ffff>;
+			simaai,hardcoded-handshake;
+		};
+
+		spi60: spi@0x04063000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04063000 0x0 0x100>;
+			interrupts = <GIC_SPI 441 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_SPI0>, <&sio60_clk SIMAAI_SIO_DEV_SPI0>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset60 SIMAAI_SIO_DEV_SPI0>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi60_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac60 0>, <&dmac60 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		spi61: spi@0x04064000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04064000 0x0 0x100>;
+			interrupts = <GIC_SPI 449 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_SPI1>, <&sio60_clk SIMAAI_SIO_DEV_SPI1>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset60 SIMAAI_SIO_DEV_SPI1>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi61_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac60 4>, <&dmac60 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		i2c60: i2c@0x04065000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04065000 0x0 0x100>;
+			interrupts = <GIC_SPI 441 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_I2C0>;
+			resets = <&reset60 SIMAAI_SIO_DEV_I2C0>;
+			pinctrl-0 = <&pins_i2c60_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c61: i2c@0x04067000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04067000 0x0 0x100>;
+			interrupts = <GIC_SPI 445 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_I2C1>;
+			resets = <&reset60 SIMAAI_SIO_DEV_I2C1>;
+			pinctrl-0 = <&pins_i2c61_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c62: i2c@0x04069000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04069000 0x0 0x100>;
+			interrupts = <GIC_SPI 449 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_I2C2>;
+			resets = <&reset60 SIMAAI_SIO_DEV_I2C2>;
+			pinctrl-0 = <&pins_i2c62_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c63: i2c@0x0406b000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x0406b000 0x0 0x100>;
+			interrupts = <GIC_SPI 453 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_I2C3>;
+			resets = <&reset60 SIMAAI_SIO_DEV_I2C3>;
+			pinctrl-0 = <&pins_i2c63_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uart60: uart@0x04066000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04066000 0x0 0x100>;
+			interrupts = <GIC_SPI 441 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_UART0>;
+			resets = <&reset60 SIMAAI_SIO_DEV_UART0>;
+			pinctrl-0 = <&pins_uart60_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac60 0>, <&dmac60 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart61: uart@0x04068000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04068000 0x0 0x100>;
+			interrupts = <GIC_SPI 445 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_UART1>;
+			resets = <&reset60 SIMAAI_SIO_DEV_UART1>;
+			pinctrl-0 = <&pins_uart61_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac60 2>, <&dmac60 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart62: uart@0x0406a000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0406a000 0x0 0x100>;
+			interrupts = <GIC_SPI 449 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_UART2>;
+			resets = <&reset60 SIMAAI_SIO_DEV_UART2>;
+			pinctrl-0 = <&pins_uart62_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac60 4>, <&dmac60 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart63: uart@0x0406c000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0406c000 0x0 0x100>;
+			interrupts = <GIC_SPI 453 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio60_clk SIMAAI_SIO_DEV_UART3>;
+			resets = <&reset60 SIMAAI_SIO_DEV_UART3>;
+			pinctrl-0 = <&pins_uart63_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac60 6>, <&dmac60 7>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+	};
+
+	sio7: sio@7 {
+		compatible = "simple-bus";
+		status = "disabled";
+		ranges;
+
+		pinmux70: pinmux@0x04070000 {
+			compatible = "simaai,pinctrl-sio";
+			reg = <0x0 0x04070000 0 0x208>, <0x0 0x04071008 0 0x4>;
+			reg-names = "ctl", "gpio";
+
+			pins_spi70_deafult: pins_spi70 {
+				function = "spi";
+				groups = "spi0_group";
+			};
+
+			pins_spi71_deafult: pins_spi71 {
+				function = "spi";
+				groups = "spi1_group";
+			};
+
+			pins_i2c70_deafult: pins_i2c70 {
+				function = "i2c";
+				groups = "i2c0_group";
+			};
+
+			pins_i2c71_deafult: pins_i2c71 {
+				function = "i2c";
+				groups = "i2c1_group";
+			};
+
+			pins_i2c72_deafult: pins_i2c72 {
+				function = "i2c";
+				groups = "i2c2_group";
+			};
+
+			pins_i2c73_deafult: pins_i2c73 {
+				function = "i2c";
+				groups = "i2c3_group";
+			};
+
+			pins_uart70_deafult: pins_uart70 {
+				function = "uart";
+				groups = "uart0_group";
+			};
+
+			pins_uart71_deafult: pins_uart71 {
+				function = "uart";
+				groups = "uart1_group";
+			};
+
+			pins_uart72_deafult: pins_uart72 {
+				function = "uart";
+				groups = "uart2_group";
+			};
+
+			pins_uart73_deafult: pins_uart73 {
+				function = "uart";
+				groups = "uart3_group";
+			};
+
+			pins_gpio70_deafult: pins_gpio70 {
+				function = "gpio";
+				groups = "gpio0_group";
+			};
+
+			pins_gpio71_deafult: pins_gpio71 {
+				function = "gpio";
+				groups = "gpio1_group";
+			};
+
+			pins_gpio72_deafult: pins_gpio72 {
+				function = "gpio";
+				groups = "gpio2_group";
+			};
+
+			pins_gpio73_deafult: pins_gpio73 {
+				function = "gpio";
+				groups = "gpio3_group";
+			};
+
+			pins_gpio74_deafult: pins_gpio74 {
+				function = "gpio";
+				groups = "gpio4_group";
+			};
+
+			pins_gpio75_deafult: pins_gpio75 {
+				function = "gpio";
+				groups = "gpio5_group";
+			};
+
+			pins_gpio76_deafult: pins_gpio76 {
+				function = "gpio";
+				groups = "gpio6_group";
+			};
+
+			pins_gpio77_deafult: pins_gpio77 {
+				function = "gpio";
+				groups = "gpio7_group";
+			};
+		};
+
+		reset70: reset@0x04070210 {
+			compatible = "simaai,reset-sio";
+			reg = <0x0 0x04070210 0 0x8>;
+			#reset-cells = <1>;
+		};
+
+		gpio70: gpio@0x04071000 {
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x0 0x04071000 0 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			port7: gpio@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <2>;
+				snps,nr-gpios = <8>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				reg = <0>;
+				interrupts = <GIC_SPI 464 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 466 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 468 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 470 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 472 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 474 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 476 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 478 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+
+		dmac70: dma-controller@0x04072000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x04072000 0x0 0x1000>;
+			clocks = <&siodmac_clk>, <&siodmac_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 462 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <8>;
+			snps,dma-masters = <2>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152 2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0 0 0 0 0>;
+			snps,axi-max-burst-len = <7>;
+			simaai,device-addr-mask = <0x00000000 0x0000ffff>;
+			simaai,hardcoded-handshake;
+		};
+
+		spi70: spi@0x04073000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04073000 0x0 0x100>;
+			interrupts = <GIC_SPI 467 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_SPI0>, <&sio70_clk SIMAAI_SIO_DEV_SPI0>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset70 SIMAAI_SIO_DEV_SPI0>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi70_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac70 0>, <&dmac70 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		spi71: spi@0x04074000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dw-apb-ssi";
+			reg = <0x0 0x04074000 0x0 0x100>;
+			interrupts = <GIC_SPI 475 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_SPI1>, <&sio70_clk SIMAAI_SIO_DEV_SPI1>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <1>;
+			reg-io-width = <4>;
+			resets = <&reset70 SIMAAI_SIO_DEV_SPI1>;
+			reset-names = "spi";
+			pinctrl-0 = <&pins_spi71_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac70 4>, <&dmac70 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		i2c70: i2c@0x04075000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04075000 0x0 0x100>;
+			interrupts = <GIC_SPI 467 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_I2C0>;
+			resets = <&reset70 SIMAAI_SIO_DEV_I2C0>;
+			pinctrl-0 = <&pins_i2c70_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c71: i2c@0x04077000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04077000 0x0 0x100>;
+			interrupts = <GIC_SPI 471 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_I2C1>;
+			resets = <&reset70 SIMAAI_SIO_DEV_I2C1>;
+			pinctrl-0 = <&pins_i2c71_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c72: i2c@0x04079000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x04079000 0x0 0x100>;
+			interrupts = <GIC_SPI 475 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_I2C2>;
+			resets = <&reset70 SIMAAI_SIO_DEV_I2C2>;
+			pinctrl-0 = <&pins_i2c72_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2c73: i2c@0x0407b000 {
+			compatible = "snps,designware-i2c";
+			reg = <0x0 0x0407b000 0x0 0x100>;
+			interrupts = <GIC_SPI 479 IRQ_TYPE_LEVEL_HIGH>;
+			clock-frequency = <100000>;
+			i2c-sda-hold-time-ns = <300>;
+			i2c-sda-falling-time-ns = <300>;
+			i2c-scl-falling-time-ns = <300>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_I2C3>;
+			resets = <&reset70 SIMAAI_SIO_DEV_I2C3>;
+			pinctrl-0 = <&pins_i2c73_deafult>;
+			pinctrl-names = "default";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uart70: uart@0x04076000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04076000 0x0 0x100>;
+			interrupts = <GIC_SPI 467 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_UART0>;
+			resets = <&reset70 SIMAAI_SIO_DEV_UART0>;
+			pinctrl-0 = <&pins_uart70_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac70 0>, <&dmac70 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart71: uart@0x04078000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04078000 0x0 0x100>;
+			interrupts = <GIC_SPI 471 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_UART1>;
+			resets = <&reset70 SIMAAI_SIO_DEV_UART1>;
+			pinctrl-0 = <&pins_uart71_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac70 2>, <&dmac70 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart72: uart@0x0407a000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0407a000 0x0 0x100>;
+			interrupts = <GIC_SPI 475 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_UART2>;
+			resets = <&reset70 SIMAAI_SIO_DEV_UART2>;
+			pinctrl-0 = <&pins_uart72_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac70 4>, <&dmac70 5>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		uart73: uart@0x0407c000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x0407c000 0x0 0x100>;
+			interrupts = <GIC_SPI 479 IRQ_TYPE_LEVEL_HIGH>;
+			reg-io-width = <4>;
+			reg-shift = <2>;
+			clocks = <&sio70_clk SIMAAI_SIO_DEV_UART3>;
+			resets = <&reset70 SIMAAI_SIO_DEV_UART3>;
+			pinctrl-0 = <&pins_uart73_deafult>;
+			pinctrl-names = "default";
+			dmas = <&dmac70 6>, <&dmac70 7>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+	};
+};

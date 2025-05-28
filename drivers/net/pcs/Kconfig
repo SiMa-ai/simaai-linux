@@ -32,4 +32,10 @@ config PCS_ALTERA_TSE
 	  This module provides helper functions for the Altera Triple Speed
 	  Ethernet SGMII PCS, that can be found on the Intel Socfpga family.
 
+config PCS_SIMAAI_MODALIX
+	bool "SIMAAI XPCS on Modalix platform"
+	default n
+	help
+	  Say Y to enable XPCS support on Modalix SIMAAI platform.
+
 endmenu

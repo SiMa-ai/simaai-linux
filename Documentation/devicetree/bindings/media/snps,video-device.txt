@@ -1,0 +1,12 @@
+Synopsys DesignWare CSI-2 Host video device
+
+This driver handles all the video handling part of this platform.
+
+Required properties:
+
+- compatible: Must be "snps,video-device".
+
+- dmas, dma-names: List of one DMA specifier and identifier string (as defined
+  in Documentation/devicetree/bindings/dma/dma.txt) per port. Each port
+  requires a DMA channel with the identifier string set to "port" followed by
+  the port index.

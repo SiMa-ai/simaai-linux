@@ -9,9 +9,18 @@
 #define SYNOPSYS_XPCS_ID		0x7996ced0
 #define SYNOPSYS_XPCS_MASK		0xffffffff
 
+#ifdef CONFIG_PCS_SIMAAI_MODALIX
+#define DW_MMD_VEND1_OFFSET		0x780000
+/* we don't have VEND2 registers, let's point it to vend1 */
+#define DW_MMD_VEND2_OFFSET		DW_MMD_VEND1_OFFSET
+#define DW_MMD_AN_OFFSET		0x180000
+#define DW_MMD_PCS_OFFSET		0x080000
+#else
 #define DW_MMD_VEND1_OFFSET		0x60000
 #define DW_MMD_VEND2_OFFSET		0x40000
 #define DW_MMD_AN_OFFSET		0x40000
+#define DW_MMD_PCS_OFFSET		0x0
+#endif
 
 /* Vendor regs access */
 #define DW_VENDOR			BIT(15)
@@ -19,8 +28,20 @@
 /* VR_XS_PCS */
 #define DW_USXGMII_RST			BIT(10)
 #define DW_USXGMII_EN			BIT(9)
+#define DW_VR_XS_PCS_DIG_CTRL1		0x0000
+#define DW_EN_2_5G_MODE			BIT(2)
+#define DW_VR_XS_PCS_DBG_CTRL		0x0005
+#define DW_SUPRESS_LOS_DET		BIT(4)
+#define DW_RX_DT_EN_CTL			BIT(6)
+#define DW_VR_XS_PCS_KR_CTRL		0x0007
+#define DW_USXG_MODE			GENMASK(12, 10)
+#define DW_USXG_MODE_10G		FIELD_PREP(GENMASK(12, 10), 0x0)
+#define DW_USXG_MODE_5G			FIELD_PREP(GENMASK(12, 10), 0x1)
 #define DW_VR_XS_PCS_DIG_STS		0x0010
 #define DW_RXFIFO_ERR			GENMASK(6, 5)
+#define DW_PSEQ_ST			GENMASK(4, 2)
+#define DW_PSEQ_ST_GOOD			FIELD_PREP(GENMASK(4, 2), 0x4)
+#define DW_PSEQ_ST_DOWN			FIELD_PREP(GENMASK(4, 2), 0x6)
 
 /* SR_MII */
 #define DW_USXGMII_FULL			BIT(8)
@@ -71,6 +92,7 @@
 #define DW_VR_MII_AN_ADV_FD		BIT(5)
 
 /* VR_MII_DIG_CTRL1 */
+#define DW_VR_MII_DIG_CTRL1_PHY_MODE_CTRL	BIT(0)
 #define DW_VR_MII_DIG_CTRL1_MAC_AUTO_SW		BIT(9)
 
 /* VR_MII_DIG_CTRL2 */
@@ -94,6 +116,7 @@
 #define DW_VR_MII_PCS_MODE_MASK			GENMASK(2, 1)
 #define DW_VR_MII_PCS_MODE_C37_1000BASEX	0x0
 #define DW_VR_MII_PCS_MODE_C37_SGMII		0x2
+#define DW_VR_MII_PCS_MODE_C37_QSGMII		0x3
 #define DW_VR_MII_AN_CTRL_INTR_EN_SHIFT	0
 #define DW_VR_MII_INTR_EN_MASK		BIT(0)
 #define DW_VR_MII_INTR_EN_ENABLED		0x1
@@ -108,11 +131,22 @@
 #define DW_VR_MII_C37_ANSGM_SP_100		0x1
 #define DW_VR_MII_C37_ANSGM_SP_1000		0x2
 #define DW_VR_MII_C37_ANSGM_SP_LNKSTS		BIT(4)
+#define DW_VR_MII_AN_USXGMII_SP_SHIFT		10
+#define DW_VR_MII_AN_USXGMII_SP			GENMASK(12, 10)
+#define DW_VR_MII_AN_USXGMII_SP_10		0x0
+#define DW_VR_MII_AN_USXGMII_SP_100		0x1
+#define DW_VR_MII_AN_USXGMII_SP_1000		0x2
+#define DW_VR_MII_AN_USXGMII_SP_10000		0x3
+#define DW_VR_MII_AN_USXGMII_SP_2500		0x4
+#define DW_VR_MII_AN_USXGMII_SP_5000		0x5
+#define DW_VR_MII_AN_USXGMII_FD			BIT(13)
+#define DW_VR_MII_AN_USXGMII_LNKSTS		BIT(14)
 
 /* SR MII MMD Control defines */
 #define AN_CL37_EN			BIT(12)	/* Enable Clause 37 auto-nego */
-#define SGMII_SPEED_SS13		BIT(13)	/* SGMII speed along with SS6 */
-#define SGMII_SPEED_SS6			BIT(6)	/* SGMII speed along with SS13 */
+#define SGMII_SPEED_SS13		BIT(13)	/* SGMII speed along with SS6 and SS5 */
+#define SGMII_SPEED_SS6			BIT(6)	/* SGMII speed along with SS13 and SS5 */
+#define SGMII_SPEED_SS5			BIT(5)	/* SGMII speed along with SS13 and SS6 */
 
 /* VR MII EEE Control 0 defines */
 #define DW_VR_MII_EEE_LTX_EN			BIT(0)  /* LPI Tx Enable */
@@ -128,8 +162,17 @@
 /* VR MII EEE Control 1 defines */
 #define DW_VR_MII_EEE_TRN_LPI		BIT(0)	/* Transparent Mode Enable */
 
+/* VR XS PCS Control defines */
+#define DW_VR_PCS_DIG_CTRL1		0x8000
+#define DW_VR_PCS_DIG_CTRL1_USRA_RST	BIT(10)  /* USXGMII Rate Adapter Reset (Port 0) */
+#define DW_VR_PCS_DIG_CTRL1_CL37_BP	BIT(12)  /* Enable Clause 37 AN in BackPlane (BP) Configurations */
+
 int xpcs_read(struct dw_xpcs *xpcs, int dev, u32 reg);
 int xpcs_write(struct dw_xpcs *xpcs, int dev, u32 reg, u16 val);
+int xpcs_read_vpcs(struct dw_xpcs *xpcs, int reg);
+int xpcs_write_vpcs(struct dw_xpcs *xpcs, int reg, u16 val);
 int nxp_sja1105_sgmii_pma_config(struct dw_xpcs *xpcs);
 int nxp_sja1110_sgmii_pma_config(struct dw_xpcs *xpcs);
 int nxp_sja1110_2500basex_pma_config(struct dw_xpcs *xpcs);
+int simaai_xpcs_switch_mode(struct dw_xpcs *xpcs, phy_interface_t iface);
+int simaai_xpcs_power_cycle(struct dw_xpcs *xpcs);
