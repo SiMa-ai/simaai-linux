@@ -296,7 +296,7 @@ config QCOM_IPCC
 
 config SIMAAI_MBOX
 	tristate "SiMa.ai Mailbox"
-	depends on HAS_IOMEM && ARCH_SIMAAI_DAVINCI
+	depends on HAS_IOMEM && ARCH_SIMAAI
 	help
 	  An implementation of the SiMa.ai DaVinci Mailbox soft core. It is used
 	  to send short messages between ARM64-bit cores and coprocessors.
@@ -304,7 +304,7 @@ config SIMAAI_MBOX
 
 config SIMAAI_HPI
 	tristate "SiMa.ai HPI"
-	depends on HAS_IOMEM && ARCH_SIMAAI_DAVINCI
+	depends on HAS_IOMEM && ARCH_SIMAAI
 	help
 	  An implementation of the SiMa.ai DaVinci HPI driver.
 

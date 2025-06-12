@@ -45,6 +45,7 @@ int al5r_codec_nr_devs = AL5R_NR_DEVS;
 module_param(al5r_codec_nr_devs, int, S_IRUGO);
 static struct class *module_class;
 
+
 int channel_is_ready(struct al5r_codec_chan *chan)
 {
 	unsigned long flags;
@@ -406,6 +407,11 @@ int al5r_setup_dma(struct al5r_codec_desc *codec)
 
 	codec->dma_offset = 0;
 
+	if (codec->dma_mask_64_bit) {
+		dma_set_mask(codec->device, DMA_BIT_MASK(64));
+		dma_set_coherent_mask(codec->device,DMA_BIT_MASK(64));
+	}
+
 	if (np) {
 		struct resource r;
 		u32 mem_offset_reg;
@@ -537,6 +543,8 @@ int al5r_codec_probe(struct platform_device *pdev)
 		al5_info("No irq requested / Couldn't obtain request irq\n");
 		has_irq = false;
 	}
+
+	codec->dma_mask_64_bit = of_property_read_bool(codec->device->of_node, "al,dma-mask-64-bit");
 
 	err = al5r_setup_dma(codec);
 	if (err)

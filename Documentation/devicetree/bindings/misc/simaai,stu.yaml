@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: "http://devicetree.org/schemas/misc/simaai,stu.yaml#"
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: SiMa.ai STU(Simple Translation Unit) Driver
+
+maintainers:
+  - Nilesh Raghuvanshi <nilesh.r@sima.ai>
+
+description: |
+  The SiMai.ai Simple Translation Unit(STU) driver
+
+properties:
+  compatible:
+    enum:
+      - simaai,stu
+    description: For SiMa.ai STU, should be "simaai,stu"
+
+  reg:
+    maxItems: 1
+
+  simaai,stu-gfill-value:
+	type: "integer"
+    description:
+      provides Global fill value for STU block
+
+  simaai,stu-table:
+	type: "array"
+	description: Array of entries for programming each table entries. First value is table index and
+		second value has to be result of the lookup.
+	items:
+		minItems: 1
+		maxItems: 8
+		type: "integer"
+
+required:
+  - compatible
+  - reg
+  - simaai,stu-gfill-value
+  - simaai,stu-table
+
+additionalProperties: false
+
+examples:
+  - |
+    // STU driver instance for CVU
+	evxx_stu: evxx_stu@0x040d3000 {
+		compatible = "simaai,stu";
+		reg = <0x0 0x040d3000 0 0x420>;
+		simaai,stu-gfill-value = <0x0>;
+		simaai,stu-table =	<0 0x0>,
+							<2 0x82>,
+							<4 0x90>;
+	};
+
+	// STU client
+	simaai,evmem-manager {
+		compatible = "simaai,memory-manager";
+		memory-region = <&evmem_reserved>;
+		simaai,target = <6>;\
+		simaai,stu = <&evxx_stu>;
+		status = "okay";
+	}
+

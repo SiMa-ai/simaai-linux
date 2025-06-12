@@ -20,12 +20,13 @@
 
 #define DMAC_MAX_CHANNELS	32
 #define DMAC_MAX_MASTERS	2
-#define DMAC_MAX_BLK_SIZE	0x200000
+#define DMAC_MAX_BLK_SIZE	0x400000
 
 #define DMAC_DESC_SUBMITTED (1)
 #define DMAC_DESC_ISSUED    (2)
 #define DMAC_DESC_COMPLETED (3)
 
+#define WRITEBACK_MASK 0x3FFFFF
 struct dw_axi_dma_hcfg {
 	u32	nr_channels;
 	u32	nr_masters;
@@ -37,7 +38,12 @@ struct dw_axi_dma_hcfg {
 	/* Register map for DMAX_NUM_CHANNELS <= 8 */
 	bool	reg_map_8_channels;
 	bool	restrict_axi_burst_len;
+	bool	hardcoded_handshake;
+	u64	dev_addr_mask;
 	u32 xfer_mode;
+	bool perch_irq;
+	u32  lms_axi_master;
+	bool rdwr_back_feature;
 };
 
 struct axi_dma_chan {
@@ -56,6 +62,13 @@ struct axi_dma_chan {
 	bool				cyclic;
 	/* these other elements are all protected by vc.lock */
 	bool				is_paused;
+	int 				irq;
+	/* 
+	**	SiMa.ai specfic for video transfer
+	*/
+	bool 				is_video_mode;
+	struct list_head 	desc_list;
+	
 };
 
 struct dw_axi_dma {
@@ -108,17 +121,21 @@ struct axi_dma_desc {
 	u32				completed_blocks;
 	u32				length;
 	u32				period_len;
+
+	struct list_head 	node;
 };
 
 struct axi_dma_chan_config {
 	u8 dst_multblk_type;
 	u8 src_multblk_type;
+	u8 wr_uid;
 	u8 dst_per;
 	u8 src_per;
 	u8 tt_fc;
 	u8 prior;
 	u8 hs_sel_dst;
 	u8 hs_sel_src;
+	u8 dst_osr_limit;
 };
 
 static inline struct device *dchan2dev(struct dma_chan *dchan)
@@ -232,6 +249,13 @@ static inline struct axi_dma_chan *dchan_to_axi_dma_chan(struct dma_chan *dchan)
 #define DMAC_CHAN_SUSP2_SHIFT		0
 #define DMAC_CHAN_SUSP2_WE_SHIFT	16
 
+/* Below constants are Sima.ai Modalix MLSoC Board */
+#define CH_LLI_SRC_START_ADDR		0x1000
+#define FRAME_METADATA_SIZE			32
+#define CH_SSTATAR_START_ADDR		0x100
+#define CH_CFG_H_DST_OST_LIMIT_VAL	15
+#define CH_CFG_L_WR_UID_VAL			15
+
 /* CH_CTL_H */
 #define CH_CTL_H_ARLEN_EN		BIT(6)
 #define CH_CTL_H_ARLEN_POS		7
@@ -252,6 +276,9 @@ enum {
 	DWAXIDMAC_ARWLEN_MAX		= DWAXIDMAC_ARWLEN_256
 };
 
+#define CH_CTL_H_SRC_STAT_EN	BIT(24)
+#define CH_CTL_H_DST_STAT_EN	BIT(25)
+#define CH_CTL_H_IOC_BLK_TFR_EN	BIT(26)
 #define CH_CTL_H_LLI_LAST		BIT(30)
 #define CH_CTL_H_LLI_VALID		BIT(31)
 
@@ -287,7 +314,18 @@ enum {
 #define CH_CTL_L_DST_MAST		BIT(2)
 #define CH_CTL_L_SRC_MAST		BIT(0)
 
+#define CH_CTL_L_DST_MAST_POS		2
+#define CH_CTL_L_SRC_MAST_POS		0
+enum {
+	DWAXIDMAC_CH_CTL_L_MAST_1_INTF = 0,
+	DWAXIDMAC_CH_CTL_L_MAST_2_INTF
+};
+
 /* CH_CFG_H */
+#define CH_CFG_H_DST_OSR_LIMIT_POS  27
+#define CH_CFG_H_SRC_OSR_LIMIT_POS  23
+#define CH_CFG_H_LOCK_CH_L_POS		21
+#define CH_CFG_H_LOCK_CH_POS		20
 #define CH_CFG_H_PRIORITY_POS		17
 #define CH_CFG_H_DST_PER_POS		12
 #define CH_CFG_H_SRC_PER_POS		7
@@ -319,6 +357,8 @@ enum {
 	DWAXIDMAC_MBLK_TYPE_SHADOW_REG,
 	DWAXIDMAC_MBLK_TYPE_LL
 };
+
+#define CH_CFG_L_WR_UID_POS			25
 
 /* CH_CFG2 */
 #define CH_CFG2_L_SRC_PER_POS		4

@@ -1195,7 +1195,7 @@ config REGULATOR_SC2731
 
 config REGULATOR_SIMAAIPRC
 	tristate "SiMa.ai PRC regulator driver"
-	depends on HAS_IOMEM && ARCH_SIMAAI_DAVINCI
+	depends on HAS_IOMEM && ARCH_SIMAAI
 	help
 	  This driver provides support for the voltage regulators via PRC
 	  registers on the SiMa.ai DaVinci SoC.

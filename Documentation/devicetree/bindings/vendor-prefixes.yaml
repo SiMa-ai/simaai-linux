@@ -1167,6 +1167,8 @@ patternProperties:
     description: Silicon Mitus, Inc.
   "^siemens,.*":
     description: Siemens AG
+  "^simaai,.*":
+    description: SiMa Technologies, Inc.
   "^simtek,.*":
     description: Cypress Semiconductor Corporation (Simtek Corporation)
   "^sinlinx,.*":

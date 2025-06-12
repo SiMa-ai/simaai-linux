@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: "http://devicetree.org/schemas/reset/simaai,reset-sio.yaml#"
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: SiMa.ai SIO Reset Controller Driver
+
+maintainers:
+  - Yurii Konovalenko <yurii.konovalenko@sima.ai>
+
+description: |
+  The SiMai.ai SIO Reset controller driver.
+
+properties:
+  compatible:
+    enum:
+      - simaai,reset-sio
+    description: For SiMa.ai SIO reset controller, should be "simaai,reset-sio"
+
+  reg:
+    maxItems: 1
+
+  "#reset-cells":
+    const: 1
+    description:
+      See table below for valid peripheral reset numbers.
+      Reset	      Define          Peripheral
+        0	  SIMAAI_SIO_DEV_SPI0      SPI 0
+        1   SIMAAI_SIO_DEV_SPI1      SPI 1
+        2   SIMAAI_SIO_DEV_I2C0      I2C 0
+        3   SIMAAI_SIO_DEV_I2C1      I2C 1
+        4   SIMAAI_SIO_DEV_I2C2      I2C 2
+        5   SIMAAI_SIO_DEV_I2C3      I2C 3
+        6   SIMAAI_SIO_DEV_UART0     UART 0
+        7   SIMAAI_SIO_DEV_UART1     UART 1
+        8   SIMAAI_SIO_DEV_UART2     UART 2
+        9   SIMAAI_SIO_DEV_UART3     UART 3
+
+required:
+  - compatible
+  - reg
+  - "#reset-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/pinctrl/pinctrl-simaai-sio.h>
+    // Reset provider
+    reset00: reset@0x0400210 {
+      compatible = "simaai,reset-sio";
+      reg = <0x0 0x04000210 0 0x8>;
+      #reset-cells = <1>;
+    };
+
+    // Reset consumer
+    uart00: uart@0x04006000 {
+      compatible = "snps,dw-apb-uart";
+      reg = <0x0 0x04006000 0x0 0x100>;
+      interrupts = <GIC_SPI 282 IRQ_TYPE_LEVEL_HIGH>;
+      reg-io-width = <4>;
+      reg-shift = <2>;
+      clocks = <&sio00_clk SIMAAI_SIO_DEV_UART0>;
+      resets = <&reset00 SIMAAI_SIO_DEV_UART0>;
+      pinctrl-0 = <&pins_uart00_deafult>;
+      pinctrl-names = "default";
+      status = "disabled";
+    };

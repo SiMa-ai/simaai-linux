@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024 SiMa ai
+ */
+
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	ranges;
+
+	mipi_dphy_rx0: dphy@40c0040 {
+		compatible = "snps,dphy-rx";
+		#phy-cells = <1>;
+		reg = < 0x00 0x40c0040 0x0 0x18
+			0x0 0x40c2020 0x0 0x14>;
+		snps,dphy-frequency = <33000000>;
+		snps,dphy-te-len = <12>;
+		simaai,mipi-generator = <0>;
+	};
+
+	csi0: csi0@40c0000 {
+		compatible = "snps,dw-mipi-csi";
+		reg = <0x0 0x40c0000 0x0 0x40
+				0x0 0x40c0058 0x0 0xFA8
+				0x0 0x40c2000 0x0 0x20
+				0x0 0x40c2034 0x0 0xFCC>;
+		reg-names = "csi-reg0", "csi-reg1", "glue-reg0", "glue-reg1";
+		interrupts = <GIC_SPI 77 IRQ_TYPE_LEVEL_HIGH>;
+		phys = <&mipi_dphy_rx0 0>;
+		phy-names = "snps-dphy-rx";
+		status = "disabled";
+		isp-connected = <0>;
+		output-type = <2>;
+		ipi-mode = <0>;
+		ipi-color-mode = <0>;
+		ipi-auto-flush = <1>;
+		virtual-channel = <1>;
+	};
+
+	mipi_dphy_rx1: dphy@40c3040 {
+		compatible = "snps,dphy-rx";
+		#phy-cells = <1>;
+		reg = < 0x00 0x40c3040 0x0 0x18
+			0x0 0x40c5020 0x0 0x14>;
+		snps,dphy-frequency = <33000000>;
+		snps,dphy-te-len = <12>;
+                simaai,mipi-generator = <0>;
+	};
+
+	csi1: csi1@40c3000 {
+		compatible = "snps,dw-mipi-csi";
+		reg = < 0x0 0x40c3000 0x0 0x40
+			0x0 0x40c3058 0x0 0xFA8
+			0x0 0x40c5000 0x0 0x20
+			0x0 0x40c5034 0x0 0xFCC>;
+		reg-names = "csi-reg0", "csi-reg1", "glue-reg0", "glue-reg1";
+		interrupts = <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
+		phys = <&mipi_dphy_rx1 0>;
+		phy-names = "snps-dphy-rx";
+		status = "disabled";
+		isp-connected = <0>;
+		output-type = <2>;
+		ipi-mode = <0>;
+		ipi-color-mode = <0>;
+		ipi-auto-flush = <1>;
+		virtual-channel = <1>;
+	};
+
+	mipi_dphy_rx2: dphy@40c6040 {
+		compatible = "snps,dphy-rx";
+		#phy-cells = <1>;
+		reg = < 0x00 0x40c6040 0x0 0x18
+			0x0 0x40c8020 0x0 0x14>;
+		snps,dphy-frequency = <33000000>;
+		snps,dphy-te-len = <12>;
+		simaai,mipi-generator = <0>;
+	};
+
+	csi2: csi2@40c6000 {
+		compatible = "snps,dw-mipi-csi";
+		reg = < 0x0 0x40c6000 0x0 0x40
+			0x0 0x40c6058 0x0 0xFA8
+			0x0 0x40c8000 0x0 0x20
+			0x0 0x40c8034 0x0 0xFCC>;
+		reg-names = "csi-reg0", "csi-reg1", "glue-reg0", "glue-reg1";
+		interrupts = <GIC_SPI 79 IRQ_TYPE_LEVEL_HIGH>;
+		phys = <&mipi_dphy_rx2 0>;
+		phy-names = "snps-dphy-rx";
+		status = "disabled";
+		isp-connected = <0>;
+		output-type = <2>;
+		ipi-mode = <0>;
+		ipi-color-mode = <0>;
+		ipi-auto-flush = <1>;
+		virtual-channel = <1>;
+	};
+
+	mipi_dphy_rx3: dphy@40c9040 {
+		compatible = "snps,dphy-rx";
+		#phy-cells = <1>;
+		reg = < 0x00 0x40c9040 0x0 0x18
+			0x0 0x40cb020 0x0 0x14>;
+		snps,dphy-frequency = <33000000>;
+		snps,dphy-te-len = <12>;
+		simaai,mipi-generator = <0>;
+	};
+
+	csi3: csi3@40c9000 {
+		compatible = "snps,dw-mipi-csi";
+		reg = < 0x0 0x40c9000 0x0 0x40
+			0x0 0x40c9058 0x0 0xFA8
+			0x0 0x40cb000 0x0 0x20
+			0x0 0x40cb034 0x0 0xFCC>;
+		reg-names = "csi-reg0", "csi-reg1", "glue-reg0", "glue-reg1";
+		interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>;
+		phys = <&mipi_dphy_rx3 0>;
+		phy-names = "snps-dphy-rx";
+		status = "disabled";
+		isp-connected = <0>;
+		output-type = <2>;
+		ipi-mode = <0>;
+		ipi-color-mode = <0>;
+		ipi-auto-flush = <1>;
+		virtual-channel = <1>;
+	};
+};

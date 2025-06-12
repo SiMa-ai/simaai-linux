@@ -1,0 +1,234 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2023-2024 SiMa ai
+ */
+
+#include <dt-bindings/pinctrl/pinctrl-simaai-sio.h>
+
+/ {
+	nvs: nvs@0 {
+		compatible = "simple-bus";
+		ranges;
+
+		nvs_pinmux_spi: pinmux@0x0408c000 {
+			compatible = "simaai,pinctrl-nvs-spi";
+			reg = <0x0 0x0408c000 0 0x130>;
+
+			pins_nvs_spi0_deafult: pins_nvs_spi0 {
+				nvs_spi0_data_pins {
+					pins = "SPI0_D0", "SPI0_D1", "SPI0_D2", "SPI0_D3",
+					       "SPI0_D4", "SPI0_D5", "SPI0_D6", "SPI0_D7";
+					input-enable;
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_spi0_clk_pins {
+					pins = "SPI0_SCLK_N", "SPI0_SCLK_P";
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_spi0_ss_pins {
+					pins = "SPI0_SS0", "SPI0_SS1", "SPI0_SS2", "SPI0_SS3";
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_spi0_ssin_pins {
+					pins = "SPI0_SS_IN";
+					input-enable;
+					bias-pull-up;
+					drive-strength = <7>;
+				};
+				nvs_spi0_dms_pins {
+					pins = "SPI0_DMS";
+					output-enable;
+					drive-strength = <7>;
+				};
+			};
+
+			pins_nvs_spi1_deafult: pins_nvs_spi1 {
+				nvs_spi1_data_pins {
+					pins = "SPI1_D0", "SPI1_D1", "SPI1_D2", "SPI1_D3",
+					       "SPI1_D4", "SPI1_D5", "SPI1_D6", "SPI1_D7";
+					input-enable;
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_spi1_clk_pins {
+					pins = "SPI1_SCLK_N", "SPI1_SCLK_P";
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_spi1_ss_pins {
+					pins = "SPI1_SS0", "SPI1_SS1", "SPI1_SS2", "SPI1_SS3";
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_spi1_ssin_pins {
+					pins = "SPI1_SS_IN";
+					input-enable;
+					bias-pull-up;
+					drive-strength = <7>;
+				};
+				nvs_spi1_dms_pins {
+					pins = "SPI1_DMS";
+					output-enable;
+					drive-strength = <7>;
+				};
+			};
+		};
+
+		nvs_pinmux_emmcsd: pinmux@0x0408d000 {
+			compatible = "simaai,pinctrl-nvs-sdemmc";
+			reg = <0x0 0x0408d000 0 0x130>;
+
+			pins_nvs_emmc_deafult: pins_nvs_emmc {
+				nvs_emmc_data_pins {
+					pins = "EMMC_D0", "EMMC_D1", "EMMC_D2", "EMMC_D3",
+					       "EMMC_D4", "EMMC_D5", "EMMC_D6", "EMMC_D7";
+					input-enable;
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_emmc_clk_pins {
+					pins = "EMMC_CLK";
+					input-enable;
+					output-enable;
+					bias-pull-up;
+					drive-strength = <7>;
+				};
+				nvs_emmc_cmd_pins {
+					pins = "EMMC_CMD";
+					input-enable;
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_emmc_rst_pins {
+					pins = "EMMC_RST";
+					input-enable;
+					output-enable;
+					bias-pull-up;
+					drive-strength = <7>;
+				};
+			};
+
+			pins_nvs_sd_deafult: pins_nvs_sd {
+				nvs_sd_data_pins {
+					pins = "SDIO_D0", "SDIO_D1", "SDIO_D2", "SDIO_D3";
+					input-enable;
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_sd_clk_pins {
+					pins = "SDIO_CLK";
+					input-enable;
+					output-enable;
+					bias-pull-up;
+					drive-strength = <7>;
+				};
+				nvs_sd_cmd_pins {
+					pins = "SDIO_CMD";
+					input-enable;
+					output-enable;
+					drive-strength = <7>;
+				};
+				nvs_sd_wrprot_pins {
+					pins = "SDIO_WP";
+					input-enable;
+					output-enable;
+					bias-pull-up;
+					drive-strength = <7>;
+				};
+				nvs_sd_det_pins {
+					pins = "SDIO_DET";
+					input-enable;
+					output-enable;
+					bias-pull-up;
+					drive-strength = <7>;
+				};
+				nvs_sd_vsel_pins {
+					pins = "SDIO_VSEL";
+					output-enable;
+					drive-strength = <7>;
+				};
+			};
+		};
+
+		nvs_dmac: dma-controller@0x0408e000 {
+			compatible = "snps,axi-dma-1.01a";
+			reg = <0x0 0x0408e000 0x0 0x1000>;
+			clocks = <&nvs_dma_clk>, <&nvs_dma_clk>;
+			clock-names = "core-clk", "cfgr-clk";
+			interrupts = <GIC_SPI 34 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			dma-channels = <4>;
+			snps,dma-masters = <1>;
+			snps,data-width = <2>;
+			snps,block-size = <2097152 2097152 2097152 2097152>;
+			snps,priority = <0 0 0 0>;
+			snps,axi-max-burst-len = <63>;
+			simaai,hardcoded-handshake;
+		};
+
+		nvs_spi0: spi@0x04088000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dwc-ssi-1.01a";
+			reg = <0x0 0x04088000 0x0 0x100>;
+			interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&nvs_spi_clk>, <&nvs_spi_clk>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <4>;
+			reg-io-width = <4>;
+			pinctrl-0 = <&pins_nvs_spi0_deafult>;
+			pinctrl-names = "default";
+			dmas = <&nvs_dmac 0>, <&nvs_dmac 1>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		nvs_spi1: spi@0x4089000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "snps,dwc-ssi-1.01a";
+			reg = <0x0 0x4089000 0x0 0x100>;
+			interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&nvs_spi_clk>, <&nvs_spi_clk>;
+			clock-names = "ssi_clk", "pclk";
+			spi-max-frequency = <50000000>;
+			num-cs = <4>;
+			reg-io-width = <4>;
+			pinctrl-0 = <&pins_nvs_spi1_deafult>;
+			pinctrl-names = "default";
+			dmas = <&nvs_dmac 2>, <&nvs_dmac 3>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
+		nvs_sdhci0: mmc@0408a000 {
+			compatible = "snps,dwcmshc-sdhci";
+			reg = <0x0 0x0408a000 0x0 0x1000>;
+			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&nvs_emmc_clk>;
+			clock-names = "core";
+			pinctrl-0 = <&pins_nvs_emmc_deafult>;
+			pinctrl-names = "default";
+			bus-width = <8>;
+			non-removable;
+			status = "disabled";
+		};
+
+		nvs_sdhci1: mmc@0408b000 {
+			compatible = "snps,dwcmshc-sdhci";
+			reg = <0x0 0x0408b000 0x0 0x1000>;
+			interrupts = <GIC_SPI 30 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&nvs_sdhci_clk>;
+			clock-names = "core";
+			pinctrl-0 = <&pins_nvs_sd_deafult>;
+			pinctrl-names = "default";
+			bus-width = <4>;
+			no-1-8-v;
+			status = "disabled";
+		};
+	};
+};

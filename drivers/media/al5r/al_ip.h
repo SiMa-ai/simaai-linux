@@ -58,6 +58,7 @@ struct al5r_codec_desc {
 	spinlock_t i_lock;
 	struct kmem_cache *cache;
 	int minor;
+	bool dma_mask_64_bit; /* sima specific parameter for 64-bit dma mask */
 };
 
 struct al5_dma_buf_mmap {

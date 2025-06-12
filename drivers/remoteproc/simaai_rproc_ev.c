@@ -2,9 +2,11 @@
 /*
  * SIMAAI Remote Processor driver for EVXX processor family
  *
+ * Copyright SiMa.ai (C) 2025 All rights reserved
+ *
+ * Author: Nikunj Kela <nikunj.kela@sima.ai>
  */
 
-#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
@@ -16,279 +18,214 @@
 #include <linux/remoteproc.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/dma-mapping.h>
+#include <linux/mailbox_client.h>
+#include <linux/mailbox_controller.h>
 #include "remoteproc_internal.h"
 
-#define NOC_REG_READ(x) (readl(x))
-#define NOC_REG_WRITE(reg, val) (writel(val, reg))
+#include <linux/simaai-stu.h>
 
-#define SIMA_MAX_MEM_REGIONS 1
+#define SIMAAI_RPROC_MAX_VRING		2
+#define SIMAAI_TX_TOUT			500
+#define CVU_FIRMWARE_SIZE		0x04000000
+#define CSM_BASE_ADD			0x10000000
+#define VCCM0_BASE_ADD			0x20000000
+#define VCCM1_BASE_ADD			0x20040000
+#define VCCM2_BASE_ADD			0x20080000
+#define VCCM3_BASE_ADD			0x200C0000
 
-#define SIMA_ARCONNECT_ADDR 0x820000
-#define SIMA_ARCONNECT_SZ 0x10000
+#define ARC_INITIATE_RUN		BIT(25)
+#define CVU_STU_INITIATOR_CLK_EN	BIT(0)
 
-// TODO: Move this to vdk platform specific code
-#define SIMA_ARCONNECT_CMD_ADDR 0x100
-#define SIMA_ARCONNECT_WRITE_ADDR 0x104
+#define CVU_CTRL_CORE0_OFFSET		0x20
+#define CVU_CTRL_CORE1_OFFSET		0x24
+#define CVU_CTRL_CORE2_OFFSET		0x28
+#define CVU_CTRL_CORE3_OFFSET		0x2C
+#define CVU_CTRL_SYS_VCCM0_OFFSET	0x40
+#define CVU_CTRL_SYS_VCCM1_OFFSET	0x44
+#define CVU_CTRL_SYS_VCCM2_OFFSET	0x48
+#define CVU_CTRL_SYS_VCCM3_OFFSET	0x4C
+#define CVU_CTRL_SYS_CSM_OFFSET		0x50
+#define CVU_CTRL_STU_OFFSET		0x14
+#define CVU_BOOT_VECTOR_OFFSET		10
 
-#define SIMA_EVXX_VECTOR_RST_BASE 0x220000
-#define SIMA_EVXX_VECTOR_INTR_BASE 0x10091
+#define DAVINCI_CVU_CLK_EN		BIT(0)
+#define DAVINCI_CVU_EV74_CLK_EN		BIT(1)
+#define DAVINCI_CVU_PCLK_EN		BIT(2)
+#define DAVINCI_CVU_DBG_PCLK_EN		BIT(3)
+#define DAVINCI_CVU_EV74_RST_N		BIT(4)
+#define DAVINCI_CVU_PRESETDBGN		BIT(5)
+#define DAVINCI_CVU_PRESET_N		BIT(6)
+#define DAVINCI_CVU_DBG_PRESETN		BIT(7)
+#define DAVINCI_CVU_RST			BIT(8)
 
-#define SIMA_EVXX_CLEAR_BITS 0xF
-#define SIMA_EVXX_CMD_DEBUG_RST 0x31
-#define SIMA_EVXX_CMD_RUN 0x33
+#define DAVINCI_CLK_EN_MASK	(DAVINCI_CVU_CLK_EN | DAVINCI_CVU_EV74_CLK_EN | DAVINCI_CVU_PCLK_EN | \
+							DAVINCI_CVU_DBG_PCLK_EN)
+#define DAVINCI_RESET_MASK	(DAVINCI_CVU_EV74_RST_N | DAVINCI_CVU_PRESETDBGN | DAVINCI_CVU_PRESET_N \
+							| DAVINCI_CVU_DBG_PRESETN | DAVINCI_CVU_RST)
 
-#define PRC_BASE      0x30100000
-#define CVU_CTRL_ADDR 0x05841000
+#define MODALIX_CVU_CLK_EN			BIT(0)
+#define MODALIX_CVU_EV74_CLK_EN			BIT(1)
+#define MODALIX_CVU_DBG_PCLK_EN			BIT(2)
+#define MODALIX_CVU_EV74_RST_N			BIT(3)
+#define MODALIX_CVU_PRESETDBGN			BIT(4)
+#define MODALIX_CVU_APB_RESET_N			BIT(5)
+#define MODALIX_CVU_DBG_PRESETN			BIT(6)
+#define MODALIX_CVU_RESET_N			BIT(7)
+#define MODALIX_CVU_DBG_CACHE_RST_DISABLE	BIT(8)
+#define MODALIX_CVU_RST				BIT(9)
 
-// Offsets
-#define CVU_CTRL_REG_OFFSET 0x20
-#define CVU_SYS_REG_OFFSET 0x40
-#define CVU_STU_REG_OFFSET (0x14)
-
-#define CVU_FIRMWARE_SIZE	0x04000000
-#define PRC_REG__CKG_RST_REG__CVU_CK_RST_ADDR 0x00000108
-
-const char *ev_mem_names[SIMA_MAX_MEM_REGIONS] = {
-		"ev_mem"
-};
+#define MODALIX_CLK_EN_MASK (MODALIX_CVU_CLK_EN | MODALIX_CVU_EV74_CLK_EN | MODALIX_CVU_DBG_PCLK_EN)
+#define MODALIX_RESET_MASK	(MODALIX_CVU_EV74_RST_N | MODALIX_CVU_PRESETDBGN | \
+					MODALIX_CVU_DBG_PRESETN | MODALIX_CVU_RESET_N | MODALIX_CVU_RST)
 
 /**
- * struct sima_mem - sima internal memory structure
- * @cpu_addr: MPU virtual address of the memory region
- * @bus_addr: Bus address used to access the memory region
- * @dev_addr: Device address from SIMA remote cores view
- * @size: Size of the memory region
+ * @prc_base_addr : memory mapped base address for PRC register
+ * @cvu_glue_base_addr : Memory mapped base address CVU glue registers
+ * @cvu_clk_reset_offset : offset from PRC base register for clock register
+ * @clock_enable_mask : Mask for enabling clocks in CVU clock register
+ * @reset_mask : Reset mask in CVU clock register
+ * @reset_bit_pos : Bit position of reset in CVU clock register
  */
-struct sima_mem {
-	char name[20];
-	void __iomem *cpu_addr;
-	phys_addr_t bus_addr;
-	u32 dev_addr;
-	size_t size;
+struct simaai_rproc_config {
+	phys_addr_t		prc_base_addr;
+	phys_addr_t		cvu_glue_base_addr;
+	uint32_t		cvu_clk_reset_offset;
+	uint32_t		clock_enable_mask;
+	uint32_t		reset_mask;
+	u8			reset_bit_pos;
 };
 
 /**
- * struct sima_rproc - sima remote processor state
+ * struct simaai_rproc - sima remote processor state
  * @rproc: rproc handle
  * @pdev: pointer to platform device
  * @mem: sima memory information
  */
-struct sima_rproc {
-	struct sima_mem mem[SIMA_MAX_MEM_REGIONS];
-	int num_mems;
-	struct sima_mem *rmem;
-	int num_rmems;
-
-	int is_rtc_only;
-	u32 nb_rmems;
+struct simaai_rproc {
+	struct device *dev;
+	struct mbox_client mc;
+	struct mbox_chan *chan;
+	struct work_struct rx_wq;
+	struct simaai_rproc_config *config;
+	struct simaai_stu *stu;
+	struct rproc * rproc;
+	u32	evmem_base;
+	size_t	evmem_size;
 };
 
-struct cvu_ck_rst_s {
-	uint32_t cvu_clk_en : 1;
-	uint32_t cvu_ev74_clk_en : 1;
-	uint32_t cvu_pclk_en : 1;
-	uint32_t cvu_dbg_pclk_en : 1;
-	uint32_t cvu_ev74_rst_n : 1;
-	uint32_t cvu_presetdbgn : 1;
-	uint32_t cvu_presetn : 1;
-	uint32_t cvu_dbg_presetn : 1;
-	uint32_t cvu_rst : 1;
-	uint32_t reserved0 : 23;
-} __packed;
-
-union cvu_ck_rst_u {
-	struct cvu_ck_rst_s reg;
-	uint32_t u32;
-} __packed;
-
-/* Enable this when you see spurious SEerrors, this would
-   make sure the writes to cache lines are streamlined
-   without any compiler optimization errors. Helps debugging */
-
-#if 0
-static void sima_barrier(void)
+static void simaai_rproc_kick(struct rproc *rproc, int vqid)
 {
-	printk("Barrier");
-	__asm__("dmb sy;"
-		"dsb sy;"
-		"isb;"
-		);
-}
-#endif
+	struct simaai_rproc *srproc = rproc->priv;
+	int ret;
 
-// TODO: Fix this, stub until mailbox & virtio are brought into remoteproc
-static void sima_rproc_kick(struct rproc *rproc, int vqid)
-{
-	return;
+	if (WARN_ON(vqid >= SIMAAI_RPROC_MAX_VRING))
+		return;
+
+	/* we just need to send the vq-id */
+	ret = mbox_send_message(srproc->chan, (void *)&vqid);
+	if (ret < 0)
+		dev_err(srproc->dev, "failed to send message via mbox: %d\n", ret);
 }
 
-/* [NOTE]:Enable this to use remoteproc with SynopsysVDK, do not commit this
- * when upstreaming the driver  */
-#if defined(EV_VDK)
-static int sima_rproc_start(struct rproc *rproc)
-{
-	struct device *dev = rproc->dev.parent;
-
-	dev_dbg(dev, "[%s][%d], Inside sima_rproc_start ", __FILE__, __LINE__);
-	// sima_vdk_cpu_boot(arc_mmio);
-	/* Map 1kb of arcconnect region */
-	void __iomem *arc_mmio = devm_ioremap(dev,
-					      SIMA_ARCONNECT_ADDR,
-					      SIMA_ARCONNECT_SZ);
-
-	writel(SIMA_EVXX_VECTOR_RST_BASE, arc_mmio + SIMA_ARCONNECT_WRITE_ADDR);
-	writel(SIMA_EVXX_VECTOR_INTR_BASE, arc_mmio + SIMA_ARCONNECT_CMD_ADDR);
-
-	writel(SIMA_EVXX_CLEAR_BITS , arc_mmio + SIMA_ARCONNECT_WRITE_ADDR);
-	writel(SIMA_EVXX_CMD_DEBUG_RST, arc_mmio + SIMA_ARCONNECT_CMD_ADDR);
-
-	usleep_range(10000, 10001);
-
-	writel(SIMA_EVXX_CLEAR_BITS, arc_mmio + SIMA_ARCONNECT_WRITE_ADDR);
-	writel(SIMA_EVXX_CMD_RUN, arc_mmio + SIMA_ARCONNECT_CMD_ADDR);
-
-	iounmap(arc_mmio);
-	return 0;
-}
-#else
 /*
  * EV startup sequence
  * If we reach this point this means the ev firwmare is loaded onto
  * DRAM and now ready to run the boot sequence.
- * 1. Enable PRC clocks for EV (troot should not have any firewalls
- * here)
+ * 1. Enable PRC clocks for EV (troot should not have any firewalls here)
  * 2. Setup interrupt Vectors, this depends on the arc.met file for ev
  * 3. Setup VMEM address for the all the cores.
  * 4. Release EV out of Reset
  * 5. Setup CSM address
  * 6. Initiate STU clock_en signal
- * 7. Setup arc_initate to run the the firmware on all the cores
+ * 7. Intiiate per core flag
  */
-
-static int sima_rproc_start(struct rproc *rproc)
+static int simaai_rproc_start(struct rproc *rproc)
 {
-	struct device *dev = rproc->dev.parent;
-	struct sima_rproc *srproc = rproc->priv;
-	uint32_t boot_vector = (uint32_t)(srproc->mem[0].dev_addr + srproc->mem[0].size
-					  - CVU_FIRMWARE_SIZE);
+	struct simaai_rproc *srproc = rproc->priv;
+	uint32_t boot_vector = (uint32_t)(srproc->evmem_base + srproc->evmem_size
+							- CVU_FIRMWARE_SIZE);
+	uint32_t val = 0;
+	void __iomem *prc_cvu_addr = ioremap(srproc->config->prc_base_addr +
+					srproc->config->cvu_clk_reset_offset, 0x4);
+	void __iomem *cvu_glue_base_addr = ioremap(srproc->config->cvu_glue_base_addr, 0xA0);
 
-	uint32_t clk_offset = PRC_REG__CKG_RST_REG__CVU_CK_RST_ADDR;
+	// STEP 1
+	val = readl(prc_cvu_addr);
+	writel(val | srproc->config->clock_enable_mask, prc_cvu_addr);
+	val = readl(prc_cvu_addr);
+	writel(val | srproc->config->reset_mask, prc_cvu_addr);
 
+	// STEP 2
+	val = readl(cvu_glue_base_addr + CVU_CTRL_CORE0_OFFSET);
+	val &= ~0x3fffff;
+	writel(val | (boot_vector >> CVU_BOOT_VECTOR_OFFSET), cvu_glue_base_addr + CVU_CTRL_CORE0_OFFSET);
 
-	// Map the entire prc-update and release
-	void __iomem *addr = ioremap(PRC_BASE, 0x1000);
-	// Map the CVU-glue logic, do not use ioremap_wc here, this
-	// leads to cache-line problems.
-	void __iomem *cvu_ctrl_addr = ioremap(CVU_CTRL_ADDR, 0xa0);
+	val = readl(cvu_glue_base_addr + CVU_CTRL_CORE1_OFFSET);
+	val &= ~0x3fffff;
+	writel(val | (boot_vector >> CVU_BOOT_VECTOR_OFFSET), cvu_glue_base_addr + CVU_CTRL_CORE1_OFFSET);
 
-	uint32_t *cvu_ctrl0 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_CTRL_REG_OFFSET);
-	uint32_t *cvu_ctrl1 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_CTRL_REG_OFFSET + 4);
-	uint32_t *cvu_ctrl2 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_CTRL_REG_OFFSET + 8);
-	uint32_t *cvu_ctrl3 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_CTRL_REG_OFFSET + 12);
+	val = readl(cvu_glue_base_addr + CVU_CTRL_CORE2_OFFSET);
+	val &= ~0x3fffff;
+	writel(val | (boot_vector >> CVU_BOOT_VECTOR_OFFSET), cvu_glue_base_addr + CVU_CTRL_CORE2_OFFSET);
 
-	uint32_t *cvu_ctrlsys0 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_SYS_REG_OFFSET);
-	uint32_t *cvu_ctrlsys1 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_SYS_REG_OFFSET + 4);
-	uint32_t *cvu_ctrlsys2 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_SYS_REG_OFFSET + 8);
-	uint32_t *cvu_ctrlsys3 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_SYS_REG_OFFSET + 12);
-	uint32_t *cvu_ctrlsys4 =
-		(uint32_t *)(cvu_ctrl_addr + CVU_SYS_REG_OFFSET + 0x10);
+	val = readl(cvu_glue_base_addr + CVU_CTRL_CORE3_OFFSET);
+	val &= ~0x3fffff;
+	writel(val | (boot_vector >> CVU_BOOT_VECTOR_OFFSET), cvu_glue_base_addr + CVU_CTRL_CORE3_OFFSET);
 
-	uint32_t *cvu_ctrl_stu = (uint32_t *)(cvu_ctrl_addr + CVU_STU_REG_OFFSET);
+	// STEP 3
+	writel(VCCM0_BASE_ADD, cvu_glue_base_addr + CVU_CTRL_SYS_VCCM0_OFFSET);
+	writel(VCCM1_BASE_ADD, cvu_glue_base_addr + CVU_CTRL_SYS_VCCM1_OFFSET);
+	writel(VCCM2_BASE_ADD, cvu_glue_base_addr + CVU_CTRL_SYS_VCCM2_OFFSET);
+	writel(VCCM3_BASE_ADD, cvu_glue_base_addr + CVU_CTRL_SYS_VCCM3_OFFSET);
 
-	union cvu_ck_rst_u cvu;
-	cvu.u32 = NOC_REG_READ(addr + clk_offset);
-	cvu.reg.cvu_clk_en = 1;
-	cvu.reg.cvu_ev74_clk_en = 1;
-	cvu.reg.cvu_pclk_en = 1;
-	cvu.reg.cvu_dbg_pclk_en = 1;
-	NOC_REG_WRITE(addr + clk_offset, cvu.u32);
+	// STEP 4
+	val = readl(prc_cvu_addr);
+	writel((val & ~BIT(srproc->config->reset_bit_pos)), prc_cvu_addr);
 
-	/* udelay(100); */
+	// STEP 5
+	writel(CSM_BASE_ADD, cvu_glue_base_addr + CVU_CTRL_SYS_CSM_OFFSET);
 
-	cvu.u32 = NOC_REG_READ(addr + clk_offset);
-	cvu.reg.cvu_ev74_rst_n = 1;
-	cvu.reg.cvu_presetdbgn = 1;
-	cvu.reg.cvu_presetn = 1;
-	cvu.reg.cvu_dbg_presetn = 1;
-	cvu.reg.cvu_rst = 1;
-	NOC_REG_WRITE(addr + clk_offset, cvu.u32);
+	// STEP 6
+	val = readl(cvu_glue_base_addr + CVU_CTRL_STU_OFFSET);
+	writel(val | CVU_STU_INITIATOR_CLK_EN, cvu_glue_base_addr + CVU_CTRL_STU_OFFSET);
 
-	/* udelay(100); */
+	// STEP 7
+	val = readl(cvu_glue_base_addr + CVU_CTRL_CORE0_OFFSET);
+	writel(val | ARC_INITIATE_RUN, cvu_glue_base_addr + CVU_CTRL_CORE0_OFFSET);
 
-	*cvu_ctrl0 &= ~0x3fffff;
-	*cvu_ctrl0 = *cvu_ctrl0 | (boot_vector >> 10);
-	*cvu_ctrlsys0 = 0x20000000;
+	val = readl(cvu_glue_base_addr + CVU_CTRL_CORE1_OFFSET);
+	writel(val | ARC_INITIATE_RUN, cvu_glue_base_addr + CVU_CTRL_CORE1_OFFSET);
 
-	*cvu_ctrl1 &= ~0x3fffff;
-	*cvu_ctrl1 = *cvu_ctrl1 | (boot_vector >> 10);
-	*cvu_ctrlsys1 = 0x20040000; //here same inside or different outside - tbd
+	val = readl(cvu_glue_base_addr + CVU_CTRL_CORE2_OFFSET);
+	writel(val | ARC_INITIATE_RUN, cvu_glue_base_addr + CVU_CTRL_CORE2_OFFSET);
 
-	*cvu_ctrl2 &= ~0x3fffff;
-	*cvu_ctrl2 = *cvu_ctrl2 | (boot_vector >> 10);
-	*cvu_ctrlsys2 = 0x20080000;
+	val = readl(cvu_glue_base_addr + CVU_CTRL_CORE3_OFFSET);
+	writel(val | ARC_INITIATE_RUN, cvu_glue_base_addr + CVU_CTRL_CORE3_OFFSET);
 
-	*cvu_ctrl3 &= ~0x3fffff;
-	*cvu_ctrl3 = *cvu_ctrl3 | (boot_vector >> 10);
-	*cvu_ctrlsys3 = 0x200C0000;
+	iounmap(prc_cvu_addr);
+	iounmap(cvu_glue_base_addr);
 
-	cvu.u32 = NOC_REG_READ(addr + clk_offset);
-	cvu.reg.cvu_rst = 0;
-	NOC_REG_WRITE(addr + clk_offset, cvu.u32);
-
-	*cvu_ctrlsys4 = 0x10000000;
-
-	*cvu_ctrl_stu = *cvu_ctrl_stu | (1 << 0);
-
-	*cvu_ctrl0 = *cvu_ctrl0 | (1<<25);
-	*cvu_ctrl1 = *cvu_ctrl1 | (1<<25);
-	*cvu_ctrl2 = *cvu_ctrl2 | (1<<25);
-	*cvu_ctrl3 = *cvu_ctrl3 | (1<<25);
-
-	iounmap(addr);
-	iounmap(cvu_ctrl_addr);
-	dev_dbg(dev, "EVXX is up, loaded firmware and out of reset");
 	return 0;
 }
-#endif
 
-static int sima_rproc_stop(struct rproc *rproc)
+static int simaai_rproc_stop(struct rproc *rproc)
 {
+	struct simaai_rproc *srproc = rproc->priv;
+	void __iomem *prc_cvu_addr = ioremap(srproc->config->prc_base_addr +
+									srproc->config->cvu_clk_reset_offset, 0x4);
+	uint32_t val = readl(prc_cvu_addr);
+	writel(val & (~(srproc->config->clock_enable_mask)), prc_cvu_addr);
 
-	void __iomem *addr = ioremap(PRC_BASE, 0x1000);
-	uint32_t clk_offset = PRC_REG__CKG_RST_REG__CVU_CK_RST_ADDR;
-	union cvu_ck_rst_u cvu;
-	cvu.u32 = NOC_REG_READ(addr + clk_offset);
-	cvu.reg.cvu_clk_en = 0;
-	cvu.reg.cvu_ev74_clk_en = 0;
-	cvu.reg.cvu_pclk_en = 0;
-	cvu.reg.cvu_dbg_pclk_en = 0;
-	NOC_REG_WRITE(addr + clk_offset, cvu.u32);
+	val = readl(prc_cvu_addr);
+	writel(val & (~(srproc->config->reset_mask)), prc_cvu_addr);
 
-	/* udelay(100); */
-
-	cvu.u32 = NOC_REG_READ(addr + clk_offset);
-	cvu.reg.cvu_ev74_rst_n = 0;
-	cvu.reg.cvu_presetdbgn = 0;
-	cvu.reg.cvu_presetn = 0;
-	cvu.reg.cvu_dbg_presetn = 0;
-	cvu.reg.cvu_rst = 0;
-	NOC_REG_WRITE(addr + clk_offset, cvu.u32);
-
-	iounmap(addr);
+	iounmap(prc_cvu_addr);
 	dev_info(rproc->dev.parent, "Stopped EV core");
+
 	return 0;
 }
 
-
-static int sima_rproc_elf_load_rsc_table(struct rproc *rproc,
+static int simaai_rproc_elf_load_rsc_table(struct rproc *rproc,
 					 const struct firmware *fw)
 {
 	if (rproc_elf_load_rsc_table(rproc, fw)) {
@@ -299,21 +236,21 @@ static int sima_rproc_elf_load_rsc_table(struct rproc *rproc,
 	return 0;
 }
 
-static int simaai_rproc_mem_alloc(struct rproc *rproc,
-                                  struct rproc_mem_entry *mem)
+static int simaai_rproc_mem_alloc(struct rproc *rproc, struct rproc_mem_entry *mem)
 {
 	struct device *dev = rproc->dev.parent;
 	void *va;
 
 	va = ioremap_wc(mem->dma, mem->len);
 	if (!va) {
-		dev_warn(dev, "Unable to map memory region: %pa+%zx\n",
+		dev_err(dev, "Unable to map memory region: %pa+%zx\n",
 			 &mem->dma, mem->len);
 		return -ENOMEM;
 	}
 
 	/* Update memory entry va */
 	mem->va = va;
+
 	return 0;
 }
 
@@ -321,99 +258,249 @@ static int simaai_rproc_mem_release(struct rproc *rproc,
 				struct rproc_mem_entry *mem)
 {
 	iounmap(mem->va);
+
 	return 0;
 }
 
-static int sima_parse_fw(struct rproc *rproc, const struct firmware *fw)
+static const char *get_carveout_name(const char *nodename)
 {
-	struct sima_rproc *srproc = rproc->priv;
-	struct device *dev = rproc->dev.parent;
-	struct rproc_mem_entry *mem;
-	int i = 0;
+#define NR_VDEV_BUF 3
+	/* we only care about carveout names that will be used by virtio */
+	const char *names[NR_VDEV_BUF] = {"vdev0buffer", "vdev0vring0", "vdev0vring1"};
 
-	for (i = 0; i < SIMA_MAX_MEM_REGIONS; i++) {
-		mem = rproc_mem_entry_init(dev, NULL,
-							   (dma_addr_t)srproc->mem[i].bus_addr,
-							   srproc->mem[i].size,
-							   srproc->mem[i].dev_addr,
-							   simaai_rproc_mem_alloc,
-							   simaai_rproc_mem_release,
-							   srproc->mem[i].name);
-
-		if (!mem) {
-			dev_err(dev, "ERROR : unable to initialize memory-region %s\n",
-							srproc->mem[i].name);
-			return -ENOMEM;
-		}
-		dev_info(dev,"srproc: region_name:[%s], phys_addr:[0x%lx], size:[0x%x],"
-				"bus_addr:[0x%llx], cpu_addr:[0x%llx]", srproc->mem[i].name,
-				srproc->mem[i].dev_addr, srproc->mem[i].size,
-				srproc->mem[i].bus_addr, srproc->mem[i].cpu_addr);
-
-		rproc_add_carveout(rproc, mem);
+	for (int i = 0; i < NR_VDEV_BUF; i++) {
+		if (strstr(nodename, names[i]))
+			return names[i];
 	}
 
-	return sima_rproc_elf_load_rsc_table(rproc, fw);
+	return nodename;
 }
 
-static const struct rproc_ops sima_rproc_ops = {
-	.start		= sima_rproc_start,
-	.stop		= sima_rproc_stop,
-	.parse_fw	= sima_parse_fw,
+static int simaai_rproc_add_carveout(struct simaai_rproc *srproc)
+{
+	struct device *dev = srproc->dev;
+	struct device_node *np = dev->of_node;
+	struct rproc_mem_entry *mem;
+	struct reserved_mem *rmem;
+	struct of_phandle_iterator it;
+	int index = 0;
+
+	of_phandle_iterator_init(&it, np, "memory-region", NULL, 0);
+	while (of_phandle_iterator_next(&it) == 0) {
+		rmem = of_reserved_mem_lookup(it.node);
+		if (!rmem) {
+			of_node_put(it.node);
+			dev_err(dev, "unable to acquire memory-region\n");
+			return -EINVAL;
+		}
+
+		/* we need base and size for evmem for startup */
+		if (strstr(it.node->name, "evmem")) {
+			srproc->evmem_base = rmem->base;
+			srproc->evmem_size = rmem->size;
+		}
+
+		/*  No need to map vdev buffer */
+		if (strstr(it.node->name, "vdev0buffer")) {
+			mem = rproc_of_resm_mem_entry_init(dev, index,
+							   rmem->size,
+							   rmem->base,
+							   get_carveout_name(it.node->name));
+		} else {
+			dma_addr_t dma_addr = rmem->base;
+			if (srproc->stu) {
+				if (simaai_stu_get_dev_address(srproc->stu, rmem->base, &dma_addr)) {
+					dev_err(dev, "Error getting device address\n");
+					return -EINVAL;
+				}
+			}
+
+			mem = rproc_mem_entry_init(dev, NULL,
+						   dma_addr,
+						   rmem->size, rmem->base,
+						   simaai_rproc_mem_alloc,
+						   simaai_rproc_mem_release,
+						   get_carveout_name(it.node->name));
+		}
+
+		if (!mem) {
+			of_node_put(it.node);
+			return -ENOMEM;
+		}
+
+		rproc_add_carveout(srproc->rproc, mem);
+		index++;
+	}
+
+	if (!srproc->evmem_size || !srproc->evmem_base) {
+		dev_err(dev, "evmem memory region not found\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int simaai_parse_fw(struct rproc *rproc, const struct firmware *fw)
+{
+	struct simaai_rproc *srproc = rproc->priv;
+	int ret;
+
+	ret = simaai_rproc_add_carveout(srproc);
+	if(ret)
+		return ret;
+
+	return simaai_rproc_elf_load_rsc_table(rproc, fw);
+}
+
+static int event_notified_idr_cb(int id, void *ptr, void *data)
+{
+	struct rproc *rproc = (struct rproc *)data;
+
+	(void)rproc_vq_interrupt(rproc, id);
+
+	return 0;
+}
+
+static void handle_event_notified(struct work_struct *work)
+{
+	struct rproc *rproc;
+	struct simaai_rproc *srproc;
+
+	srproc = container_of(work, struct simaai_rproc, rx_wq);
+
+	rproc = srproc->rproc;
+
+	idr_for_each(&rproc->notifyids, event_notified_idr_cb, rproc);
+}
+
+static void simaai_ev_rx_cb(struct mbox_client *cl, void *msg)
+{
+	struct simaai_rproc *srproc = container_of(cl, struct simaai_rproc, mc);
+
+	schedule_work(&srproc->rx_wq);
+}
+
+static int simaai_setup_mbox(struct simaai_rproc *srproc)
+{
+	srproc->mc.dev = srproc->dev;
+	srproc->mc.rx_callback = simaai_ev_rx_cb;
+	srproc->mc.tx_done = NULL;
+	srproc->mc.tx_block = true;
+	srproc->mc.tx_tout = SIMAAI_TX_TOUT;
+	srproc->mc.knows_txdone = false;
+
+	INIT_WORK(&srproc->rx_wq, handle_event_notified);
+
+	srproc->chan = mbox_request_channel(&srproc->mc, 0);
+	if (IS_ERR(srproc->chan)) {
+		dev_err(srproc->dev, "failed to request mbox channel.\n");
+		srproc->chan = NULL;
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static const struct rproc_ops simaai_rproc_ops = {
+	.start		= simaai_rproc_start,
+	.stop		= simaai_rproc_stop,
+	.parse_fw	= simaai_parse_fw,
 	.load		= rproc_elf_load_segments,
 	.find_loaded_rsc_table = rproc_elf_find_loaded_rsc_table,
 	.sanity_check	= rproc_elf_sanity_check,
 	.get_boot_addr	= rproc_elf_get_boot_addr,
-	.kick		= sima_rproc_kick,
+	.kick		= simaai_rproc_kick,
 };
 
-static const struct of_device_id sima_rproc_of_match[] = {
-	{ .compatible = "simaai,evxx-rproc" },
+static const struct simaai_rproc_config davinci_rproc_config = {
+	.prc_base_addr = 0x30100000,
+	.cvu_glue_base_addr = 0x05841000,
+	.cvu_clk_reset_offset = 0x108,
+	.clock_enable_mask = DAVINCI_CLK_EN_MASK,
+	.reset_mask = DAVINCI_RESET_MASK,
+	.reset_bit_pos = 0x8,
+};
+
+static const struct simaai_rproc_config modalix_rproc_config = {
+	.prc_base_addr = 0x0FF00000,
+	.cvu_glue_base_addr = 0x040D0000,
+	.cvu_clk_reset_offset = 0x50C,
+	.clock_enable_mask = MODALIX_CLK_EN_MASK,
+	.reset_mask = MODALIX_RESET_MASK,
+	.reset_bit_pos = 0x9,
+};
+
+static const struct of_device_id simaai_rproc_of_match[] = {
+	{ .compatible = "simaai,davinci-evxx-rproc", .data = &davinci_rproc_config},
+	{ .compatible = "simaai,modalix-evxx-rproc", .data = &modalix_rproc_config},
 	{},
 };
 
-MODULE_DEVICE_TABLE(of, sima_rproc_of_match);
+MODULE_DEVICE_TABLE(of, simaai_rproc_of_match);
 
-static int sima_rproc_probe(struct platform_device *pdev)
+static int simaai_rproc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct sima_rproc *sproc;
+	struct simaai_rproc *srproc;
 	struct device_node *np = dev->of_node;
 	const char *fw_name;
+	const char *cpu_name;
 	struct rproc *rproc;
-	int ret, i;
-	struct resource *res;
+	int ret;
+	const struct of_device_id *match;
 
-	ret = of_property_read_string(dev->of_node, "sima,pm-firmware",
-				      &fw_name);
-	if (ret) {
-		dev_err(dev, "No firmware filename given\n");
+	match = of_match_device(simaai_rproc_of_match, dev);
+	if (!match || !match->data) {
+		dev_err(dev, "No device match found\n");
 		return -ENODEV;
 	}
 
-	rproc = rproc_alloc(dev, np->name, &sima_rproc_ops, fw_name,
-							sizeof(*sproc));
-	if (!rproc) {
-		ret = -ENOMEM;
-		goto err;
+	ret = of_property_read_string(dev->of_node, "simaai,cvu-firmware", &fw_name);
+	if (ret) {
+		dev_err(dev, "Firmware filename is not provided in device tree\n");
+		return -ENODEV;
 	}
-	sproc = rproc->priv;
-	sproc->is_rtc_only = true;
-	rproc->has_iommu = false;
-	platform_set_drvdata(pdev, rproc);
 
-	for (i = 0; i < SIMA_MAX_MEM_REGIONS; i++) {
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, ev_mem_names[i]);
-		if(!res) {
-			dev_err(dev, "ERROR : getting mem region %s\n", ev_mem_names[i]);
+	ret = of_property_read_string(dev->of_node, "cpu-name", &cpu_name);
+	if (ret) {
+		dev_warn(dev, "No cpu-name specified in device tree.\n");
+		return -EINVAL;
+	}
+
+	ret = of_property_count_elems_of_size(np, "memory-region",
+						sizeof(phandle));
+	if (ret <= 0) {
+		dev_err(dev, "device does not reserved memory regions, ret = %d\n",
+			ret);
+		return -EINVAL;
+	}
+
+	rproc = rproc_alloc(dev, cpu_name, &simaai_rproc_ops, fw_name, sizeof(*srproc));
+	if (!rproc)
+		return -ENOMEM;
+
+	srproc = rproc->priv;
+	srproc->rproc = rproc;
+	rproc->has_iommu = false;
+	srproc->config = (struct simaai_rproc_config *)match->data;
+	srproc->dev = dev;
+
+	srproc->stu = simaai_stu_get_by_phandle(dev->of_node, "simaai,stu");
+	if (IS_ERR(srproc->stu)) {
+		if (PTR_ERR(srproc->stu) != -EPROBE_DEFER)
+			srproc->stu = NULL;
+		else {
+			ret = PTR_ERR(srproc->stu);
 			goto err_put_rproc;
 		}
+	} else
+		dev_info(dev, "Success getting STU handle\n");
 
-		sproc->mem[i].bus_addr = res->start;
-		sproc->mem[i].dev_addr = res->start;
-		sproc->mem[i].size = (res->end - res->start) + 1;
-		strcpy(sproc->mem[i].name, ev_mem_names[i]);
-	}
+	platform_set_drvdata(pdev, rproc);
+
+	ret = simaai_setup_mbox(srproc);
+	if (ret)
+		goto err_put_rproc;
 
 	ret = rproc_add(rproc);
 	if (ret) {
@@ -423,13 +510,15 @@ static int sima_rproc_probe(struct platform_device *pdev)
 
 	dev_dbg(dev, "Successfully added rproc handle\n");
 
+	return 0;
+
 err_put_rproc:
 	rproc_free(rproc);
-err:
+
 	return ret;
 }
 
-static int sima_rproc_remove(struct platform_device *pdev)
+static int simaai_rproc_remove(struct platform_device *pdev)
 {
 	struct rproc *rproc = platform_get_drvdata(pdev);
 
@@ -440,36 +529,38 @@ static int sima_rproc_remove(struct platform_device *pdev)
 }
 
 /* TODO: SRIRAM Fix them with power management and ev platform driver
- * for poewr management */
+ * for power management
+ */
 #ifdef CONFIG_PM
-static int sima_rpm_suspend(struct device *dev)
+static int simaai_rpm_suspend(struct device *dev)
 {
 	return -EBUSY;
 }
 
-static int sima_rpm_resume(struct device *dev)
+static int simaai_rpm_resume(struct device *dev)
 {
 	return 0;
 }
 #endif
 
-static const struct dev_pm_ops sima_rproc_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(sima_rpm_suspend, sima_rpm_resume)
+static const struct dev_pm_ops simaai_rproc_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(simaai_rpm_suspend, simaai_rpm_resume)
 };
 
-static struct platform_driver sima_rproc_driver = {
-	.probe = sima_rproc_probe,
-	.remove = sima_rproc_remove,
+static struct platform_driver simaai_rproc_driver = {
+	.probe = simaai_rproc_probe,
+	.remove = simaai_rproc_remove,
 	.driver = {
 		.name = "simaai-rproc-evxx",
-		.of_match_table = sima_rproc_of_match,
-		.pm = &sima_rproc_pm_ops,
+		.of_match_table = simaai_rproc_of_match,
+		.pm = &simaai_rproc_pm_ops,
 	},
 };
 
-module_platform_driver(sima_rproc_driver);
+module_platform_driver(simaai_rproc_driver);
 
 MODULE_AUTHOR("Sriram Raghunathan <sriram.r@sima.ai>");
 MODULE_AUTHOR("Manish Mathur <manish.mathur@sima.ai>");
+MODULE_AUTHOR("Nileshkumar Raghuvanshi <nilesh.r@sima.ai>");
 MODULE_DESCRIPTION("SIMA.ai Remote processor management driver for EV processor family");
 MODULE_LICENSE("Dual MIT/GPL");

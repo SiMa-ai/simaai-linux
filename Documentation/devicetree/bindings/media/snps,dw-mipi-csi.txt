@@ -1,0 +1,41 @@
+Synopsys DesignWare CSI-2 Host controller
+
+Description
+-----------
+
+This HW block is used to receive image coming from an MIPI CSI-2 compatible
+camera.
+
+Required properties:
+- compatible		: shall be "snps,dw-csi"
+- reg			: physical base address and size of the device memory
+			  mapped registers;
+- interrupts		: DW CSI-2 Host interrupts
+- phys			: List of one PHY specifier (as defined in
+			  Documentation/devicetree/bindings/phy/phy-bindings.txt).
+			  This PHY is a MIPI DPHY working in RX mode.
+- resets		: Reference to a reset controller (optional)
+
+The per-board settings:
+ - port sub-node describing a single endpoint connected to the camera as
+   described in video-interfaces.txt[1].
+
+Example:
+
+	csi2: csi2@3000 {
+		compatible = "snps,dw-csi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = < 0x03000 0x7FF>;
+		phys = <&mipi_dphy_rx>;
+		resets = <&dw_rst 1>;
+		interrupts = <2>;
+
+		port@0 {
+			reg = <0>;
+			csi_ep1: endpoint {
+				remote-endpoint = <&camera_1>;
+				data-lanes = <1 2>;
+			};
+		};
+	};

@@ -1,0 +1,225 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2023 SiMa ai
+ */
+
+/ {
+	modalix_clks {
+		compatible = "simple-bus";
+		ranges;
+
+		sys_clk: sysclk {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <1000000000>;
+			clock-output-names = "sysclk";
+		};
+
+		sys_div2_clk: sysdiv2clk {
+			compatible = "fixed-factor-clock";
+			clocks = <&sys_clk>;
+			#clock-cells = <0>;
+			clock-div = <2>;
+			clock-mult = <1>;
+		};
+
+		sys_div4_clk: sysdiv4clk {
+			compatible = "fixed-factor-clock";
+			clocks = <&sys_clk>;
+			#clock-cells = <0>;
+			clock-div = <4>;
+			clock-mult = <1>;
+		};
+
+		sys_div5_clk: sysdiv5clk {
+			compatible = "fixed-factor-clock";
+			clocks = <&sys_clk>;
+			#clock-cells = <0>;
+			clock-div = <5>;
+			clock-mult = <1>;
+		};
+
+		noc_clk: nocclk {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <1000000000>;
+			clock-output-names = "nocclk";
+		};
+
+		noc_div4_clk: nocdiv4clk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_clk>;
+			#clock-cells = <0>;
+			clock-div = <4>;
+			clock-mult = <1>;
+		};
+
+		sdhci_clk: sdhciclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <2>;
+		};
+
+		emmc_clk: emmcclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <2>;
+		};
+
+		eth_clk: ethclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <1>;
+		};
+
+		timer_clk: timer_clk {
+			compatible = "fixed-factor-clock";
+			clocks = <&sys_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <10>;
+			clock-mult = <1>;
+		};
+
+		mipi_clk: mipiclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&sys_div2_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <1>;
+		};
+
+		nvs_dma_clk: nvsdmaclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <1>;
+		};
+
+		nvs_sdhci_clk: nvssdhciclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <2>;
+		};
+
+		nvs_emmc_clk: nvsemmcclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <2>;
+		};
+
+		nvs_spi_clk: nvsspiclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&sys_div5_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <1>;
+		};
+
+		siodmac_clk: siodmacclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&sys_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <1>;
+		};
+
+		sio00_clk: siodivclk@0x04000300 {
+			compatible = "simaai,clkdiv-sio";
+			reg = <0x0 0x04000300 0 0x28>;
+			#clock-cells = <1>;
+			clocks = <&sys_div4_clk>;
+		};
+
+		sio10_clk: siodivclk@0x04010300 {
+			compatible = "simaai,clkdiv-sio";
+			reg = <0x0 0x04010300 0 0x28>;
+			#clock-cells = <1>;
+			clocks = <&sys_div4_clk>;
+		};
+
+		sio20_clk: siodivclk@0x04020300 {
+			compatible = "simaai,clkdiv-sio";
+			reg = <0x0 0x04020300 0 0x28>;
+			#clock-cells = <1>;
+			clocks = <&sys_div4_clk>;
+		};
+
+		sio30_clk: siodivclk@0x04030300 {
+			compatible = "simaai,clkdiv-sio";
+			reg = <0x0 0x04030300 0 0x28>;
+			#clock-cells = <1>;
+			clocks = <&sys_div4_clk>;
+		};
+
+		sio40_clk: siodivclk@0x04040300 {
+			compatible = "simaai,clkdiv-sio";
+			reg = <0x0 0x04040300 0 0x28>;
+			#clock-cells = <1>;
+			clocks = <&sys_div4_clk>;
+		};
+
+		sio50_clk: siodivclk@0x04050300 {
+			compatible = "simaai,clkdiv-sio";
+			reg = <0x0 0x04050300 0 0x28>;
+			#clock-cells = <1>;
+			clocks = <&sys_div4_clk>;
+		};
+
+		sio60_clk: siodivclk@0x04060300 {
+			compatible = "simaai,clkdiv-sio";
+			reg = <0x0 0x04060300 0 0x28>;
+			#clock-cells = <1>;
+			clocks = <&sys_div4_clk>;
+		};
+
+		sio70_clk: siodivclk@0x04070300 {
+			compatible = "simaai,clkdiv-sio";
+			reg = <0x0 0x04070300 0 0x28>;
+			#clock-cells = <1>;
+			clocks = <&sys_div4_clk>;
+		};
+
+		sdma0_apb_clk: sdma0apbclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <1>;
+		};
+
+		sdma1_apb_clk: sdma1apbclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <1>;
+		};
+
+		sdma0_axi_clk: sdma0axiclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_div4_clk>;
+			#clock-cells = <0>;
+			clock-div = <1>;
+			clock-mult = <2>;
+		};
+
+		sdma1_axi_clk: sdma1axiclk {
+			compatible = "fixed-factor-clock";
+			clocks = <&noc_clk>;
+			#clock-cells = <0>;
+			clock-div = <5>;
+			clock-mult = <4>;
+		};
+	};
+};

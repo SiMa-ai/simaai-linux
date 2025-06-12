@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright SiMa.ai (C) 2021. All rights reserved
+ * Copyright SiMa.ai (C) 2021,2025 All rights reserved
  */
 
 #include <linux/cdev.h>
@@ -18,6 +18,9 @@
 #include <linux/wait.h>
 
 #include <linux/mailbox/simaai-mailbox.h>
+
+#define SIMA_MBOX_MSG_INDEX            GENMASK(14,0)
+#define SIMA_MBOX_MSG_SIZE             GENMASK(29,15)
 
 /* Tx timeout in milliseconds */
 #define SIMA_TX_TOUT		500
@@ -48,6 +51,8 @@ struct sima_mbox_client {
 	struct mutex dev_lock;
 	int dev_open_count;
 	int max_users;
+	void __iomem *txbuf;
+	void __iomem *rxbuf;
 };
 
 static int init_device(struct sima_mbox_client *mbox)
@@ -133,7 +138,7 @@ static ssize_t mbox_dev_write(struct file *filp, const char __user *buf,
 	ssize_t len = count > SIMAAI_MAX_DATA_SIZE ? SIMAAI_MAX_DATA_SIZE : count;
 	struct simaai_mbmsg *msg;
 	int ret, msgid;
-
+	u32 data;
 
 	if (!tx_msg_available(mbox, &msgid) && (filp->f_flags & O_NONBLOCK)) {
 		dev_err(mbox->dev, "%d: Returning %d\n", __LINE__, -EAGAIN);
@@ -152,12 +157,19 @@ static ssize_t mbox_dev_write(struct file *filp, const char __user *buf,
 	ret = copy_from_user(msg->data, buf, len);
 	msg->len = len;
 
-	ret = mbox_send_message(mbox->channel, msg);
+	ret = mutex_lock_interruptible(&mbox->write_lock);
 
+	memcpy_toio(mbox->txbuf, msg->data, msg->len);
+	/* populate index(always 0) and size for mailbox msg register */
+	data = FIELD_PREP(SIMA_MBOX_MSG_INDEX, 0) | FIELD_PREP(SIMA_MBOX_MSG_SIZE, len);
+
+	ret = mbox_send_message(mbox->channel, &data);
 	if (ret < 0) {
 		dev_err(mbox->dev, "Failed to send message via mailbox\n");
 		len = (ssize_t)ret;
 	}
+
+	mutex_unlock(&mbox->write_lock);
 
 	ret = mutex_lock_interruptible(&mbox->write_lock);
 	bitmap_release_region(mbox->msgs_bmap, msgid, 0);
@@ -287,9 +299,22 @@ static void message_from_remote(struct mbox_client *client, void *message)
 {
 	struct sima_mbox_client *mbox = dev_get_drvdata(client->dev);
 	unsigned long flags;
+	u32 data = *(u32 *) message;
+	char msg_raw[SIMAAI_MAX_MSG_SIZE];
+	struct simaai_mbmsg *msg = (struct simaai_mbmsg*)msg_raw;
+	int index, size;
+
+	index = FIELD_GET(SIMA_MBOX_MSG_INDEX, data);
+	size = FIELD_GET(SIMA_MBOX_MSG_SIZE, data);
+
+	if ((index + size) > SIMAAI_MAX_DATA_SIZE)
+		size = SIMAAI_MAX_DATA_SIZE - index;
+
+	msg->len = size;
 
 	spin_lock_irqsave(&mbox->rx_fifo_lock, flags);
-	kfifo_in(&mbox->rx_fifo, message, SIMAAI_MAX_MSG_SIZE);
+	memcpy_fromio(msg->data, mbox->rxbuf + index, size);
+	kfifo_in(&mbox->rx_fifo, msg_raw, SIMAAI_MAX_MSG_SIZE);
 	spin_unlock_irqrestore(&mbox->rx_fifo_lock, flags);
 
 	wake_up_interruptible(&mbox->rx_wq);
@@ -311,6 +336,14 @@ static int sima_mbox_client_probe(struct platform_device *pdev)
 	if (!mbox->msgs)
 		return -ENOMEM;
 	mbox->dev = &pdev->dev;
+
+	mbox->txbuf = devm_platform_ioremap_resource_byname(pdev, "txbuf");
+	if (IS_ERR(mbox->txbuf))
+		return PTR_ERR(mbox->txbuf);
+
+	mbox->rxbuf = devm_platform_ioremap_resource_byname(pdev, "rxbuf");
+	if (IS_ERR(mbox->rxbuf))
+		return PTR_ERR(mbox->rxbuf);
 
 	ret = of_property_read_string(pdev->dev.of_node, "simaai,dev-name",
 				      &mbox->name);

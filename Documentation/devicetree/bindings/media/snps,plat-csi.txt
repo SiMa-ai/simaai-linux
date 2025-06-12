@@ -1,0 +1,103 @@
+Synopsys DesignWare CSI-2 Host Media Device
+
+The Synopsys DesignWare CSI-2 Host subsystem comprises of multiple
+sub-devices represented by separate device tree nodes. Currently this includes:
+plat-csi, video-device, and dw-mipi-csi.
+
+The sub-subdevices are defined as child nodes of the common 'camera' node which
+also includes common properties of the whole subsystem not really specific to
+any single sub-device.
+
+Common 'camera' node
+--------------------
+
+Required properties:
+
+- compatible: must be "snps,plat-csi", "simple-bus"
+
+The 'camera' node must include at least one 'video-device' and one 'dw-mipi-csi'
+child node.
+
+'video-device' device nodes
+-------------------
+
+Required properties:
+
+- compatible: "snps,video-device"
+- dmas, dma-names: List of one DMA specifier and identifier string (as defined
+ in Documentation/devicetree/bindings/dma/dma.txt) per port. Each port
+ requires a DMA channel with the identifier string set to "port" followed by
+ the port index.
+
+Image sensor nodes
+------------------
+
+The sensor device nodes should be added to their control bus controller (e.g.
+I2C0) nodes and linked to a port node in the dw-mipi-csi,using the common video
+interfaces bindings, defined in video-interfaces.txt.
+
+Example:
+
+ i2c@0x02000 {
+ compatible = "snps,designware-i2c";
+ #address-cells = <1>;
+ #size-cells = <0>;
+ reg = <0x02000 0x100>;
+ clock-frequency = <400000>;
+ clocks = <&i2cclk>;
+ interrupts =<0>;
+ ov: camera@0x36 {
+ compatible = "ovti,ov5647";
+ reg = <0x36>;
+ port {
+ camera_1: endpoint {
+ remote-endpoint = <&csi1_ep1>;
+ clock-lanes = <0>;
+ data-lanes = <1 2 >;
+           };
+ };
+     };
+ };
+
+ camera {
+ compatible = "snps,plat-csi", "simple-bus";
+ #address-cells = <1>;
+ #size-cells = <1>;
+ ranges;
+ video_device: video-device@0x10000 {
+ compatible = "snps,video-device";
+ dmas = <&axi_vdma_0 0>;
+ dma-names = "vdma0";
+ };
+
+ csi2_1: csi2@0x03000 {
+ compatible = "snps,dw-mipi-csi";
+ #address-cells = <1>;
+ #size-cells = <0>;
+ reg = < 0x03000 0x7FF>;
+ interrupts = <2>;
+ data-lanes = <2>;
+ output-type = <2>;
+
+ phys = <&mipi_phy_ctrl1 0>;
+ phy-names = "csi2-dphy";
+
+ /*IPI Related Configurations*/
+ ipi-mode = <0>;
+ ipi-color-mode = <0>;
+ ipi-auto-flush = <1>;
+ virtual-channel = <0>;
+
+ /* Camera MIPI CSI-2 (CSI1) */
+ port@1 {
+ reg = <1>;
+ csi1_ep1: endpoint {
+ remote-endpoint = <&camera_1>;
+ data-lanes = <1 2>;
+           };
+ };
+         };
+ };
+};
+
+The dw-mipi-csi device binding is defined in snps,dw-mipi-csi.txt.

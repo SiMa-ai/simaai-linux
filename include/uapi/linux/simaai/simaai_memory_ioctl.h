@@ -56,6 +56,20 @@ struct simaai_free_args {
 	__u32 num_of_segments;
 };
 
+/* memcpy args */
+struct simaai_memcpy_args {
+	/* src phy addr */
+	__u64 src_addr;
+	/* src buffer offset */
+	__u64 src_offset;
+	/* dst phy addr */
+	__u64 dst_addr;
+	/* dst buffer offset */
+	__u64 dst_offset;
+	/*  copy buffer size  */
+	__u32 size;
+};
+
 /*
  * Target mask to indicate from which target, memory is allocated
  */
@@ -87,5 +101,10 @@ struct simaai_free_args {
  * Get allocated memory buffer information
  */
 #define SIMAAI_IOC_MEM_INFO		_IOWR('S', 2, struct simaai_memory_info)
+
+/*
+ * memcpy through sdma
+ */
+#define SIMAAI_IOC_MEMCPY		_IOWR('S', 3, struct simaai_memcpy_args)
 
 #endif /* _SIMAAI_MEMORY_IOCTL_UAPI_H */

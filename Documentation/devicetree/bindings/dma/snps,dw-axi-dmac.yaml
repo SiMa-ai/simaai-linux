@@ -96,6 +96,21 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32
     minimum: 1
     maximum: 256
+  simaai,hardcoded-handshake:
+    description:
+      Indicates that the DMA handshake number is harcoded per channel. As a
+      result, driver choose not first available DMA channel, but picks DMA
+      channel based on handshake number provided in the cell of the DMAC
+      client.
+    $ref: /schemas/types.yaml#/definitions/flag
+  simaai,device-addr-mask:
+    description:
+      Indicates the mask that will be applied to a device address.
+    $ref: /schemas/types.yaml#/definitions/uint64
+  snps,perch_irq:
+	type: boolean
+    description:
+      Indicates separate interrupt for each supported channel.
 
 required:
   - compatible

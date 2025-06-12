@@ -1,0 +1,137 @@
+/*
+*
+* SPDX-License-Identifier: GPL-2.0
+*
+* Copyright (C) 2011-2021 ARM or its affiliates
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; version 2.
+* This program is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+* or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+* for more details.
+* You should have received a copy of the GNU General Public License along
+* with this program; if not, write to the Free Software Foundation, Inc.,
+* 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+*
+*/
+
+#include "system_interrupts.h"
+#include "acamera_isp_ctx.h"
+
+void frame_stitch_fsm_clear( frame_stitch_fsm_t *p_fsm )
+{
+}
+
+void frame_stitch_request_interrupt( frame_stitch_fsm_ptr_t p_fsm, system_fw_interrupt_mask_t mask )
+{
+    system_interrupts_disable();
+    p_fsm->irq_mask |= mask;
+    system_interrupts_enable();
+}
+
+void frame_stitch_fsm_switch_state( frame_stitch_fsm_t *p_fsm, frame_stitch_state_t new_state )
+{
+    frame_stitch_state_t prev_state = p_fsm->state;
+    if ( new_state == prev_state ) return;
+    p_fsm->state = new_state;
+    if ( new_state == frame_stitch_state_initialized ) {
+        /* Switching into frame_stitch_state_initialized */
+        frame_stitch_init( p_fsm );
+    } else if ( new_state == frame_stitch_state_configured ) {
+        /* Switching into frame_stitch_state_configured */
+        frame_stitch_config( p_fsm );
+    } else if ( new_state == frame_stitch_state_reload_calibration ) {
+        /* Switching into frame_stitch_state_reload_calibration */
+        frame_stitch_reload_calibration( p_fsm );
+    } else if ( new_state == frame_stitch_state_deinit ) {
+        /* Switching into frame_stitch_state_deinit */
+        frame_stitch_deinit( p_fsm );
+    } else if ( new_state == frame_stitch_state_update_hw ) {
+        /* Switching into frame_stitch_state_update_hw */
+        frame_stitch_update_hw( p_fsm );
+    }
+}
+
+void frame_stitch_fsm_process_state( frame_stitch_fsm_t *p_fsm )
+{
+    frame_stitch_state_t state = p_fsm->state;
+    for ( ;; ) {
+        frame_stitch_state_t prev_state = state;
+        switch ( state ) {
+        default:
+            break;
+        case frame_stitch_state_reload_calibration:
+            state = frame_stitch_state_ready;
+            break;
+        case frame_stitch_state_update_hw:
+            state = frame_stitch_state_ready;
+            break;
+        }
+        if ( state == prev_state ) {
+            break;
+        }
+        frame_stitch_fsm_switch_state( p_fsm, state );
+    }
+}
+
+uint8_t frame_stitch_fsm_process_event( frame_stitch_fsm_t *p_fsm, event_id_t event_id )
+{
+    uint8_t b_event_processed = 0;
+    switch ( event_id ) {
+    default:
+        break;
+    case event_id_fsm_config:
+        if ( p_fsm->state == frame_stitch_state_initialized ) {
+            frame_stitch_fsm_switch_state( p_fsm, frame_stitch_state_configured );
+            b_event_processed = 1;
+            break;
+        }
+        if ( p_fsm->state == frame_stitch_state_stopped ) {
+            frame_stitch_fsm_switch_state( p_fsm, frame_stitch_state_configured );
+            b_event_processed = 1;
+            break;
+        }
+        break;
+    case event_id_fsm_start:
+        if ( p_fsm->state == frame_stitch_state_configured ) {
+            frame_stitch_fsm_switch_state( p_fsm, frame_stitch_state_reload_calibration );
+            b_event_processed = 1;
+            break;
+        }
+        break;
+    case event_id_fsm_stop:
+        if ( p_fsm->state == frame_stitch_state_ready ) {
+            frame_stitch_fsm_switch_state( p_fsm, frame_stitch_state_stopped );
+            b_event_processed = 1;
+            break;
+        }
+        break;
+    case event_id_fsm_update_hw:
+        if ( p_fsm->state == frame_stitch_state_ready ) {
+            frame_stitch_fsm_switch_state( p_fsm, frame_stitch_state_update_hw );
+            b_event_processed = 1;
+            break;
+        }
+        break;
+    case event_id_fsm_reload_calibration:
+        if ( p_fsm->state == frame_stitch_state_ready ) {
+            frame_stitch_fsm_switch_state( p_fsm, frame_stitch_state_reload_calibration );
+            b_event_processed = 1;
+            break;
+        }
+        break;
+    case event_id_fsm_deinit:
+        if ( p_fsm->state == frame_stitch_state_stopped ) {
+            frame_stitch_fsm_switch_state( p_fsm, frame_stitch_state_deinit );
+            b_event_processed = 1;
+            break;
+        }
+        break;
+    }
+    if ( b_event_processed ) {
+        frame_stitch_fsm_process_state( p_fsm );
+    }
+    return b_event_processed;
+}

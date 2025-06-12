@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * Copyright (c) 2021 SiMa ai
+ * Copyright (c) 2021,2025 SiMa ai
  */
 
 /dts-v1/;
@@ -218,9 +218,7 @@
 	ev74mb: mailbox@0720000 {
 		compatible = "simaai,mailbox-1.0";
 		reg = <0x0 0x00720000 0x0 0xc>, <0x0 0x007200c0 0x0 0xc>, // LP Regs
-		      <0x0 0x00720010 0x0 0xc>, <0x0 0x007200d0 0x0 0xc>, // HP Regs
-		      <0x0 0x00728000 0x0 0x800>, <0x0 0x0072e000 0x0 0x800>, // LP Scratch
-		      <0x0 0x00728800 0x0 0x800>, <0x0 0x0072e800 0x0 0x800>; // HP Scratch
+		      <0x0 0x00720010 0x0 0xc>, <0x0 0x007200d0 0x0 0xc>; // HP Regs
 		interrupts = <GIC_SPI 49 IRQ_TYPE_LEVEL_HIGH>, // A65->EV74 LP
 			     <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>, // EV74->A64 LP
 			     <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>, // A65->EV74 HP
@@ -232,9 +230,7 @@
 	m4mb: mailbox@0720020 {
 		compatible = "simaai,mailbox-1.0";
 		reg = <0 0x00720020 0 0xc>, <0 0x00720040 0 0xc>, // LP Regs
-		      <0 0x00720030 0 0xc>, <0 0x00720050 0 0xc>, // HP Regs
-		      <0x0 0x00729000 0x0 0x800>, <0x0 0x0072a000 0x0 0x800>, // LP Scratch
-		      <0x0 0x00729800 0x0 0x800>, <0x0 0x0072a800 0x0 0x800>; // HP Scratch
+		      <0 0x00720030 0 0xc>, <0 0x00720050 0 0xc>; // HP Regs
 		interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>, // A65->M4 LP
 			     <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>, // M4->A65 LP
 			     <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>, // A65->M4 HP
@@ -243,32 +239,10 @@
 		status = "okay";
 	};
 
-	ev74_lp_client: ev74_lp_mbox {
-		compatible = "simaai,mailbox-client";
-		mbox-names = "lp";
-		mboxes = <&ev74mb 0>;
-		simaai,dev-name = "ev74_lp_mbox";
-		simaai,channel = "lp";
-		simaai,tx-tout-ms = <500>;
-		simaai,rx-fifo-depth = <128>;
-		simaai,max-users = <10>;
-		status = "okay";
-	};
-	
-	ev74_hp_client: ev74_hp_mbox {
-		compatible = "simaai,mailbox-client";
-		mbox-names = "hp";
-		mboxes = <&ev74mb 1>;
-		simaai,dev-name = "ev74_hp_mbox";
-		simaai,channel = "hp";
-		simaai,tx-tout-ms = <500>;
-		simaai,rx-fifo-depth = <128>;
-		simaai,max-users = <10>;
-		status = "okay";
-	};
-	
 	m4_lp_client: m4_lp_mbox {
 		compatible = "simaai,mailbox-client";
+		reg = <0x0 0x00729000 0x0 0x800>, <0x0 0x0072a000 0x0 0x800>;
+		reg-names = "txbuf", "rxbuf";
 		mbox-names = "lp";
 		mboxes = <&m4mb 0>;
 		simaai,dev-name = "m4_lp_mbox";
@@ -281,6 +255,8 @@
 	
 	m4_hp_client: m4_hp_mbox {
 		compatible = "simaai,mailbox-client";
+		reg = <0x0 0x00729800 0x0 0x800>, <0x0 0x0072a800 0x0 0x800>;
+		reg-names = "txbuf", "rxbuf";
 		mbox-names = "hp";
 		mboxes = <&m4mb 1>;
 		simaai,dev-name = "m4_hp_mbox";
@@ -371,6 +347,7 @@
 
 	dmac0: dma-controller@730000 {
 		compatible = "snps,axi-dma-1.01a";
+		#dma-cells = <1>;
 		reg = <0x0 0x730000 0x0 0x4000>;
 		clocks = <&sysclk>, <&sysclk>;
 		clock-names = "core-clk", "cfgr-clk";
@@ -393,9 +370,10 @@
 	
 	dmac1: dma-controller@734000 {
 		compatible = "snps,axi-dma-1.01a";
+		#dma-cells = <1>;
 		reg = <0x0 0x734000 0x0 0x4000>;
         	clocks = <&sysclk>, <&sysclk>;
-       	 clock-names = "core-clk", "cfgr-clk";
+		clock-names = "core-clk", "cfgr-clk";
 		interrupts = <GIC_SPI 338 IRQ_TYPE_LEVEL_HIGH>;
 		dma-channels = <32>;
 		snps,dma-masters = <2>;
@@ -540,9 +518,33 @@
         cma_reserved: linux,cma {
             compatible = "shared-dma-pool";
             reusable;
-            reg = <0x00000000 0x80000000 0x00000000 0x70000000>;
+            reg = <0x00000000 0x80000000 0x00000000 0x6FC00000>;
             linux,cma-default;
         };
+
+	ev_vdev0vring0: vdev0vring0@EFFF4000 {
+		reg = <0x0 0xEFFF4000 0x0 0x2000>;
+		no-map;
+	};
+
+	ev_vdev0vring1: vdev0vring1@EFFF6000 {
+		reg = <0x0 0xEFFF6000 0x0 0x2000>;
+		no-map;
+	};
+
+	ev_vdev0buffer: vdev0buffer@EFFF8000 {
+		compatible = "shared-dma-pool";
+		reg = <0x00000000 0xEFFF8000 0x00000000 0x8000>;
+		no-map;
+		alignment = <0x1000>;
+	};
+
+	evmem_rsvd: evmem@f0000000 {
+		compatible = "shared-dma-pool";
+		reg = <0x0 0xF0000000 0x0 0x4000000>;
+		no-map;
+		simaai,skip-memset-in-alloc;
+	};
 
         ocm_reserved: ocm@0 {
                 compatible = "shared-dma-pool";
@@ -585,6 +587,15 @@
                 simaai,skip-memset-in-alloc;
                 reg = <0x00000004 0x00000000 0x00000000 0x60000000>;
 		};
+	};
+
+	simaai,memcpy-manager {
+		compatible = "simaai,memcpy-manager";
+		dmas = <&dmac1 0>,<&dmac0 0>,<&dmac1 1>,<&dmac0 1>,
+		     <&dmac1 2>,<&dmac0 2>,<&dmac1 3>,<&dmac0 3>;
+		dma-names = "ch0","ch1","ch2","ch3",
+			"ch4","ch5","ch6","ch7";
+		status = "okay";
 	};
 
 	simaai,memory-manager {
@@ -630,22 +641,23 @@
 	};
 
 	simaai,evxx-rproc {
-		compatible = "simaai,evxx-rproc";
-		st,auto-boot =  <1>;
-		/* ARM specific */
-		reg = < 0x0 0x10000000 0x0 0x00001000
-		0x0 0xF0000000 0x0 0x04000000>; /* EV_FIRMWARE */
-		reg-names = "ev_csm", "ev_mem";
- 		sima,pm-firmware = "davinci-evxx-fw";
+		compatible = "simaai,davinci-evxx-rproc";
+		memory-region = <&ev_vdev0vring0>,<&ev_vdev0vring1>,
+				<&ev_vdev0buffer>,<&evmem_rsvd>;
+		mboxes = <&ev74mb 1>;
+		mbox-names = "hp";
+ 		simaai,cvu-firmware = "davinci-evxx-fw";
+		cpu-name = "ev74";
 		status = "okay";
 	};
 
 	simaai,m4-rproc {
-		compatible = "simaai,m4-rproc";
+		compatible = "simaai,davinci-m4-rproc";
 		st,auto-boot =  <1>;
 		reg = <0x0 0x01d00000 0x0 0x00080000>;
 		reg-names = "m4_sram";
-		sima,pm-firmware = "mla_driver.elf";
+		simaai,pm-firmware = "davinci-mla_driver.elf";
+		cpu-name = "m4";
 		status = "okay";
 	};
 

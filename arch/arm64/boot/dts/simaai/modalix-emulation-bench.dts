@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2023 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix.dtsi"
+
+/ {
+	model = "SiMa.ai Modalix emulation bench";
+
+	chosen {
+		bootargs = "earlycon=uart8250,mmio32,0x04006000 console=ttyS0,15625000n8 root=/dev/ram0 rw rootfstype=ramfs";
+		linux,initrd-start = <0x10 0x08000000>;
+		linux,initrd-end = <0x10 0x09400000>;
+	};
+
+	aliases {
+		console   = &uart00;
+	};
+
+	memory@1000000000 {
+		device_type = "memory";
+		reg = <0x10 0x00000000 0x00 0x10000000>;
+	};
+};
+
+&sio0 {
+	status = "okay";
+};
+
+&uart00 {
+	status = "okay";
+};
+
+&nvs {
+	status = "disabled";
+};
+
+&evxx_stu {
+	status = "disabled";
+};
+
+&isp_stu {
+	status = "disabled";
+};
+
+&evxx {
+	status = "disabled";
+};

@@ -1144,6 +1144,10 @@ enum v4l2_jpeg_chroma_subsampling {
 #define V4L2_CID_UNIT_CELL_SIZE			(V4L2_CID_IMAGE_SOURCE_CLASS_BASE + 8)
 #define V4L2_CID_NOTIFY_GAINS			(V4L2_CID_IMAGE_SOURCE_CLASS_BASE + 9)
 
+/* Sima.ai specific test controls */ 
+#define V4L2_CID_SIMAAI_ZEBU_CAMERA_IMAGE_WIDTH	(V4L2_CID_IMAGE_SOURCE_CLASS_BASE + 10)
+#define V4L2_CID_SIMAAU_ZEBU_CAMERA_IMAGE_HEIGHT       (V4L2_CID_IMAGE_SOURCE_CLASS_BASE + 11)
+
 
 /* Image processing controls */
 

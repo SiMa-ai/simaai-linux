@@ -32,3 +32,4 @@ obj-$(CONFIG_CEC_CORE) += cec/
 obj-y += common/ platform/ pci/ usb/ mmc/ firewire/ spi/ test-drivers/
 obj-y += al5r/
 obj-$(CONFIG_VIDEO_DEV) += radio/
+obj-$(CONFIG_ARM_MALI_ISP_C71AE) += isp/

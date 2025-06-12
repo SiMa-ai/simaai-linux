@@ -406,7 +406,7 @@ int stmmac_xpcs_setup(struct mii_bus *bus)
 		if (IS_ERR(mdiodev))
 			continue;
 
-		xpcs = xpcs_create(mdiodev, mode, priv->plat->xpcs_skip_reset);
+		xpcs = xpcs_create(mdiodev, mode, priv->plat->xpcs_skip_reset, priv->xpcs_irq);
 		if (IS_ERR_OR_NULL(xpcs)) {
 			mdio_device_free(mdiodev);
 			continue;
@@ -440,6 +440,7 @@ int stmmac_mdio_register(struct net_device *ndev)
 	struct device *dev = ndev->dev.parent;
 	struct fwnode_handle *fixed_node;
 	int addr, found, max_addr;
+	char name[64];
 
 	if (!mdio_bus_data)
 		return 0;
@@ -451,12 +452,14 @@ int stmmac_mdio_register(struct net_device *ndev)
 	if (mdio_bus_data->irqs)
 		memcpy(new_bus->irq, mdio_bus_data->irqs, sizeof(new_bus->irq));
 
-	new_bus->name = "stmmac";
+	snprintf(name, sizeof(name) - 1, "%s-mdio", dev_name(dev));
+	new_bus->name = name;
 
 	if (priv->plat->has_gmac4)
 		new_bus->probe_capabilities = MDIOBUS_C22_C45;
 
 	if (priv->plat->has_xgmac) {
+
 		new_bus->read = &stmmac_xgmac2_mdio_read;
 		new_bus->write = &stmmac_xgmac2_mdio_write;
 

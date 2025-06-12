@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+#  Sima.ai dummy camera for modalix emulation
+
+config CONFIG_VIDEO_SIMAAI_DUMMY_CAMERA
+  tristate "Fake camera driver for simaai Modalix zebu emulation"
+  help
+   This driver is dummpy camera sensor driver for modalix zebu environment
+    If unsure, say N.

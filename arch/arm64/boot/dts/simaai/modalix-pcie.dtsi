@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024 SiMa ai
+ */
+
+/ {
+	pcie0_ep: pcie0@0x6000000 {
+		compatible = "simaai,modalix-pcie-ep-1.0";
+		reg = <0 0x6000000 0 0x100000>,	/* dbi */
+			<0 0x6100070 0 0x14>,	/* dbi2 */
+			<0 0x6200000 0 0x1000>, /* asr */
+			<0 0x6300000 0 0x7f24>,	/* atu */
+			<0 0x6380000 0 0x3fac>;	/* hdma */
+		reg-names = "dbi", "dbi2", "asr", "atu", "hdma" ;
+		ocm-region = <&ocm_pcie_reserved>;
+		silicon = "modalix";
+		interrupt-count = <48>;
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 857 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 858 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 859 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 860 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 861 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 862 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 863 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 864 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 865 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 866 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 867 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 868 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 869 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 870 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 871 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 872 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 873 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 874 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 875 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 876 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 877 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 878 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 879 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 880 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 881 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 882 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 883 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 884 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 885 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 886 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 887 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 888 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 889 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 890 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 891 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 892 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 893 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 894 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 895 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 896 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 897 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 898 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 899 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 900 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 901 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 902 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 903 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 904 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "doorbell_0",
+			"doorbell_1",
+			"doorbell_2",
+			"doorbell_3",
+			"doorbell_4",
+			"doorbell_5",
+			"doorbell_6",
+			"doorbell_7",
+			"doorbell_8",
+			"doorbell_9",
+			"doorbell_10",
+			"doorbell_11",
+			"doorbell_12",
+			"doorbell_13",
+			"doorbell_14",
+			"doorbell_15",
+			"doorbell_16",
+			"doorbell_17",
+			"doorbell_18",
+			"doorbell_19",
+			"doorbell_20",
+			"doorbell_21",
+			"doorbell_22",
+			"doorbell_23",
+			"doorbell_24",
+			"doorbell_25",
+			"doorbell_26",
+			"doorbell_27",
+			"doorbell_28",
+			"doorbell_29",
+			"doorbell_30",
+			"doorbell_31",
+			"doorbell_32",
+			"doorbell_33",
+			"doorbell_34",
+			"doorbell_35",
+			"doorbell_36",
+			"doorbell_37",
+			"doorbell_38",
+			"doorbell_39",
+			"doorbell_40",
+			"doorbell_41",
+			"doorbell_42",
+			"doorbell_43",
+			"doorbell_44",
+			"doorbell_45",
+			"doorbell_46",
+			"doorbell_47";
+		status = "disabled";
+	};
+};

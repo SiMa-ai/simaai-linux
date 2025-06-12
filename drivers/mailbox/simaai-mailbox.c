@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright SiMa.ai (C) 2021. All rights reserved
+ * Copyright SiMa.ai (C) 2021,2025. All rights reserved
  */
 
 #include <linux/device.h>
@@ -11,8 +11,6 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-
-#include <linux/mailbox/simaai-mailbox.h>
 
 /* Mailbox controller registers area */
 #define SIMA_MBOX_CFG_OFFSET		0x00
@@ -28,8 +26,7 @@
 
 /* Mailbox Message Register bit definitions */
 #define SIMA_MBOX_MSG_RX_INT_SET	BIT(0)
-#define SIMA_MBOX_MSG_INDEX		GENMASK(16,2)
-#define SIMA_MBOX_MSG_SIZE		GENMASK(31,17)
+#define SIMA_MBOX_MSG_DATA		GENMASK(31,2)
 
 /* Mailbox Status Register bit definitions */
 #define SIMA_MBOX_STAT_RX_INT_PENDING	BIT(0)
@@ -43,7 +40,6 @@ struct sima_resource {
 	char name[32];
 	int irq;
 	void __iomem *regs;
-	void __iomem *scratch;
 };
 
 struct sima_channel {
@@ -106,7 +102,7 @@ static bool sima_mbox_last_tx_done(struct mbox_chan *chan)
 static int sima_mbox_tx_data(struct mbox_chan *chan, void *data)
 {
 	struct sima_channel *mbox = mbox_chan_to_sima_chan(chan);
-	struct simaai_mbmsg *msg = (struct simaai_mbmsg *)data;
+	u32 *msg = (u32 *)data;
 	u32 message; 
 
 	if (!mbox || !data)
@@ -115,11 +111,8 @@ static int sima_mbox_tx_data(struct mbox_chan *chan, void *data)
 	if (sima_mbox_full(mbox, SIMA_MBOX_TX))
 		return -EBUSY;
 	
-	memcpy_toio(mbox->res[SIMA_MBOX_TX].scratch, msg->data, msg->len);
-
 	/* Message payload is placed in MSG[31:2] bits */
-	message = FIELD_PREP(SIMA_MBOX_MSG_INDEX, 0) | FIELD_PREP(SIMA_MBOX_MSG_SIZE, msg->len) |
-			SIMA_MBOX_MSG_RX_INT_SET;
+	message = FIELD_PREP(SIMA_MBOX_MSG_DATA, *msg) | SIMA_MBOX_MSG_RX_INT_SET;
 	writel_relaxed(message, mbox->res[SIMA_MBOX_TX].regs + SIMA_MBOX_MSG_OFFSET);
 
 	return 0;
@@ -134,12 +127,6 @@ static int sima_mbox_tx_startup(struct mbox_chan *chan)
 
 	writel_relaxed(0, mbox->res[SIMA_MBOX_TX].regs + SIMA_MBOX_MSG_OFFSET);
 
-	ret = request_irq(mbox->res[SIMA_MBOX_TX].irq, sima_mbox_tx_interrupt, 0,
-				mbox->res[SIMA_MBOX_TX].name, chan);
-	if (unlikely(ret)) {
-		dev_err(mbox->dev, "failed to register mailbox interrupt: %d\n", ret);
-		return ret;
-	}
 	cfg |= SIMA_MBOX_CFG_TX_INT_EN;
 
 	writel_relaxed(cfg, mbox->res[SIMA_MBOX_TX].regs + SIMA_MBOX_CFG_OFFSET);
@@ -150,22 +137,13 @@ static int sima_mbox_tx_startup(struct mbox_chan *chan)
 static inline void sima_mbox_rx_data(struct mbox_chan *chan)
 {
 	struct sima_channel *mbox = mbox_chan_to_sima_chan(chan);
-	char msg_raw[SIMAAI_MAX_MSG_SIZE];
-	struct simaai_mbmsg *msg = (struct simaai_mbmsg*)msg_raw;
-	int index, size;
 	u32 data;
 
 	if (sima_mbox_full(mbox, SIMA_MBOX_RX)) {
 		data = readl_relaxed(mbox->res[SIMA_MBOX_RX].regs + SIMA_MBOX_MSG_OFFSET);
-		index = FIELD_GET(SIMA_MBOX_MSG_INDEX, data);
-		size = FIELD_GET(SIMA_MBOX_MSG_SIZE, data);
+		data = FIELD_GET(SIMA_MBOX_MSG_DATA, data);
 
-		if ((index + size) > SIMAAI_MAX_DATA_SIZE)
-			size = SIMAAI_MAX_DATA_SIZE - index;
-		msg->len = size;
-
-		memcpy_fromio(msg->data, mbox->res[SIMA_MBOX_RX].scratch + index, size);
-		mbox_chan_received_data(chan, msg_raw);
+		mbox_chan_received_data(chan, &data);
 		/* Deassert Rx interrupt and notify a sender */
 		writel_relaxed(0, mbox->res[SIMA_MBOX_RX].regs + SIMA_MBOX_MSG_OFFSET);
 	}
@@ -192,23 +170,6 @@ static bool sima_mbox_rx_peek_data(struct mbox_chan *chan)
 	return sima_mbox_full(mbox, SIMA_MBOX_RX);
 }
 
-static int sima_mbox_rx_startup(struct mbox_chan *chan)
-{
-	int ret;
-	struct sima_channel *mbox = mbox_chan_to_sima_chan(chan);
-
-	ret = request_irq(mbox->res[SIMA_MBOX_RX].irq, sima_mbox_rx_interrupt, 0,
-				mbox->res[SIMA_MBOX_RX].name, chan);
-	if (unlikely(ret)) {
-		dev_err(mbox->dev,
-			"failed to register mailbox interrupt: %d\n",
-			ret);
-		return -EFAULT; 
-	}
-
-	return 0;
-}
-
 static int sima_mbox_startup(struct mbox_chan *chan)
 {
 	struct sima_channel *mbox = mbox_chan_to_sima_chan(chan);
@@ -218,12 +179,6 @@ static int sima_mbox_startup(struct mbox_chan *chan)
 		return -EINVAL;
 
 	ret = sima_mbox_tx_startup(chan);
-	if (ret)
-		return ret;
-
-	ret = sima_mbox_rx_startup(chan);
-	if (ret)
-		free_irq(mbox->res[SIMA_MBOX_TX].irq, chan);  
 
 	return ret;
 }
@@ -235,8 +190,6 @@ static void sima_mbox_shutdown(struct mbox_chan *chan)
 	/* Sender is responsible for disabling mailbox */
 	writel_relaxed(0, mbox->res[SIMA_MBOX_TX].regs + SIMA_MBOX_CFG_OFFSET);
 
-	free_irq(mbox->res[SIMA_MBOX_TX].irq, chan);  
-	free_irq(mbox->res[SIMA_MBOX_RX].irq, chan);  
 }
 
 static const struct mbox_chan_ops sima_mbox_ops = {
@@ -248,10 +201,11 @@ static const struct mbox_chan_ops sima_mbox_ops = {
 };
 
 static int sima_init_rs(struct platform_device *pdev, struct sima_resource *res,
-		int chan, int dir)
+		int chan, int dir, struct sima_mbox *mbox)
 {
+	struct device *dev = &pdev->dev;
 	void __iomem * addr;
-	int offset;
+	int offset, ret;
 	const char names[][5] = { "lptx", "lprx", "hptx", "hprx",};
 
 	offset = (chan == SIMA_MBOX_LP_CHAN) ? 0 : 2;
@@ -262,16 +216,23 @@ static int sima_init_rs(struct platform_device *pdev, struct sima_resource *res,
 		return PTR_ERR(addr);
 	res->regs = addr;
 
-	addr = devm_platform_ioremap_resource(pdev, offset + 4);
-	if (IS_ERR(addr))
-		return PTR_ERR(addr);
-	res->scratch = addr;
-
 	res->irq = platform_get_irq(pdev, offset);
 	if (res->irq < 0)
 		return -ENOTSUPP;
 
 	snprintf(res->name, sizeof(res->name) - 1, "%s_%s", pdev->name, names[offset]);
+
+	if (dir == SIMA_MBOX_RX)
+		ret = devm_request_irq(dev, res->irq, sima_mbox_rx_interrupt, 0, res->name, &mbox->chans[chan]);
+	else
+		ret = devm_request_irq(dev, res->irq, sima_mbox_tx_interrupt, 0, res->name, &mbox->chans[chan]);
+
+	if (unlikely(ret)) {
+		dev_err(dev,
+			"failed to register mailbox interrupt: %d\n",
+			ret);
+		return -ENODEV;
+	}
 
 	return 0;
 }
@@ -293,7 +254,7 @@ static int sima_mbox_probe(struct platform_device *pdev)
 
 	for (i = 0; i < ARRAY_SIZE(rs); i++) {
 		ret = sima_init_rs(pdev, &(mbox->channels[rs[i][0]].res[rs[i][1]]),
-				   rs[i][0], rs[i][1]);
+				   rs[i][0], rs[i][1], mbox);
 		if (ret != 0)
 			return ret;
 	}

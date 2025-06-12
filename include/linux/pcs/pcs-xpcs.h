@@ -18,6 +18,7 @@
 #define DW_AN_C37_SGMII			2
 #define DW_2500BASEX			3
 #define DW_AN_C37_1000BASEX		4
+#define DW_AN_C37_USXGMII		5
 
 struct xpcs_id;
 
@@ -27,6 +28,7 @@ struct dw_xpcs {
 	const struct xpcs_id *id;
 	struct phylink_pcs pcs;
 	bool skip_reset;
+	int link_num;
 };
 
 int xpcs_get_an_mode(struct dw_xpcs *xpcs, phy_interface_t interface);
@@ -38,7 +40,7 @@ void xpcs_get_interfaces(struct dw_xpcs *xpcs, unsigned long *interfaces);
 int xpcs_config_eee(struct dw_xpcs *xpcs, int mult_fact_100ns,
 		    int enable);
 struct dw_xpcs *xpcs_create(void __iomem *base, phy_interface_t interface,
-			     int skip_reset);
+			     int skip_reset, int irq);
 void xpcs_destroy(struct dw_xpcs *xpcs);
 
 #endif /* __LINUX_PCS_XPCS_H */
