@@ -107,8 +107,8 @@ static int isp_vb2_buf_prepare( struct vb2_buffer *vb )
     static unsigned long cnt = 0;
     struct v4l2_format vfmt;
 
-    LOG( LOG_INFO, "Preparing VB2 buffer for stream type: %d, queue type: %u, fcall#: %lu.",
-         pstream->stream_type, vb->vb2_queue->type, cnt++ );
+    //LOG( LOG_INFO, "Preparing VB2 buffer for stream type: %d, queue type: %u, fcall#: %lu.",
+    //     pstream->stream_type, vb->vb2_queue->type, cnt++ );
 
     // Get stream direction based on the queue type
     isp_v4l2_stream_direction_t stream_direction;
@@ -133,9 +133,9 @@ static int isp_vb2_buf_prepare( struct vb2_buffer *vb )
         }
 
         vb2_set_plane_payload( vb, 0, size );
-        LOG( LOG_INFO, "VB2 buffer is single plane, effective payload size: %lu", size );
+        //LOG( LOG_INFO, "VB2 buffer is single plane, effective payload size: %lu", size );
     } else if ( V4L2_TYPE_IS_MULTIPLANAR( vfmt.type ) ) {
-        LOG( LOG_INFO, "VB2 buffer is multi plane:" );
+        //LOG( LOG_INFO, "VB2 buffer is multi plane:" );
         uint8_t i;
         for ( i = 0; i < vfmt.fmt.pix_mp.num_planes; i++ ) {
             size = vfmt.fmt.pix_mp.plane_fmt[i].sizeimage;
@@ -145,7 +145,7 @@ static int isp_vb2_buf_prepare( struct vb2_buffer *vb )
                 return -EINVAL;
             }
             vb2_set_plane_payload( vb, i, size );
-            LOG( LOG_INFO, "  |--Plane %d. Effective payload size: %lu", i, size );
+            //LOG( LOG_INFO, "  |--Plane %d. Effective payload size: %lu", i, size );
         }
     }
 
@@ -246,8 +246,8 @@ static void isp_vb2_buf_queue( struct vb2_buffer *vb )
 #endif
     static unsigned long cnt = 0;
 
-    LOG( LOG_INFO, "Queueing buffer for stream type: %d, queue type: %u, fcall#: %lu.",
-         pstream->stream_type, vb->vb2_queue->type, cnt++ );
+    //LOG( LOG_INFO, "Queueing buffer for stream type: %d, queue type: %u, fcall#: %lu.",
+    //     pstream->stream_type, vb->vb2_queue->type, cnt++ );
 
 #if 0
     //First buffer is used for creating bufset in ISP at stream start, but it doesn't
@@ -261,7 +261,7 @@ static void isp_vb2_buf_queue( struct vb2_buffer *vb )
     }
 #endif
 
-	LOG (LOG_INFO, "DMA address is %#llx", vb2_dma_contig_plane_dma_addr(vb, 0));
+	//LOG (LOG_INFO, "DMA address is %#llx", vb2_dma_contig_plane_dma_addr(vb, 0));
 
 
     // Capture stream VB2 buffers go to stream ready queue

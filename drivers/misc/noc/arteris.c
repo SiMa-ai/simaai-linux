@@ -27,9 +27,10 @@ struct noc_device {
 
 struct nocDesc {
   /*
-   *TODO: Add support for rest of noc (pkt probe, QoS, firewall...)
+   *TODO: Add support for rest of noc (QoS, firewall...)
    */
   struct transactionProbe txnProbes[MAX_TRANSACTION_PROBES];
+  struct packetProbe pktProbes[MAX_PACKET_PROBES];
 };
 
 // Runtime context structure
@@ -157,23 +158,153 @@ static int readHistogramBins(struct txnProbeDesc *probe)
 	return 0;
 }
 
+int configureAndRunPktProbe(struct pktProbeDesc *probe)
+{
+	struct packetProbe *pktProbe;
+	if (!probe)
+	  return -EINVAL;
+
+	pktProbe = &nocCtx.pktProbes[probe->id];
+	strncpy(probe->label, pktProbe->label,
+		sizeof(probe->label) / sizeof(probe->label[0]));
+
+	// Reset
+	iowrite32(~PROBE_CFG_CTL_GLOBAL_EN,
+		  pktProbe->reg + PKT_PROBE_CFG_CTL_OFFSET);
+	iowrite32(~PKT_PROBE_MAIN_CTL_MASK,
+		  pktProbe->reg + PKT_PROBE_MAIN_CTL_OFFSET);
+
+	// Init
+	iowrite32((PROBE_MAIN_CTL_STATEN | PROBE_MAIN_CTL_PAYLOADEN),
+		      pktProbe->reg + PKT_PROBE_MAIN_CTL_OFFSET);
+	iowrite32(probe->tracePort, pktProbe->reg + PKT_PROBE_TRACE_PORT_SEL_OFFSET);
+
+	//Filters
+	for (int i = 0; i < probe->nFilterCount; i++) {
+	  //Route
+	  iowrite32(probe->fltDesc[i].fltRouteIdDesc.routeIdBase,
+		    pktProbe->reg + PKT_PROBE_FILT_X_ROUTE_ID_BASE_OFFSET(i));
+	  iowrite32(probe->fltDesc[i].fltRouteIdDesc.routeIdMask,
+		    pktProbe->reg + PKT_PROBE_FILT_X_ROUTE_ID_MASK_OFFSET(i));
+
+	  //Address
+	  iowrite32(probe->fltDesc[i].fltAddrDesc.addrBase_low,
+		    pktProbe->reg + PKT_PROBE_FILT_X_ADDR_BASE_LOW_OFFSET(i));
+	  iowrite32(probe->fltDesc[i].fltAddrDesc.addrBase_high,
+		    pktProbe->reg + PKT_PROBE_FILT_X_ADDR_BASE_HIGH_OFFSET(i));
+	  iowrite32(probe->fltDesc[i].fltAddrDesc.windowSize,
+		    pktProbe->reg +
+		    PKT_PROBE_FILT_X_WINDOW_SIZE_OFFSET(i));
+
+	  //Opcode
+	  iowrite32(probe->fltDesc[i].fltOpCode,
+		    pktProbe->reg + PKT_PROBE_FILT_X_OPCODE_OFFSET(i));
+
+	  //Status En
+	  iowrite32(probe->fltDesc[i].fltStatus,
+		    pktProbe->reg + PKT_PROBE_FILT_X_STATUS_OFFSET(i));
+
+	  //Length. Hardcoded to detect all packet lengths
+	  iowrite32(0xF,
+		    pktProbe->reg + PKT_PROBE_FILT_X_LENGTH_OFFSET(i));
+	}
+
+	//Set counter's source to read filter'd packets in terms of bytes
+	//Note: Using only counter 0,1
+	iowrite32((uint32_t)pktCounterSourceFiltByte,
+		  pktProbe->reg + PKT_PROBE_COUNTER_X_SRC(0));
+	iowrite32((uint32_t)pktCounterSourceChain,
+		  pktProbe->reg + PKT_PROBE_COUNTER_X_SRC(1));
+
+
+	//Global En
+	iowrite32(PROBE_CFG_CTL_GLOBAL_EN,
+		  pktProbe->reg + PKT_PROBE_CFG_CTL_OFFSET);
+
+	return 0;
+}
+
+static uint64_t errGetValidCounterVal(uint32_t lowerVal, uint32_t upperVal, bool isShortWidth)
+{
+  /* There is an errata where the counters for prb_bsu_nvs_pkt are 16 bits wide (aka short)
+   * where as counters of all the other packet probes are 32 bits. Handle it here
+   */
+  uint64_t upperValu64;
+
+  if (isShortWidth) {
+    return (uint64_t)((upperVal << 16) | (lowerVal & 0xFFFF));
+  }
+
+  upperValu64 = (uint64_t)upperVal;
+  return (uint64_t)((upperValu64 << 32) | (lowerVal & 0xFFFFFFFF));
+}
+
+static int getBytesCountValue(struct pktProbeDesc *probe)
+{
+  struct packetProbe *pktProbe;
+  if (!probe)
+    return -EINVAL;
+
+  pktProbe = &nocCtx.pktProbes[probe->id];
+
+  //TODO: Loop here
+  probe->bytesCount = errGetValidCounterVal(ioread32(pktProbe->reg + PKT_PROBE_COUNTER_X_VAL(0)),
+					    ioread32(pktProbe->reg + PKT_PROBE_COUNTER_X_VAL(1)),
+					    probe->id == prb_bsu_nvs_pkt);
+
+  return 0;
+}
+
 static long noc_platform_ioctl(struct file *file, unsigned int cmd,
 			       unsigned long arg)
 {
   int ret = 0;
-  struct txnProbeDesc probeDesc;
-  copy_from_user(&probeDesc, (struct txnProbeDesc *)arg,
-		 sizeof(struct txnProbeDesc));
 
   switch (cmd) {
-  case NOC_IOCTL_CONFIGURE_AND_RUN:
+  case NOC_IOCTL_CONFIGURE_AND_RUN: {
+    struct txnProbeDesc probeDesc;
+    copy_from_user(&probeDesc, (struct txnProbeDesc *)arg,
+		   sizeof(struct txnProbeDesc));
+
     ret = configureAndEnableTxnProbe(&probeDesc);
-    copy_to_user((struct txnProbeDesc *)arg, &probeDesc, sizeof(struct txnProbeDesc));
+    copy_to_user((struct txnProbeDesc *)arg, &probeDesc,
+		 sizeof(struct txnProbeDesc));
+  }
     break;
 
-  case NOC_IOCTL_READ:
+  case NOC_IOCTL_CONFIGURE_PKT_AND_RUN: {
+	  struct pktProbeDesc probeDesc;
+	  copy_from_user(&probeDesc, (struct pktProbeDesc *)arg,
+			 sizeof(struct pktProbeDesc));
+
+	  ret = configureAndRunPktProbe(&probeDesc);
+
+	  //We updated the label name. Write back
+	  copy_to_user((struct pktProbeDesc *)arg, &probeDesc,
+		       sizeof(struct pktProbeDesc));
+  }
+    break;
+
+  case NOC_IOCTL_BW_READ: {
+    struct pktProbeDesc probeDesc;
+	  copy_from_user(&probeDesc, (struct pktProbeDesc *)arg,
+			 sizeof(struct pktProbeDesc));
+
+	  getBytesCountValue(&probeDesc);
+	  copy_to_user((struct pktProbeDesc *)arg, &probeDesc,
+		       sizeof(struct pktProbeDesc));
+  }
+    break;
+
+  case NOC_IOCTL_READ: {
+    struct txnProbeDesc probeDesc;
+    copy_from_user(&probeDesc, (struct txnProbeDesc *)arg,
+		   sizeof(struct txnProbeDesc));
+
     ret = readHistogramBins(&probeDesc);
-    copy_to_user((struct txnProbeDesc *)arg, &probeDesc, sizeof(struct txnProbeDesc));
+    copy_to_user((struct txnProbeDesc *)arg, &probeDesc,
+		 sizeof(struct txnProbeDesc));
+  }
     break;
 
   default:
@@ -188,6 +319,38 @@ static const struct file_operations noc_platform_fops = {
   .owner          = THIS_MODULE,
   .unlocked_ioctl = noc_platform_ioctl,  // IOCTL handler
 };
+
+static int parse_packet_probes(struct device *dev,
+			       struct device_node *node)
+{
+  int i = 0;
+  struct device_node *probe_node;
+
+  if (!node) {
+    dev_err(dev, "Packet probe node not found\n");
+    return -EINVAL;
+  }
+
+  for_each_child_of_node(node, probe_node) {
+    uint32_t reg[2];
+
+    of_property_read_u32_array(probe_node, "reg", reg, 2);
+    nocCtx.pktProbes[i].reg = devm_ioremap(dev, reg[0], reg[1]);
+
+    of_property_read_u32(probe_node, "probe-id",
+			 &nocCtx.pktProbes[i].probeId);
+
+    of_property_read_string(probe_node, "label",
+			    &nocCtx.pktProbes[i].label);
+    of_property_read_u32(probe_node, "num-counters",
+			 &nocCtx.pktProbes[i].nCounters);
+
+    dev_info(dev, "Successfully added packet probe \"%s\"\n",
+	     nocCtx.pktProbes[i].label);
+    i++;
+  }
+  return 0;
+}
 
 static int parse_transaction_probes(struct device *dev,struct device_node *node)
 {
@@ -261,7 +424,7 @@ static int noc_platform_probe(struct platform_device *pdev)
 	int ret, i = 0;
 	struct device *dev = &pdev->dev, *sysDev = NULL;
 	struct noc_device *nocdev;
-	struct device_node *probe_node, *txn_probes_node;
+	struct device_node *probe_node, *txn_probes_node, *pkt_probes_node;
 
 	dev_info(dev, "Probing platform device: %s\n", SIMAAI_NOC_DEV_NAME);
 
@@ -309,7 +472,11 @@ static int noc_platform_probe(struct platform_device *pdev)
 	txn_probes_node =
 		of_get_child_by_name(dev->of_node, "transaction-probes");
 
-	ret = parse_transaction_probes(dev,txn_probes_node);
+	pkt_probes_node =
+	  of_get_child_by_name(dev->of_node, "packet-probes");
+
+	ret = parse_transaction_probes(dev, txn_probes_node);
+	ret = parse_packet_probes(dev, pkt_probes_node);
 
 	platform_set_drvdata(pdev, nocdev);
 	dev_info(dev, "Character device registered with major number %d\n",

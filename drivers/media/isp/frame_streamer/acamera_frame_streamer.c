@@ -291,7 +291,7 @@ int frame_stream_get_frame( const unsigned int ctx_id, const aframe_type_t type,
         LOG( LOG_ERR, "Failed to get FRAME_STREAM_PARAM_IS_ENABLED parameter. Using default value (%d).", is_stream_enabled );
     }
 
-	LOG (LOG_INFO, "is stream enabled %d", is_stream_enabled);
+	//LOG (LOG_INFO, "is stream enabled %d", is_stream_enabled);
 
     frame_streamer_api_config_record_t *primary = &( frame_streamer_config.api_config.records[frame_streamer_config.api_config.primary_streamer_index] );
     frame_streamer_api_config_record_t *secondary = &( frame_streamer_config.api_config.records[frame_streamer_config.api_config.secondary_streamer_index] );

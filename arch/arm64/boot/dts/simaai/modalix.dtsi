@@ -21,3 +21,4 @@
 #include "modalix-vis.dtsi"
 #include "modalix-aux.dtsi"
 #include "modalix-noc.dtsi"
+#include "modalix-uio.dtsi"

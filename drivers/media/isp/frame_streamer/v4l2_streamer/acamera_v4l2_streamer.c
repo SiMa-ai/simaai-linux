@@ -49,7 +49,7 @@ int v4l2_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type
 
     aframe_t *lframe = *frame;
 
-    LOG( LOG_INFO, "get frame: 0x%p, requested: context id: %u, type: %u, state: %u", lframe, ctx_id, type, state );
+    //LOG( LOG_INFO, "get frame: 0x%p, requested: context id: %u, type: %u, state: %u", lframe, ctx_id, type, state );
 
     // Update frame hw specific description fields
     if ( lframe != NULL ) {
@@ -57,7 +57,7 @@ int v4l2_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type
             lframe->planes[i].data_width = s_stream_cfg[type].planes[i].data_width;
             lframe->planes[i].hw_cfg = s_stream_cfg[type].planes[i].hw_cfg;
         }
-
+#if 0
         LOG( LOG_INFO, "context id: %u, type: %u, state: %u, source: %u, num_planes: %u",
              lframe->context_id, lframe->type, lframe->state, lframe->source, lframe->num_planes );
 
@@ -71,6 +71,7 @@ int v4l2_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type
                  (uint64_t)lframe->planes[i].address.low | ( ( (uint64_t)lframe->planes[i].address.high ) << 32 ),
                  lframe->planes[i].data_width );
         }
+#endif
     }
 
     return rc;

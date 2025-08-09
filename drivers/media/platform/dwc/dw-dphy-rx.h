@@ -151,6 +151,7 @@ struct dw_dphy_rx {
 	u32 dphy_gen;
 	u32 dphy_te_len;
 	u32 mipi_generator;
+	u32 data_lane_mask;
 	u32 lanes_config;
 	u32 max_lanes;
 	u32 lp_time;
@@ -171,6 +172,7 @@ int dw_dphy_init(struct phy *phy);
 int dw_dphy_reset(struct phy *phy);
 int dw_dphy_power_off(struct phy *phy);
 int dw_dphy_power_on(struct phy *phy);
+int dw_dphy_config(struct phy *phy, union phy_configure_opts *opts);
 u8 dw_dphy_setup_config(struct dw_dphy_rx *dphy);
 #if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
 u32 dw_dphy_if_read(struct dw_dphy_rx *dphy, u32 address);

@@ -11,6 +11,7 @@ def main() {
                         def parameters = [
                             string(name: 'LINUX_BRANCH', value: "${env.CHANGE_BRANCH}"),
                             string(name: 'BRANCH_CONTAINER_BASE', value: "${env.CHANGE_TARGET}"),
+                            string(name: 'DEFAULT_BRANCH', value: "${env.CHANGE_TARGET}")
                         ]
                         println "Passing LINUX_BRANCH ${env.CHANGE_BRANCH} to upstream job"
                         println "Passing BRANCH_CONTAINER_BASE ${env.CHANGE_TARGET} to upstream job}"

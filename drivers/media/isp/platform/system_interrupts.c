@@ -68,6 +68,7 @@ void system_set_global_flag( void )
     m_global_flag = 1;
 }
 
+#define ISP_CPU_CORE_NUMBER		(8)
 
 /**
  * @brief      Bottom half handler.
@@ -149,6 +150,8 @@ void system_interrupts_set_irq( void *pdev, int irq_num, int flags )
 
 int system_interrupts_init( void )
 {
+	cpumask_t mask;
+
     if ( m_interrupt_request_status != ISP_IRQ_STATUS_DEINIT ) {
         /* Interrupts are already initialized. */
         printk( KERN_WARNING "Interrupts are already init'd." );
@@ -182,6 +185,10 @@ int system_interrupts_init( void )
         destroy_workqueue( m_work_queue );
         return rc;
     }
+
+	cpumask_clear(&mask);
+	cpumask_set_cpu(ISP_CPU_CORE_NUMBER, &mask);
+	irq_set_affinity(m_irq_num, &mask);
 
     m_interrupt_request_status = ISP_IRQ_STATUS_ENABLED;
     return 0;

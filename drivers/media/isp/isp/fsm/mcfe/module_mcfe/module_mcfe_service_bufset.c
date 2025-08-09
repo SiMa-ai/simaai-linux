@@ -498,6 +498,7 @@ static int bufset_get_frame_index_with_status( const module_mcfe_bufset_t *bufse
 
             const uint8_t buffer_status = mcfe_hwif_buff_status_get( bufset->buffs.buff[i][j]->type, bufset->buffs.buff[i][j]->index );
 
+#if 0
             LOG( LOG_INFO, "Buffer status query:\n"
                             "\tenabled: %u\n"
                             "\tstatus: %u\n"
@@ -509,6 +510,7 @@ static int bufset_get_frame_index_with_status( const module_mcfe_bufset_t *bufse
                  req_buffer_status,
                  bufset->buffs.buff[i][j]->index,
                  bufset->buffs.buff[i][j]->type );
+#endif
 
             if ( ( buffer_status == req_buffer_status ) || ( req_buffer_status == 255 ) ) {
                 status_match_count++;
@@ -558,7 +560,7 @@ static int bufset_set_buffer_address_and_status( const module_mcfe_bufset_t *buf
     for ( i = 0; i < bufset->buffs.num_planes; i++ ) {
         module_mcfe_buf_t *buffer = bufset->buffs.buff[frame_index][i];
         if ( is_input_frame_supplied ) {
-			LOG (LOG_INFO, "input frame is supplied %#x",  frame->planes[i].address.low);
+			//LOG (LOG_INFO, "input frame is supplied %#x",  frame->planes[i].address.low);
             mcfe_hwif_buff_addr_set( buffer->type, buffer->index, frame->planes[i].address.low );
         } else {
             mcfe_hwif_buff_addr_set( buffer->type, buffer->index, 0 );

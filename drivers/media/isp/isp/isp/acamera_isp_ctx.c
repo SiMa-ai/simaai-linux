@@ -165,7 +165,7 @@ void acamera_isp_ctx_process_interrupt( acamera_isp_ctx_ptr_t p_ictx, uint8_t ev
     }
 
     if ( event == ACAMERA_IRQ_BE_FRAME_START ) {
-		LOG (LOG_INFO, "ACAMERA_IRQ_BE_FRAME_START");
+		//LOG (LOG_INFO, "ACAMERA_IRQ_BE_FRAME_START");
         // Back End Frame Start
         p_ictx->be_frame_counter++;
         if ( p_ictx->be_frame_counter != p_ictx->fe_frame_counter ) {
@@ -213,7 +213,7 @@ void acamera_isp_ctx_process_interrupt( acamera_isp_ctx_ptr_t p_ictx, uint8_t ev
 
     if ( event == ACAMERA_IRQ_FE_FRAME_END ) {
         // Front End Frame End
-		LOG (LOG_INFO, "ACAMERA_IRQ_FE_FRAME_END");
+		//LOG (LOG_INFO, "ACAMERA_IRQ_FE_FRAME_END");
         p_ictx->dfe_frame_counter++;
         if ( p_ictx->fe_frame_counter != p_ictx->dfe_frame_counter ) {
             DISCON_TRACE( "FW[%u] FRAME_START discontinuity!!!, FS %u DFE %u", p_ictx->context_id, p_ictx->fe_frame_counter, p_ictx->dfe_frame_counter );
@@ -224,7 +224,7 @@ void acamera_isp_ctx_process_interrupt( acamera_isp_ctx_ptr_t p_ictx, uint8_t ev
 
     if ( event == ACAMERA_IRQ_BE_FRAME_END ) {
         // Back End Frame End
-		LOG (LOG_INFO, "ACAMERA_IRQ_BE_FRAME_END");
+		//LOG (LOG_INFO, "ACAMERA_IRQ_BE_FRAME_END");
         p_ictx->frame_end_counter++;
 
 #if ( ISP_RTL_VERSION_R >= 1 ) //TODO: Figure out the behaviour for R2, for now assume same as R1

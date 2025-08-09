@@ -56,12 +56,40 @@ find_dw_mipi_csi_format(struct v4l2_mbus_framefmt *mf)
 	return NULL;
 }
 
-static void dw_mipi_csi_glue_reset(struct mipi_csi_dev *dev)
+static void dw_mipi_csi_glue_power_off(struct mipi_csi_dev *dev)
 {
+	//mipi_chctl_ch0
 	dw_mipi_csi_glue_write(dev, 0xB8, 0x0);
 	dw_mipi_csi_glue_write(dev, 0xDC, 0x0);
 	dw_mipi_csi_glue_write(dev, 0x100, 0x0);
 	dw_mipi_csi_glue_write(dev, 0x124, 0x0);
+
+	// mipi_stats_ctrl_ch0
+	dw_mipi_csi_glue_write(dev, 0xBC, 0xFF);
+	dw_mipi_csi_glue_write(dev, 0xE0, 0xFF);
+	dw_mipi_csi_glue_write(dev, 0x104, 0xFF);
+	dw_mipi_csi_glue_write(dev, 0x128, 0xFF);
+
+	// pixle_cnt_ctrl
+	dw_mipi_csi_glue_write(dev, 0x70, 0x2);
+}
+
+static void dw_mipi_csi_glue_power_on(struct mipi_csi_dev *dev)
+{
+	//mipi_chctl_ch0
+	dw_mipi_csi_glue_write(dev, 0xB8, 0x1);
+	dw_mipi_csi_glue_write(dev, 0xDC, 0x1);
+	dw_mipi_csi_glue_write(dev, 0x100, 0x1);
+	dw_mipi_csi_glue_write(dev, 0x124, 0x1);
+
+	// mipi_stats_ctrl_ch0
+	dw_mipi_csi_glue_write(dev, 0xBC, 0x0);
+	dw_mipi_csi_glue_write(dev, 0xE0, 0x0);
+	dw_mipi_csi_glue_write(dev, 0x104, 0x0);
+	dw_mipi_csi_glue_write(dev, 0x128, 0x0);
+
+	// pixle_cnt_ctrl
+	dw_mipi_csi_glue_write(dev, 0x70, 0x1);
 }
 
 static void dw_mipi_csi_reset(struct mipi_csi_dev *dev)
@@ -83,6 +111,7 @@ static int dw_mipi_csi_mask_irq_power_off(struct mipi_csi_dev *dev)
        dw_mipi_csi_write(dev, R_CSI2_MASK_INT_LINE, 0);
        dw_mipi_csi_write(dev, R_CSI2_MASK_INT_IPI, 0);
 
+       dw_mipi_csi_write(dev, R_CSI2_IPI_MEM_FLUSH, 0x0);
        dw_mipi_csi_write(dev, R_CSI2_CTRL_RESETN, 0);
 
        return 0;
@@ -271,7 +300,7 @@ static void __dw_mipi_csi_start(struct mipi_csi_dev *csi_dev)
 {
 	struct device *dev = &csi_dev->pdev->dev;
 
-	dw_mipi_csi_write(csi_dev, R_CSI2_N_LANES, 0x3);
+	dw_mipi_csi_write(csi_dev, R_CSI2_N_LANES, (csi_dev->hw.num_lanes - 1));
 	dw_mipi_csi_write(csi_dev, R_CSI2_IPI_HLINE_TIME, 0x2134);
 
 	dw_mipi_csi_write(csi_dev, R_CSI2_IPI_MODE, 0x1010000);
@@ -312,6 +341,10 @@ static void __dw_mipi_csi_start(struct mipi_csi_dev *csi_dev)
 	dw_mipi_csi_write(csi_dev, R_CSI2_IPI_VACTIVE_LINES, 0x10);
 	dw_mipi_csi_write(csi_dev, R_CSI2_VIRTUAL_CHANNEL_EXT, 0x0);
 
+	dw_mipi_csi_glue_write(csi_dev, 0x0, 0x09BEEF38);
+	dw_mipi_csi_glue_write(csi_dev, 0x4, 0x09BEEF38);
+	dw_mipi_csi_glue_write(csi_dev, 0x8, 0x09BEEF38);
+	dw_mipi_csi_glue_write(csi_dev, 0xC, 0x09BEEF38);
 	dw_mipi_csi_glue_write(csi_dev, 0x10, 0x80000008);
 	dw_mipi_csi_glue_write(csi_dev, 0xB8, 0x8801);
 	dw_mipi_csi_glue_write(csi_dev, 0xC0, 0xF00);
@@ -422,17 +455,29 @@ static int
 dw_mipi_csi_s_power(struct v4l2_subdev *sd, int on)
 {
 	struct mipi_csi_dev *dev = v4l2_get_subdevdata(sd);
+	union phy_configure_opts config;
+	int ret = 0;
 
 	if (on) {
 		dev_dbg(&dev->pdev->dev, "Power on\n");
+		dw_mipi_csi_glue_power_on(dev);
 		dw_mipi_csi_hw_stdby(dev);
 		__dw_mipi_csi_start(dev);
+
+		memset(&config, 0, sizeof(config));
+		config.mipi_dphy.lanes = dev->hw.num_lanes;
+		ret = phy_configure(dev->phy, &config);
+		if (ret) {
+			dev_err(&dev->pdev->dev, "Failed to configure D-PHY\n");
+			return ret;
+		}
+
 		phy_power_on(dev->phy);
 	} else {
 		dev_dbg(&dev->pdev->dev, "Power off\n");
 		phy_power_off(dev->phy);
-		dw_mipi_csi_glue_reset(dev);
 		dw_mipi_csi_mask_irq_power_off(dev);
+		dw_mipi_csi_glue_power_off(dev);
 	}
 
 	return 0;
@@ -521,50 +566,57 @@ dw_mipi_csi_irq1(int irq, void *dev_id)
 static int
 dw_mipi_csi_parse_dt(struct platform_device *pdev, struct mipi_csi_dev *dev)
 {
-       struct device_node *node = pdev->dev.of_node;
-       int ret = 0;
 
-       ret = of_property_read_u32(node, "output-type", &dev->hw.output_type);
-       if (ret) {
-	       dev_err(&pdev->dev, "Couldn't read output-type\n");
+	struct device_node *node = pdev->dev.of_node;
+	int ret = 0;
+	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
+
+	ret = of_property_read_u32(node, "output-type", &dev->hw.output_type);
+	if (ret) {
+		dev_err(&pdev->dev, "Couldn't read output-type\n");
+		return ret;
+	}
+
+	ret = of_property_read_u32(node, "ipi-mode", &dev->hw.ipi_mode);
+	if (ret) {
+		dev_err(&pdev->dev, "Couldn't read ipi-mode\n");
+		return ret;
+	}
+
+	ret = of_property_read_u32(node, "ipi-auto-flush", &dev->hw.ipi_auto_flush);
+	if (ret) {
+		dev_err(&pdev->dev, "Couldn't read ipi-auto-flush\n");
+		return ret;
+	}
+
+	ret = of_property_read_u32(node, "ipi-color-mode", &dev->hw.ipi_color_mode);
+	if (ret) {
+		dev_err(&pdev->dev, "Couldn't read ipi-color-mode\n");
+		return ret;
+	}
+
+	ret = of_property_read_u32(node, "virtual-channel", &dev->hw.virtual_ch);
+	if (ret) {
+		dev_err(&pdev->dev, "Couldn't read virtual-channel\n");
+		return ret;
+	}
+
+	node = of_graph_get_next_endpoint(node, NULL);
+	if (!node) {
+		dev_err(&pdev->dev, "No port node at %s\n", pdev->dev.of_node->full_name);
+		return -EINVAL;
+	}
+
+	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(node), &ep);
+	if (ret) {
+		of_node_put(node);
+		return ret;
+	}
+	
+	dev->hw.num_lanes = ep.bus.mipi_csi2.num_data_lanes;
+	dev_dbg(&pdev->dev, "num of lanes are %d\n", dev->hw.num_lanes);
+
 	return ret;
-       }
-
-       ret = of_property_read_u32(node, "ipi-mode", &dev->hw.ipi_mode);
-       if (ret) {
-	       dev_err(&pdev->dev, "Couldn't read ipi-mode\n");
-	return ret;
-       }
-
-       ret = of_property_read_u32(node, "ipi-auto-flush",
-				&dev->hw.ipi_auto_flush);
-       if (ret) {
-	       dev_err(&pdev->dev, "Couldn't read ipi-auto-flush\n");
-	return ret;
-       }
-
-       ret = of_property_read_u32(node, "ipi-color-mode",
-				&dev->hw.ipi_color_mode);
-       if (ret) {
-	       dev_err(&pdev->dev, "Couldn't read ipi-color-mode\n");
-	return ret;
-       }
-
-       ret = of_property_read_u32(node, "virtual-channel",
-			       &dev->hw.virtual_ch);
-       if (ret) {
-	       dev_err(&pdev->dev, "Couldn't read virtual-channel\n");
-	return ret;
-       }
-
-       node = of_graph_get_next_endpoint(node, NULL);
-       if (!node) {
-	       dev_err(&pdev->dev, "No port node at %s\n",
-			       pdev->dev.of_node->full_name);
-	return -EINVAL;
-       }
-
-       return ret;
 }
 
 static const struct of_device_id dw_mipi_csi_of_match[];

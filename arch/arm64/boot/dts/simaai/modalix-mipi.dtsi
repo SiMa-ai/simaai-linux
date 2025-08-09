@@ -44,7 +44,7 @@
 			0x0 0x40c5020 0x0 0x14>;
 		snps,dphy-frequency = <33000000>;
 		snps,dphy-te-len = <12>;
-                simaai,mipi-generator = <0>;
+		simaai,mipi-generator = <0>;
 	};
 
 	csi1: csi1@40c3000 {

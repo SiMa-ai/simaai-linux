@@ -20,7 +20,6 @@
 		interrupts = <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "macirq", "xpcs_irq";
-		snps,multicast-filter-bins = <256>;
 		snps,perfect-filter-entries = <128>;
 		rx-fifo-depth = <16384>;
 		tx-fifo-depth = <16384>;
@@ -32,6 +31,8 @@
 		phy-mode = "xgmii";
 		snps,apbxpcs;
 		snps,xpcs_skip_reset;
+		/* mac-address is to be updated by the bootloader */
+		local-mac-address = [00 00 00 00 00 00];
 		status = "disabled";
 	};
 
@@ -42,7 +43,6 @@
 		reg-names = "gmac", "xpcs";
 		interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "macirq";
-		snps,multicast-filter-bins = <256>;
 		snps,perfect-filter-entries = <128>;
 		rx-fifo-depth = <16384>;
 		tx-fifo-depth = <16384>;
@@ -54,6 +54,8 @@
 		phy-mode = "xgmii";
 		snps,apbxpcs;
 		snps,xpcs_skip_reset;
+		/* mac-address is to be updated by the bootloader */
+		local-mac-address = [00 00 00 00 00 00];
 		status = "disabled";
 	};
 
@@ -65,7 +67,6 @@
 		interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "macirq", "xpcs_irq";
-		snps,multicast-filter-bins = <256>;
 		snps,perfect-filter-entries = <128>;
 		rx-fifo-depth = <16384>;
 		tx-fifo-depth = <16384>;
@@ -77,6 +78,8 @@
 		phy-mode = "xgmii";
 		snps,apbxpcs;
 		snps,xpcs_skip_reset;
+		/* mac-address is to be updated by the bootloader */
+		local-mac-address = [00 00 00 00 00 00];
 		status = "disabled";
 	};
 
@@ -88,7 +91,6 @@
 		interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 149 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "macirq", "xpcs_irq";
-		snps,multicast-filter-bins = <256>;
 		snps,perfect-filter-entries = <128>;
 		rx-fifo-depth = <16384>;
 		tx-fifo-depth = <16384>;
@@ -101,6 +103,8 @@
 		//managed = "in-band-status";
 		snps,apbxpcs;
 		snps,xpcs_skip_reset;
+		/* mac-address is to be updated by the bootloader */
+		local-mac-address = [00 00 00 00 00 00];
 		status = "disabled";
 	};
 };

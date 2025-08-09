@@ -230,7 +230,7 @@ static __inline uint8_t acamera_buffers_status_read( ISP_BUFFER_T *buffer )
 
 static __inline void acamera_buffers_base_address_write( ISP_BUFFER_T *buffer, uint32_t data )
 {
-	LOG ( LOG_INFO, "base address address :%#x, data %#x", (uint32_t)(&buffer->BASE_ADDR), data);
+	//LOG ( LOG_INFO, "base address address :%#x, data %#x", (uint32_t)(&buffer->BASE_ADDR), data);
     system_isp_write_32( (uintptr_t)&buffer->BASE_ADDR, data );
 }
 static __inline uint32_t acamera_buffers_base_address_read( ISP_BUFFER_T *buffer )

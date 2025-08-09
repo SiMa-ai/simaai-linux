@@ -81,4 +81,13 @@
 		dma-names = "sdma";
 		status = "disabled";
 	};
+
+	pvt0: pvt-controller@ff0e000 {
+		compatible = "simaai,modalix-thermal-sensor";
+		reg = <0x0 0xff0e000 0x0 0xb80>,
+			<0x0 0xff00000 0x0 0x1000>;
+		reg-names = "pvt", "prc";
+		pvt-ck-rst-val = <13>;
+		status = "okay";
+	};
 };

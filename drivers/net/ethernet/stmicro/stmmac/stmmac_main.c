@@ -618,6 +618,7 @@ static void stmmac_get_rx_hwtstamp(struct stmmac_priv *priv, struct dma_desc *p,
 static int stmmac_hwtstamp_set(struct net_device *dev, struct ifreq *ifr)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
+	bool xmac = priv->plat->has_xgmac;
 	struct hwtstamp_config config;
 	u32 ptp_v2 = 0;
 	u32 tstamp_all = 0;
@@ -728,7 +729,7 @@ static int stmmac_hwtstamp_set(struct net_device *dev, struct ifreq *ifr)
 			config.rx_filter = HWTSTAMP_FILTER_PTP_V2_EVENT;
 			ptp_v2 = PTP_TCR_TSVER2ENA;
 			snap_type_sel = PTP_TCR_SNAPTYPSEL_1;
-			if (priv->synopsys_id < DWMAC_CORE_4_10)
+			if ((priv->synopsys_id < DWMAC_CORE_4_10) && !xmac)
 				ts_event_en = PTP_TCR_TSEVNTENA;
 			ptp_over_ipv4_udp = PTP_TCR_TSIPV4ENA;
 			ptp_over_ipv6_udp = PTP_TCR_TSIPV6ENA;
@@ -5945,6 +5946,9 @@ static irqreturn_t stmmac_xpcs_interrupt(int irq, void *dev_id)
 
 		pr_info("Link is Up - %d/%s\n", (int)priv->xstats.pcs_speed,
 			priv->xstats.pcs_duplex ? "Full" : "Half");
+		if(pcs && pcs->ops)
+			pcs->ops->pcs_link_up(pcs, MLO_AN_INBAND, state.interface,
+						state.speed, state.duplex);
 	} else {
 		priv->xstats.pcs_link = 0;
 		state.speed = SPEED_UNKNOWN;
@@ -6893,6 +6897,9 @@ static int stmmac_hw_init(struct stmmac_priv *priv)
 					(BIT(priv->dma_cap.hash_tb_sz) << 5);
 			priv->hw->mcast_bits_log2 =
 					ilog2(priv->hw->multicast_filter_bins);
+		} else {
+			priv->hw->multicast_filter_bins = 0;
+			priv->hw->mcast_bits_log2 = 0;
 		}
 
 		/* TXCOE doesn't work in thresh DMA mode */
