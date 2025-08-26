@@ -441,7 +441,7 @@ int remote_sensor_put_frame_callback_handler( void *owner, void *frame )
 
     fsm_raise_event( p_fsm, event_id_isphw_frame_end_fe );
 
-    LOG( LOG_INFO, "Filled raw frame is ready to be fetched by the MCFE (context id: %d, ptr: %p).", ctx_id, frame );
+    //LOG( LOG_INFO, "Filled raw frame is ready to be fetched by the MCFE (context id: %d, ptr: %p).", ctx_id, frame );
 
 #endif
     return 0;
@@ -468,7 +468,7 @@ int remote_sensor_get_frame_callback_handler( void *owner, void **frame )
         return -1;
     }
 
-    LOG( LOG_INFO, "Empty raw frame acquired (context id: %d, ptr: %p).", ctx_id, *frame );
+    //LOG( LOG_INFO, "Empty raw frame acquired (context id: %d, ptr: %p).", ctx_id, *frame );
 
 #endif
     return 0;
@@ -496,7 +496,7 @@ int remote_sensor_release_frame_callback_handler( void *owner, void *frame )
         return -1;
     }
 
-    LOG( LOG_INFO, "Raw frame released (context id: %d, ptr: %p).", ctx_id, frame );
+    //LOG( LOG_INFO, "Raw frame released (context id: %d, ptr: %p).", ctx_id, frame );
 
 #endif
     return 0;

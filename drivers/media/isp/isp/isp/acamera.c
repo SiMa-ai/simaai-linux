@@ -208,7 +208,7 @@ void acamera_deinit_ctx( uint8_t ctx_id )
 void acamera_process_interrupt( uint8_t slot, const uint32_t mask )
 {
     
-    LOG(LOG_INFO,"acamera_process_interrupt %d",slot);
+    //LOG(LOG_INFO,"acamera_process_interrupt %d",slot);
 
     // Check if slot number within range.
     if ( slot >= FIRMWARE_CONTEXT_NUMBER ) {

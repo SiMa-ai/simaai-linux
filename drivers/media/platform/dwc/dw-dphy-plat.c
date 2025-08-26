@@ -225,6 +225,7 @@ static DEVICE_ATTR_RW(dw_dphy_g118_settle);
 static struct phy_ops dw_dphy_ops = {
 	.init = dw_dphy_init,
 	.reset = dw_dphy_reset,
+	.configure = dw_dphy_config,
 	.power_on = dw_dphy_power_on,
 	.power_off = dw_dphy_power_off,
 	.owner = THIS_MODULE,

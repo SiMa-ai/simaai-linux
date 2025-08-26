@@ -14,7 +14,6 @@
 		reg-names = "dbi", "dbi2", "asr", "atu", "hdma" ;
 		ocm-region = <&ocm_pcie_reserved>;
 		silicon = "modalix";
-		interrupt-count = <48>;
 		interrupt-parent = <&gic>;
 		interrupts = <GIC_SPI 857 IRQ_TYPE_LEVEL_HIGH>,
 			<GIC_SPI 858 IRQ_TYPE_LEVEL_HIGH>,
@@ -63,7 +62,71 @@
 			<GIC_SPI 901 IRQ_TYPE_LEVEL_HIGH>,
 			<GIC_SPI 902 IRQ_TYPE_LEVEL_HIGH>,
 			<GIC_SPI 903 IRQ_TYPE_LEVEL_HIGH>,
-			<GIC_SPI 904 IRQ_TYPE_LEVEL_HIGH>;
+			<GIC_SPI 904 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 481 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 482 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 483 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 484 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 485 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 486 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 487 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 488 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 489 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 490 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 491 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 492 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 493 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 494 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 495 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 496 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 497 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 498 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 499 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 500 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 501 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 502 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 503 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 504 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 505 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 506 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 507 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 508 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 509 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 510 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 511 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 512 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 513 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 514 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 515 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 516 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 517 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 518 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 519 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 520 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 521 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 522 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 523 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 524 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 525 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 526 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 527 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 528 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 529 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 530 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 531 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 532 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 533 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 534 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 535 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 536 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 537 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 538 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 539 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 540 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 541 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 542 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 543 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 544 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "doorbell_0",
 			"doorbell_1",
 			"doorbell_2",
@@ -111,7 +174,131 @@
 			"doorbell_44",
 			"doorbell_45",
 			"doorbell_46",
-			"doorbell_47";
+			"doorbell_47",
+			"hdma_wch0",
+			"hdma_wch1",
+			"hdma_wch2",
+			"hdma_wch3",
+			"hdma_wch4",
+			"hdma_wch5",
+			"hdma_wch6",
+			"hdma_wch7",
+			"hdma_wch8",
+			"hdma_wch9",
+			"hdma_wch10",
+			"hdma_wch11",
+			"hdma_wch12",
+			"hdma_wch13",
+			"hdma_wch14",
+			"hdma_wch15",
+			"hdma_wch16",
+			"hdma_wch17",
+			"hdma_wch18",
+			"hdma_wch19",
+			"hdma_wch20",
+			"hdma_wch21",
+			"hdma_wch22",
+			"hdma_wch23",
+			"hdma_wch24",
+			"hdma_wch25",
+			"hdma_wch26",
+			"hdma_wch27",
+			"hdma_wch28",
+			"hdma_wch29",
+			"hdma_wch30",
+			"hdma_wch31",
+			"hdma_rch0",
+			"hdma_rch1",
+			"hdma_rch2",
+			"hdma_rch3",
+			"hdma_rch4",
+			"hdma_rch5",
+			"hdma_rch6",
+			"hdma_rch7",
+			"hdma_rch8",
+			"hdma_rch9",
+			"hdma_rch10",
+			"hdma_rch11",
+			"hdma_rch12",
+			"hdma_rch13",
+			"hdma_rch14",
+			"hdma_rch15",
+			"hdma_rch16",
+			"hdma_rch17",
+			"hdma_rch18",
+			"hdma_rch19",
+			"hdma_rch20",
+			"hdma_rch21",
+			"hdma_rch22",
+			"hdma_rch23",
+			"hdma_rch24",
+			"hdma_rch25",
+			"hdma_rch26",
+			"hdma_rch27",
+			"hdma_rch28",
+			"hdma_rch29",
+			"hdma_rch30",
+			"hdma_rch31";
+		status = "disabled";
+	};
+
+	pcie0_rc: pci@4000000000 {
+		compatible = "pci-host-ecam-generic";
+		device_type = "pci";
+		reg = <0x0000004F 0xF0000000 0x00000000 0x10000000>;
+		reg-names = "PCI ECAM";
+		linux,pci-domain = <0>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges = <0x82000000 0x00000000 0x80000000 0x00000000 0x80000000 0x00000000 0x10000000>,
+			 <0xC3000000 0x00000040 0x00000000 0x00000040 0x00000000 0x0000000F 0x00000000>;
+		msi-parent = <&gic_its0>;
+		msi-map = <0x0000 &gic_its0 0x0000 0x10000>;
+		status = "disabled";
+	};
+
+	pcie1_rc: pci@5000000000 {
+		compatible = "pci-host-ecam-generic";
+		device_type = "pci";
+		reg = <0x0000005F 0xF0000000 0x00000000 0x10000000>;
+		reg-names = "PCI ECAM";
+		linux,pci-domain = <1>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges = <0x82000000 0x00000000 0x90000000 0x00000000 0x90000000 0x00000000 0x10000000>,
+			 <0xC3000000 0x00000050 0x00000000 0x00000050 0x00000000 0x0000000F 0x00000000>;
+		msi-parent = <&gic_its1>;
+		msi-map = <0x0000 &gic_its1 0x0000 0x10000>;
+		status = "disabled";
+	};
+
+	pcie2_rc: pci@6000000000 {
+		compatible = "pci-host-ecam-generic";
+		device_type = "pci";
+		reg = <0x0000006F 0xF0000000 0x00000000 0x10000000>;
+		reg-names = "PCI ECAM";
+		linux,pci-domain = <2>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges = <0x82000000 0x00000000 0xa0000000 0x00000000 0xa0000000 0x00000000 0x10000000>,
+			 <0xC3000000 0x00000060 0x00000000 0x00000060 0x00000000 0x0000000F 0x00000000>;
+		msi-parent = <&gic_its2>;
+		msi-map = <0x0000 &gic_its2 0x0000 0x10000>;
+		status = "disabled";
+	};
+
+	pcie3_rc: pci@7000000000 {
+		compatible = "pci-host-ecam-generic";
+		device_type = "pci";
+		reg = <0x0000007F 0xF0000000 0x00000000 0x10000000>;
+		reg-names = "PCI ECAM";
+		linux,pci-domain = <3>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges = <0x82000000 0x00000000 0xb0000000 0x00000000 0xb0000000 0x00000000 0x10000000>,
+			 <0xC3000000 0x00000070 0x00000000 0x00000070 0x00000000 0x0000000F 0x00000000>;
+		msi-parent = <&gic_its3>;
+		msi-map = <0x0000 &gic_its3 0x0000 0x10000>;
 		status = "disabled";
 	};
 };

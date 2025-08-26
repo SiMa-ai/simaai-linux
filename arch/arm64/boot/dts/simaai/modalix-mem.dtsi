@@ -13,7 +13,7 @@
 			compatible = "shared-dma-pool";
 			reusable;
 			linux,cma-default;
-			reg = <0x00000012 0x00000000 0x00000000 0x6FC00000>;
+			reg = <0x00000010 0x00000000 0x00000000 0x6FC00000>;
 		};
 
 		ev_vdev0vring0: vdev0vring0@EFFF4000 {
@@ -26,32 +26,30 @@
 			no-map;
 		};
 
-		ev_vdev0buffer: vdev0buffer@126FFF8000 {
+		ev_vdev0buffer: vdev0buffer@106FFF8000 {
 			compatible = "shared-dma-pool";
-			reg = <0x00000012 0x6FFF8000 0x00000000 0x8000>;
+			reg = <0x00000010 0x6FFF8000 0x00000000 0x00008000>;
 			no-map;
 			alignment = <0x1000>;
 		};
 
-		evmem_rsvd: evmem@F0000000 {
-			compatible = "shared-dma-pool";
+		evmem_rsvd: evmem@0xF0000000 {
 			reg = <0x0 0xF0000000 0x0 0x4000000>;
 			no-map;
-			simaai,skip-memset-in-alloc;
 		};
 
 		ocm_reserved: ocm@0 {
-                compatible = "shared-dma-pool";
-                no-map;
-                simaai,skip-memset-in-alloc;
-                reg = <0x0 0x0 0x0 0x600000>;
+			compatible = "shared-dma-pool";
+			no-map;
+			simaai,skip-memset-in-alloc;
+			reg = <0x00000000 0x00000000 0x00000000 0x00600000>;
 		};
 
 		dms0_reserved: dms@0x1400000000 {
 			compatible = "shared-dma-pool";
 			no-map;
 			simaai,skip-memset-in-alloc;
-			reg = <0x00000014 0x00000000 0x00000008 0x00000000>;
+			reg = <0x00000014 0x00000000 0x0000000A 0x00000000>;
 		};
 
 		ocm_pcie_reserved: ocm@600000 {
@@ -60,14 +58,20 @@
 			reg = <0x0 0x600000 0x0 0x200000>;
 		};
 
-                vid_reserved: vid@0x1280000000 {
-                      compatible = "shared-dma-pool";
-                      no-map;
-                      reg = <0x12 0x80000000 0x0 0x80000000>;
-                 };
+		isp_cdma_reserved: isp_cdma@0x1080000000 {
+			no-map;
+			reg = <0x00000010 0x80000000 0x00000000 0x01000000>;
+		};
+
+		video_reserved: video@0x1081000000 {
+			compatible = "shared-dma-pool";
+			no-map;
+			simaai,skip-memset-in-alloc;
+			reg = <0x00000010 0x81000000 0x00000000 0xFF000000>;
+		};
 	};
 
-	simaai,memcpy-manager {
+	dmacpy: simaai,memcpy-manager {
 		compatible = "simaai,memcpy-manager";
 		dmas = <&dmac1 0>,<&dmac0 0>,<&dmac1 1>,<&dmac0 1>,
 		     <&dmac1 2>,<&dmac0 2>,<&dmac1 3>,<&dmac0 3>;

@@ -277,9 +277,9 @@ void mcfe_hwif_buff_config( const mcfe_hwif_buf_type_t bftype,
 void mcfe_hwif_buff_addr_set( const mcfe_hwif_buf_type_t bftype, const uint8_t idx, uint32_t base_address )
 {
 
-	LOG (LOG_INFO, "index : %d", idx);
+	//LOG (LOG_INFO, "index : %d", idx);
     ISP_BUFFER_T *ptr = mcfe_hwif_buff_get_ptr( bftype, idx );
-	LOG (LOG_INFO, "index : %#llx", idx, ptr);
+	//LOG (LOG_INFO, "index : %#llx", idx, ptr);
 
     if ( ptr ) {
         acamera_buffers_base_address_write( ptr, ADDR_SYSPHY2ISPAS( base_address ) );

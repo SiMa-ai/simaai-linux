@@ -646,7 +646,7 @@
 				<&ev_vdev0buffer>,<&evmem_rsvd>;
 		mboxes = <&ev74mb 1>;
 		mbox-names = "hp";
- 		simaai,cvu-firmware = "davinci-evxx-fw";
+ 		simaai,cvu-firmware = "davinci-cvu-fw";
 		cpu-name = "ev74";
 		status = "okay";
 	};
@@ -659,6 +659,10 @@
 		simaai,pm-firmware = "davinci-mla_driver.elf";
 		cpu-name = "m4";
 		status = "okay";
+		simaai,reg-list = <0x30100018
+				0x30100150
+				0x30100130
+				0x30100144>;
 	};
 
     	watchdog@0x700000 {

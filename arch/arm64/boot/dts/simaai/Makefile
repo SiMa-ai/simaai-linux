@@ -11,3 +11,6 @@ dtb-$(CONFIG_ARCH_SIMAAI) += davinci-dual-m2.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += davinci-hhhl.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += modalix-emulation-bench.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += modalix-dvt.dtb
+dtb-$(CONFIG_ARCH_SIMAAI) += modalix-hhhl.dtb
+dtb-$(CONFIG_ARCH_SIMAAI) += modalix-som.dtb
+dtb-$(CONFIG_ARCH_SIMAAI) += modalix-vdk.dtb

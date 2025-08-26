@@ -11,9 +11,9 @@
 	model = "SiMa.ai Modalix DVT Board";
 
 	chosen {
-		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs";
-		linux,initrd-start = <0x10 0x08000000>;
-		linux,initrd-end = <0x10 0x09400000>;
+		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
+		linux,initrd-start = <0x11 0x88000000>;
+		linux,initrd-end = <0x11 0x89400000>;
 	};
 
 	aliases {
@@ -24,9 +24,8 @@
 
 	memory@1000000000 {
 		device_type = "memory";
-		reg = <0x10 0x00000000 0x02 0x6FC00000
-				0x12 0x74000000 0x09 0xAC000000
-				0x1C 0x80000000 0x01 0x80000000>;
+		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
+				0x00000011 0x80000000 0x00000002 0x80000000>;
 	};
 
 	thermal-zones {
@@ -59,6 +58,12 @@
 		};
 	};
 
+	ptp_clk: ptpclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <100000000>;
+		clock-output-names = "ptpclk";
+	};
 };
 
 &nvs_sdhci0 {
@@ -121,6 +126,9 @@
 };
 
 &xgmac0 {
+	clocks = <&eth_clk>, <&ptp_clk>;
+	clock-names = "stmmaceth", "ptp_ref";
+
 	phy-mode = "sgmii";
 	managed = "in-band-status";
 	snps,ps-speed = <1000>;
@@ -141,6 +149,9 @@
 };
 
 &xgmac1 {
+	clocks = <&eth_clk>, <&ptp_clk>;
+	clock-names = "stmmaceth", "ptp_ref";
+
 	phy-mode = "usxgmii";
 	managed = "in-band-status";
 	snps,reset-gpio = <&pcal6534 15 GPIO_ACTIVE_LOW>;
@@ -161,21 +172,25 @@
 };
 
 &xgmac2 {
-	phy-mode = "10gbase-kr";
+	clocks = <&eth_clk>, <&ptp_clk>;
+	clock-names = "stmmaceth", "ptp_ref";
+	interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "macirq";
+
+	phy-mode = "usxgmii";
+	managed = "in-band-status";
 	status = "okay";
-	fixed-link {
-		speed = <10000>;
-		full-duplex;
-	};
 };
 
 &xgmac3 {
-	phy-mode = "10gbase-kr";
+	clocks = <&eth_clk>, <&ptp_clk>;
+	clock-names = "stmmaceth", "ptp_ref";
+	interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "macirq";
+
+	phy-mode = "usxgmii";
+	managed = "in-band-status";
 	status = "okay";
-	fixed-link {
-		speed = <10000>;
-		full-duplex;
-	};
 };
 
 &i2c03 {

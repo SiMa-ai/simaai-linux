@@ -123,7 +123,7 @@ static void module_mcfe_update_buffer_address_translation( const mcfe_fsm_ptr_t 
         // If frame memory type is AFRAME_MEMORY_USER then low 32-bit of actual physical
         // address is reduced by ISPAS_MINUS_SYSPHY, compensating it for the log message
         address |= ( addr_translation_info.out.type ) ? ADDR_SYSPHY2ISPAS( addr_translation_info.out.address.low ) : addr_translation_info.out.address.low;
-        LOG( LOG_INFO, "OUT buffer address translation, type: %u, address: 0x%llx", addr_translation_info.out.type, address );
+        //LOG( LOG_INFO, "OUT buffer address translation, type: %u, address: 0x%llx", addr_translation_info.out.type, address );
     }
 
     // Check if raw frames were swapped successfully and configure address translation if needed
@@ -139,7 +139,7 @@ static void module_mcfe_update_buffer_address_translation( const mcfe_fsm_ptr_t 
         // If frame memory type is AFRAME_MEMORY_USER then low 32-bit of actual physical
         // address is reduced by ISPAS_MINUS_SYSPHY, compensating it for the log message
         address |= ( addr_translation_info.raw.type ) ? ADDR_SYSPHY2ISPAS( addr_translation_info.raw.address.low ) : addr_translation_info.raw.address.low;
-        LOG( LOG_INFO, "RAW buffer address translation, type: %u, address: 0x%llx", addr_translation_info.raw.type, address );
+        //LOG( LOG_INFO, "RAW buffer address translation, type: %u, address: 0x%llx", addr_translation_info.raw.type, address );
     }
 
     // Update address translation if needed

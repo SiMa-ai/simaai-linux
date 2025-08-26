@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix.dtsi"
+
+/ {
+	model = "SiMa.ai Modalix HHHL X16  Board";
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
+		linux,initrd-start = <0x11 0x88000000>;
+		linux,initrd-end = <0x11 0x89400000>;
+	};
+
+	aliases {
+		console = &uart12;
+		mmc0 = &nvs_sdhci0;
+		mmc1 = &nvs_sdhci1;
+		rtc0 = &rv3028;
+	};
+
+	memory@1000000000 {
+		device_type = "memory";
+		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
+				0x00000011 0x80000000 0x00000001 0x80000000>;
+	};
+
+	thermal-zones {
+		board {
+			polling-delay = <30000>;
+			polling-delay-passive = <5000>;
+			thermal-sensors = <&board_edge_sensor>, <&power_supply_sensor>;
+
+			trips {
+				board_alert: board-alert {
+					temperature = <50000>;
+					hysteresis = <3000>;
+					type = "active";
+				};
+				board_crit: board-crit {
+					temperature = <70000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&board_alert>;
+				};
+				map1 {
+					trip = <&board_crit>;
+				};
+			};
+		};
+	};
+
+	reg12v0: fixedregulator@1 {
+		compatible = "regulator-fixed";
+		regulator-name = "in_supply";
+		regulator-min-microvolt = <12000000>;
+		regulator-max-microvolt = <12000000>;
+		regulator-always-on;
+	};
+
+	reg3v3: fixedregulator@2 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_supply";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+};
+
+&dms0_reserved {
+	reg = <0x00000013 0x00000000 0x00000004 0x00000000>;
+};
+
+&nvs_sdhci0 {
+	status = "okay";
+};
+
+&nvs_sdhci1 {
+	max-frequency = <25000000>;
+	status = "okay";
+};
+
+&sio0 {
+	status = "okay";
+};
+
+&sio1 {
+	status = "okay";
+};
+
+&sio2 {
+	status = "okay";
+};
+
+&gpio20 {
+	pinctrl-0 = <&pins_gpio20_deafult>, <&pins_gpio21_deafult>,
+		    <&pins_gpio22_deafult>, <&pins_gpio23_deafult>,
+		    <&pins_gpio24_deafult>, <&pins_gpio25_deafult>;
+	pinctrl-names = "default";
+
+	status = "okay";
+};
+
+&sio3 {
+	status = "okay";
+};
+
+&sio4 {
+	status = "okay";
+};
+
+&gpio50 {
+	pinctrl-0 = <&pins_gpio55_deafult>;
+	pinctrl-names = "default";
+
+	status = "okay";
+};
+
+&sio5 {
+	status = "okay";
+};
+
+&sio6 {
+	status = "okay";
+};
+
+&sio7 {
+	status = "okay";
+};
+
+&gpio70 {
+	pinctrl-0 = <&pins_gpio70_deafult>, <&pins_gpio71_deafult>,
+		    <&pins_gpio72_deafult>, <&pins_gpio73_deafult>,
+		    <&pins_gpio74_deafult>, <&pins_gpio75_deafult>,
+		    <&pins_gpio76_deafult>, <&pins_gpio77_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&xgmac3 {
+	interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "macirq";
+	phy-mode = "usxgmii";
+	managed = "in-band-status";
+	snps,reset-gpio = <&port7 6 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 50000 50000>;
+	phy-handle = <&ethernet_phy0>;
+	status = "okay";
+	mdio3 {
+		compatible = "snps,dwmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ethernet_phy0: ethernet-phy@0 {
+			compatible = "ethernet-phy-ieee802.3-c45";
+			reg = <0>;
+		};
+	};
+};
+
+&i2c01 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&i2c03 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	power-sensor@44 {
+		compatible = "ti,ina226";
+		reg = <0x44>;
+		#io-channel-cells = <1>;
+		shunt-resistor = <1000>;
+	};
+
+	power-sensor@45 {
+		compatible = "ti,ina226";
+		reg = <0x45>;
+		#io-channel-cells = <1>;
+		shunt-resistor = <1000>;
+	};
+
+	board_edge_sensor: temp-sensor@48 {
+		compatible = "ti,tmp101";
+		reg = <0x48>;
+		#thermal-sensor-cells = <0>;
+	};
+
+	power_supply_sensor: temp-sensor@4A {
+		compatible = "ti,tmp101";
+		reg = <0x4A>;
+		#thermal-sensor-cells = <0>;
+	};
+
+	eeprom@50 {
+		compatible = "atmel,24c2048";
+		reg = <0x50>;
+		pagesize = <256>;
+		num-addresses = <1>;
+	};
+
+	rv3028: rtc@52 {
+		compatible = "microcrystal,rv3028";
+		reg = <0x52>;
+	};
+};
+
+&i2c43 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	spi@28 {
+		compatible = "nxp,sc18is606";
+		reg = <0x28>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+};
+
+&uart12 {
+	status = "okay";
+};
+
+&csi0 {
+	status = "disabled";
+};
+
+&csi1 {
+	status = "disabled";
+};
+
+&csi2 {
+	status = "disabled";
+};
+
+&csi3 {
+	isp-connected = <0>;
+	status = "disabled";
+};

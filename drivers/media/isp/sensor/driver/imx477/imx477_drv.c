@@ -35,14 +35,21 @@
 #include "acamera_math.h"
 #include "sensor_api.h"
 #include "imx477_config.h"
-
 #include "acamera_aframe.h"
+#include "isp-v4l2.h"
+
 #include <linux/dmaengine.h> 
 #include <linux/platform_device.h>
 #include <linux/semaphore.h>
 #include <linux/delay.h>
 #include <linux/workqueue.h>
 #include <asm/io.h>
+#include <linux/i2c.h>
+#include <asm/unaligned.h>
+
+#include <linux/simaai-stu.h>
+
+extern struct simaai_stu *stu;
 
 //filled in system_cma.c
 extern struct platform_device *g_pdev;
@@ -131,6 +138,7 @@ typedef struct _sensor_private_t {
     uint16_t integration_time;
     int32_t again;
     int32_t dgain;
+	struct i2c_client *client;
 	// TODO : instead of individual function add the callback structure
 	int (*sensor_get_frame )( void *owner, void **frame );
 	int (*sensor_put_frame )( void *owner, void *frame );
@@ -153,6 +161,7 @@ typedef struct _sensor_private_t {
 
 static sensor_private_t priv_array[FIRMWARE_CONTEXT_NUMBER];
 
+
 //--------------------DATA-------------------------------------------------------------
 //--------------------RESET------------------------------------------------------------
 static void sensor_hw_reset_enable( void )
@@ -165,6 +174,31 @@ static void sensor_hw_reset_disable( void )
     return;
 }
 
+static bool i2c_client_init(sensor_private_t *priv) {
+
+	isp_v4l2_dev_t *isp_dev = isp_v4l2_get_dev(priv->ctx_id);
+	if (!isp_dev) {
+		LOG( LOG_ERR, "Failed to get isp dev for context %d", priv->ctx_id);
+		return false;
+	}
+
+	struct v4l2_subdev *sd_sensor = isp_dev->sd[SD_CAMERA];
+	if (!sd_sensor) {
+		LOG( LOG_ERR, "Failed to get sensor sd for locaion %d", priv->ctx_id);
+		return false;
+	}
+
+	priv->client = v4l2_get_subdevdata(sd_sensor);
+	if(!(priv->client)) {
+		LOG (LOG_CRIT, "Failed to get i2c client handle for context %d", priv->ctx_id);
+		return false;
+	}
+
+	LOG(LOG_DEBUG, "SUCCESS initalizing i2c client for context %d with address %#x",
+			priv->ctx_id, priv->client->addr);
+
+	return true;
+}
 //--------------------FLASH------------------------------------------------------------
 
 static int32_t sensor_alloc_analog_gain( void *sensor_priv, int32_t gain )
@@ -172,6 +206,7 @@ static int32_t sensor_alloc_analog_gain( void *sensor_priv, int32_t gain )
     sensor_private_t *priv = sensor_priv;
 
     priv->again = gain;
+	LOG (LOG_ERR, "NOT IMPLEMENTED : sensor alloc analog gain");
     return gain;
 }
 
@@ -180,6 +215,7 @@ static int32_t sensor_alloc_digital_gain( void *sensor_priv, int32_t gain )
     sensor_private_t *priv = sensor_priv;
 
     priv->dgain = gain;
+	LOG (LOG_ERR, "NOT IMPLEMENTED : sensor alloc digital gain");
     return gain;
 }
 
@@ -188,18 +224,21 @@ static void sensor_alloc_integration_time( void *sensor_priv, integration_times_
     sensor_private_t *priv = sensor_priv;
     uint32_t *int_time = &int_times->int_time;
 
+	LOG (LOG_ERR, "NOT IMPLEMENTED : sensor alloc integration time");
     priv->integration_time = *int_time;
 }
 
 static void sensor_alloc_white_balance_gains( void *sensor_priv, int32_t gain[4] )
 {
+	LOG (LOG_ERR, "NOT IMPLEMENTED : sensor alloc white balance");
+	
     (void)sensor_priv; //unusued
     (void)gain;        //unusued
 }
 
 static void sensor_update( void *sensor_priv )
 {
-	LOG (LOG_INFO, "Sensor update called");
+	LOG (LOG_ERR, "NOT IMPLEMENTED : sensor update called");
 }
 
 static void work_queue_fn(struct work_struct *work) {
@@ -213,6 +252,8 @@ static void work_queue_fn(struct work_struct *work) {
 		LOG (LOG_ERR, "Invalid sensor info");
 		return;
 	}
+
+#if 0
 	LOG (LOG_INFO, "WQ : width %d , height %d , pixel bits %d last_index : %u, "
 				"priv : %#llx, work : %#llx",
 	        priv->param.active.width,
@@ -221,6 +262,7 @@ static void work_queue_fn(struct work_struct *work) {
 			priv->last_cb_index,
 			priv,
 			&priv->work);
+#endif
 
 	if (priv->first_cb != 0 ) {
 		down(&priv->sem_isp_to_dma);
@@ -243,7 +285,7 @@ static void work_queue_fn(struct work_struct *work) {
 static void dma_transfer_done_cb(void *param) {
 
 	sensor_private_t *priv = (sensor_private_t *)param;
-	LOG ( LOG_INFO, "Buffer transfer done : private pointer is %#llx, work %#llx", priv, &priv->work);
+	//LOG ( LOG_INFO, "Buffer transfer done : private pointer is %#llx, work %#llx", priv, &priv->work);
 
 	if (!queue_work(priv->wq, &priv->work)) {
         LOG( LOG_ERR, "Work is already scheduled !!!! %u", priv->ctx_id);
@@ -257,13 +299,27 @@ static int submit_dma_request(sensor_private_t *priv, aframe_t *input_frame) {
 	struct dma_async_tx_descriptor *desc;
 	u32 flags;
 	int32_t cookie = -1;
+	dma_addr_t phys_addr;
+	int rc = 0;
 
 	flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
 	priv->xt.dir = DMA_DEV_TO_MEM;
 	uint64_t addr = input_frame->planes[0].address.high;
 	addr = (addr << 32) | (input_frame->planes[0].address.low);
-	priv->xt.dst_start = addr;
-	LOG (LOG_INFO, "RAW : DMA address is %#llx", addr);
+
+	if (stu) {
+		rc = simaai_stu_get_dev_address(stu, addr, &phys_addr);
+		if (rc != 0) {
+			LOG(LOG_CRIT, "Failed to get device address for phys address %#llx\n", addr);
+			return rc;
+		}
+	} else {
+		LOG( LOG_CRIT, "STU is not initialized\n");
+		return -EINVAL;
+	}
+
+	priv->xt.dst_start = phys_addr;
+	//LOG (LOG_INFO, "RAW : DMA address is %#llx", phys_addr);
 
 	if ( (input_frame->planes[0].width !=  priv->param.active.width) ||
 		 (input_frame->planes[0].height !=  priv->param.active.height)) {
@@ -271,10 +327,12 @@ static int submit_dma_request(sensor_private_t *priv, aframe_t *input_frame) {
 		return -EINVAL;
 	}
 
+#if 0
 	LOG (LOG_INFO, "Submitting DMA request width %d , height %d , pixel bits %d \n",
         priv->param.active.width,
         priv->param.active.height,
         priv->param.data_width);
+#endif
 
 	priv->xt.src_sgl = false;
 	priv->xt.dst_inc = false;
@@ -295,7 +353,7 @@ static int submit_dma_request(sensor_private_t *priv, aframe_t *input_frame) {
 	desc->callback_param = priv;
 
 	cookie = dmaengine_submit(desc);
-	LOG( LOG_INFO, "cookie submitted is %d, %#llx, %#llx", cookie, priv, &priv->work);
+	//LOG( LOG_INFO, "cookie submitted is %d, %#llx, %#llx", cookie, priv, &priv->work);
 
 #if 0
 	if (vb2_is_streaming(vb->vb2_queue) && pstream->start_dma_async) {
@@ -307,7 +365,7 @@ static int submit_dma_request(sensor_private_t *priv, aframe_t *input_frame) {
 		dma_async_issue_pending(priv->dma);
 	}
 
-	LOG( LOG_INFO, "SUCCESS : MIPI submitting buffer");
+	//LOG( LOG_INFO, "SUCCESS : MIPI submitting buffer");
 
 	return 0;
 }
@@ -372,7 +430,8 @@ static void sensor_set_mode( void *sensor_priv, uint8_t mode )
 
 static uint16_t sensor_get_id( void *sensor_priv )
 {
-    return 0xFFFF;
+    sensor_private_t *priv = (sensor_private_t *)sensor_priv;
+    return priv->ctx_id;
 }
 
 static const sensor_param_t *sensor_get_parameters( void *sensor_priv )
@@ -384,20 +443,82 @@ static const sensor_param_t *sensor_get_parameters( void *sensor_priv )
 static uint8_t sensor_fps_control( void *sensor_priv, uint8_t fps )
 {
     // This sensor does not support FPS switching.
-	LOG( LOG_INFO, "Sensor fps control");
+	LOG( LOG_ERR, "NOT IMPLEMENTED : Sensor FPS control");
     return 0;
 }
 
 static uint32_t read_register( void *sensor_priv, uint32_t address )
 {
-	LOG( LOG_ERR, " Un-supported read sensor register for address %#x", address); 
-    return 0;
+
+	sensor_private_t *priv = (sensor_private_t *)sensor_priv;
+	u8 read_data[4];
+	u8 addr_buf[2];
+	addr_buf[0] = (address >> 8) & 0xFF;
+	addr_buf[1] = address & 0xFF;
+
+	LOG( LOG_DEBUG, "Read sensor register for address %#x", address);
+
+	if(!(priv->client)) {
+		if (i2c_client_init(priv) == false) {
+			LOG (LOG_ERR, "read register failed because i2c client is not initialised");
+			return 0;
+		}
+	}
+
+	struct i2c_msg msgs[2] = {
+		{
+			.addr = priv->client->addr,
+			.flags = 0, // Write register address first
+			.len = 2,
+			.buf = addr_buf,
+		},
+		{
+			.addr = priv->client->addr,
+			.flags = I2C_M_RD, // Read
+			.len = 2,
+			.buf = &read_data[2],
+		}
+	};
+
+	if (i2c_transfer(priv->client->adapter, msgs, 2) != 2)
+		LOG( LOG_ERR, "Failed to read 2-byte add :  %#x", address);
+	else
+		LOG( LOG_DEBUG, "Read : %#x from add : %#x", get_unaligned_be32(read_data), address);
+
+ 
+    return get_unaligned_be32(read_data);
 }
 
 static void write_register( void *sensor_priv, uint32_t address, uint32_t data )
 {
-	LOG( LOG_ERR, "un-supported write sensor register for address %#x value %#x", address, data);
+	sensor_private_t *priv = sensor_priv;
+	u8 write_buf[4];
+	write_buf[0] = (address >> 8) & 0xFF;	// High byte of address
+	write_buf[1] = address & 0xFF;			// Low byte of address
+	write_buf[2] = (data >> 8)  & 0xFF;		// High byte of data
+	write_buf[3] = data & 0xFF;				// Low byte of data
+
+	LOG( LOG_DEBUG, "write sensor register for address %#x value %#x", address, data);
+
+	if(!(priv->client)) {
+		if (i2c_client_init(priv) == false) {
+			LOG (LOG_ERR, "write register failed because i2c client is not initialised");
+			return;
+		}
+	}
+	struct i2c_msg write_msg = {
+		.addr = priv->client->addr,
+		.flags = 0, // Write
+		.len = sizeof(write_buf),
+		.buf = write_buf,
+	};
+
+	if (i2c_transfer(priv->client->adapter, &write_msg, 1) != 1)
+		LOG( LOG_ERR, "Failed to write 2-byte add :  %#x\n", address);
+	else
+		LOG( LOG_DEBUG, "Wrote 0x%02x to add : 0x%04x\n", get_unaligned_be16(&write_buf[2]), address);
 }
+
 static void stop_streaming( void *sensor_priv ) {
 
 	LOG( LOG_INFO, "STOP streaming is called");
@@ -420,7 +541,7 @@ static void request_next_frame( void *sensor_priv ) {
 
     sensor_private_t *priv = sensor_priv;
 	aframe_t *input_frame = NULL;
-	LOG( LOG_INFO, "Request next frame");
+	//LOG( LOG_INFO, "Request next frame");
 #if 1
 	if (priv->sensor_get_frame) {
 		int rc = priv->sensor_get_frame( priv->owner, (void **)&input_frame);
@@ -429,10 +550,11 @@ static void request_next_frame( void *sensor_priv ) {
 			return;
 		}
 
+#if 0
 		LOG (LOG_INFO, "SUCCESS getting frame from stramer %#llx, %#x, width : %d, height : %d",
 				input_frame->planes[0].virt_addr, input_frame->planes[0].address.low,
 				input_frame->planes[0].width, input_frame->planes[0].height);
-
+#endif
 			// Fill the dma cb struct
 		priv->dma_cb_struct[priv->last_ff_index].raw_frame = input_frame;
 		priv->dma_cb_struct[priv->last_ff_index].owner = priv->owner;
@@ -443,7 +565,7 @@ static void request_next_frame( void *sensor_priv ) {
 			return;
 		}
 
-		LOG( LOG_INFO, "SUCCESS submitting DMA request, iter : %u", priv->last_ff_index);
+		//LOG( LOG_INFO, "SUCCESS submitting DMA request, iter : %u", priv->last_ff_index);
 		priv->last_ff_index = (priv->last_ff_index + 1) % MAX_RAW_FRAMES;	
 	}
 	//msleep(100);
@@ -451,7 +573,7 @@ static void request_next_frame( void *sensor_priv ) {
 
 	up(&priv->sem_isp_to_dma);
 
-	LOG (LOG_INFO, "request_next : semaphore raised");
+	//LOG (LOG_INFO, "request_next : semaphore raised");
 }
 
 static void register_frame_callbacks( void *sensor_priv, const sensor_remote_callbacks_t *callbacks ) {
@@ -510,7 +632,7 @@ int isp_register_dma_channels(sensor_private_t *priv, int ctx_id) {
 
 void sensor_init_imx477( void **priv_ptr, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const options )
 {
-    LOG(LOG_INFO, "imx477 sensor init for ctx : %u", location);
+    LOG(LOG_DEBUG, "imx477 sensor init for ctx : %u", location);
 
 	char wq_name[64];
     sensor_private_t *priv = *priv_ptr = priv_array + location;
@@ -574,11 +696,12 @@ void sensor_init_imx477( void **priv_ptr, uint8_t location, sensor_control_t *ct
 		LOG (LOG_INFO, "Failed to register dma channel for context : %d", location);
 		return;
 	}
+
     // Reset sensor during initialization
     sensor_hw_reset_enable();
     sensor_hw_reset_disable();
 
-    LOG( LOG_INFO, "Sensor DPattern (id 0x%04x) initialized at position %d.", sensor_get_id( priv ), location );
+    LOG( LOG_DEBUG, "Sensor DPattern (id 0x%04x) initialized at position %d.", sensor_get_id( priv ), location );
 }
 
 //*************************************************************************************

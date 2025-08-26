@@ -539,11 +539,13 @@ void acamera_interrupt_handler( void *param )
     acamera_cmd_queues_debug( 1 );
 #endif
 
-
+#if 0
     LOG(LOG_INFO,"mask stats %x, mcfe %x, eof %x, sof %x , scheduler status %d, curr_slot %d",
             mask.stats, mask.mcfe, mask.eof, mask.sof, 
 	    acamera_frontend_mcfe_scheduler_status_read(PHY_ADDR_ISP),
 	    curr_slot);
+#endif
+
 /*
  * ########### BACK END : FRAME END ###########
  *
@@ -660,11 +662,11 @@ void acamera_interrupt_handler( void *param )
 #endif
         }
 
-	LOG(LOG_INFO,"Bit set ACAMERA_IRQ_BE_FRAME_START");
+	//LOG(LOG_INFO,"Bit set ACAMERA_IRQ_BE_FRAME_START");
         irq_masks[curr_slot] |= BIT( ACAMERA_IRQ_BE_FRAME_START );
         last_isp_slot = curr_slot;
 
-	LOG(LOG_INFO,"last_isp_slot is %d", last_isp_slot);
+	//LOG(LOG_INFO,"last_isp_slot is %d", last_isp_slot);
     }
 
     /*

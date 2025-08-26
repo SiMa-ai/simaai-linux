@@ -376,8 +376,8 @@ static int isp_v4l2_stream_get_planes( struct vb2_buffer *vb,
 				return -EINVAL;
 			}
 
-            frame->planes[i].address.low = bus_addr;
-            frame->planes[i].address.high = phys_addr >> 32;
+            frame->planes[i].address.low = lower_32_bits(bus_addr);
+            frame->planes[i].address.high = upper_32_bits(bus_addr);
 			frame->planes[i].virt_addr = vb2_plane_vaddr( vb, i );
 
             if ( vb->memory == VB2_MEMORY_USERPTR ) {
@@ -386,9 +386,12 @@ static int isp_v4l2_stream_get_planes( struct vb2_buffer *vb,
                 // so to write original user address as buffer base address we subtract it here
                 frame->planes[i].address.low -= ISPAS_MINUS_SYSPHY;
             }
+#if 0
 			LOG(LOG_INFO, "Buffer phy address : %#llx, bus addr: %#x[%#x], virt : %#llx", phys_addr,
 					frame->planes[i].address.low,
-					bus_addr, frame->planes[i].virt_addr);
+				bus_addr, frame->planes[i].virt_addr);
+#endif
+
         }
 
         // Check if pixel format is NV12 and adjust UV plane resolution according to subsampling
@@ -410,6 +413,8 @@ static int isp_v4l2_stream_get_planes( struct vb2_buffer *vb,
 static void isp_v4l2_stream_put_planes( struct vb2_buffer *vb, aframe_t *frame )
 {
     uint32_t i;
+	dma_addr_t bus_addr = 0;
+	int rc = 0;
     for ( i = 0; i < frame->num_planes; i++ ) {
         if ( frame->type == AFRAME_TYPE_META ) {
             void *addr = vb2_plane_vaddr( vb, i );
@@ -420,8 +425,19 @@ static void isp_v4l2_stream_put_planes( struct vb2_buffer *vb, aframe_t *frame )
             }
         } else {
             uint64_t addr = vb2_dma_contig_plane_dma_addr( vb, i );
-            uint32_t addr_low = addr & 0xFFFFFFFF;
-            uint32_t addr_high = addr >> 32;
+			if (stu) {
+				rc = simaai_stu_get_bus_address(stu, addr, &bus_addr);
+				if (rc != 0) {
+					LOG(LOG_CRIT, "Failed to get bus address for phys address %#llx\n", addr);
+					return ;
+				}
+			} else {
+				LOG( LOG_CRIT, "STU is not initialized\n");
+				return;
+			}
+
+            uint32_t addr_low = lower_32_bits(bus_addr);
+            uint32_t addr_high = upper_32_bits(bus_addr);
 
             if ( vb->memory == VB2_MEMORY_USERPTR ) {
                 // Original VB2 buffer address (its low 32-bit part) is reduced by ISPAS_MINUS_SYSPHY
@@ -477,17 +493,20 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
             LOG( LOG_ERR, "Error. Can't find stream direction matching m2m stream, context id: %u, stream type: %d", ctx_id, stream_type );
             return -1;
         }
-
+#if 0
         LOG( LOG_INFO, "[Stream#%d-%s] Get frame, ready buffer queue size: %u, busy buffer queue size: %u",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
              ( ( stream_direction == V4L2_STREAM_DIRECTION_CAP ) ? v4l2_m2m_num_dst_bufs_ready( pstream->fh.m2m_ctx ) : v4l2_m2m_num_src_bufs_ready( pstream->fh.m2m_ctx ) ),
              pstream->buffer_list[stream_direction].busy.size );
+#endif
+
     } else {
         stream_direction = V4L2_STREAM_DIRECTION_CAP;
-
+#if 0
         LOG( LOG_INFO, "[Stream#%d-%s] Get frame, ready buffer queue size: %u, busy buffer queue size: %u",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
              pstream->buffer_list[stream_direction].ready.size, pstream->buffer_list[stream_direction].busy.size );
+#endif
     }
 
     struct v4l2_format *v4l2_fmt = &pstream->cur_v4l2_fmt[stream_direction];
@@ -515,7 +534,7 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
     } else {
 
 		if (state == AFRAME_STATE_FULL) {
-			LOG (LOG_INFO, "requested filled frame");
+			//LOG (LOG_INFO, "requested filled frame");
         	spin_lock( &pstream->buffer_list[stream_direction].lock );
 	        if ( !list_empty( &pstream->buffer_list[stream_direction].busy.head ) ) {
     	        pbuf = list_entry( pstream->buffer_list[stream_direction].busy.head.next, isp_v4l2_buffer_t, list );
@@ -528,7 +547,7 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
 			return 0;
 
 		} else {
-			LOG (LOG_INFO, "requested empty frame");
+			//LOG (LOG_INFO, "requested empty frame");
         	spin_lock( &pstream->buffer_list[stream_direction].lock );
         	if ( !list_empty( &pstream->buffer_list[stream_direction].ready.head ) ) {
             	pbuf = list_entry( pstream->buffer_list[stream_direction].ready.head.next, isp_v4l2_buffer_t, list );
@@ -581,8 +600,7 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
         isp_v4l2_stream_get_planes( vb, pix_mp, &pbuf->frame );
 
         *frame = &pbuf->frame;
-		LOG (LOG_INFO, "frame returned is %#llx, address : %#x",
-				*frame, pbuf->frame.planes[0].address.low);
+		//LOG (LOG_INFO, "frame returned is %#llx, address : %#x", *frame, pbuf->frame.planes[0].address.low);
 
     } else {
         LOG( LOG_CRIT, "[Stream#%d-%s] Stream has invalid v4l2_fmt->type: %d",
@@ -632,7 +650,7 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
         stream_direction = V4L2_STREAM_DIRECTION_CAP;
     }
 
-	LOG( LOG_INFO," stream directions : %d", stream_direction);
+	//LOG( LOG_INFO," stream directions : %d", stream_direction);
     /* try to get an active buffer from vb2 queue */
     bool found = false;
     spin_lock( &pstream->buffer_list[stream_direction].lock );
@@ -648,8 +666,8 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
             // from the way they were received, so try to find the match
             if ( &pbuf->frame == frame ) {
                 found = true;
-   				LOG (LOG_INFO, "Found Match :  current frame is (%#llx)%#x, looking for (%#llx)%#x",
-					&pbuf->frame, pbuf->frame.planes[0].address.low, frame, frame->planes[0].address.low);
+   				//LOG (LOG_INFO, "Found Match :  current frame is (%#llx)%#x, looking for (%#llx)%#x",
+				//	&pbuf->frame, pbuf->frame.planes[0].address.low, frame, frame->planes[0].address.low);
              break;
             } else {
 				LOG (LOG_INFO, "no match current frame is (%#llx)%#x, looking for (%#llx)%#x",
@@ -707,8 +725,8 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
             vb2_buffer_done( vb, VB2_BUF_STATE_DONE );
         }
 
-        LOG( LOG_DEBUG, "[Stream#%d-%s] set vb2 buffer status VB2_BUF_STATE_DONE",
-             pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ) );
+        //LOG( LOG_DEBUG, "[Stream#%d-%s] set vb2 buffer status VB2_BUF_STATE_DONE",
+        //     pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ) );
     } else {
         /* Put buffer back to vb2 queue with error flag set */
         if ( pstream->stream_type == V4L2_STREAM_TYPE_M2M ) {
@@ -1254,6 +1272,7 @@ int isp_v4l2_stream_get_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 
     *f = pstream->cur_v4l2_fmt[stream_direction];
 
+#if 0
     LOG( LOG_INFO, "[Stream#%d-%s] Get stream format: width: %4u, height: %4u, format: 0x%x (%s)",
          pstream->stream_type,
          isp_v4l2_stream_get_direction_string( stream_direction ),
@@ -1261,6 +1280,7 @@ int isp_v4l2_stream_get_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
          f->fmt.pix_mp.height,
          f->fmt.pix_mp.pixelformat,
          isp_v4l2_stream_get_pixelformat_string( f->fmt.pix_mp.pixelformat ) );
+#endif
 
     if ( f->fmt.pix_mp.width == 0 || f->fmt.pix_mp.height == 0 || f->fmt.pix_mp.pixelformat == 0 ) { //not formatted yet
         LOG( LOG_NOTICE, "Compliance error. Uninitialized format" );

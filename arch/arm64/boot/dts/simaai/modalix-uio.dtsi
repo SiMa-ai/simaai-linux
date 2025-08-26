@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 SiMa ai
+ */
+
+/ {
+	mla_irq@86 {
+		compatible = "generic-uio";
+		linux,uio-name = "mla_intr_ftl";
+		interrupts = <GIC_SPI 86 IRQ_TYPE_LEVEL_HIGH>;		
+	};
+
+	mla_irq@87 {
+		compatible = "generic-uio";
+		linux,uio-name = "mla_intr_non_ftl";
+		interrupts = <GIC_SPI 87 IRQ_TYPE_LEVEL_HIGH>;		
+	};
+
+	mla_irq@89 {
+		compatible = "generic-uio";
+		linux,uio-name = "mla_intr_quadgrp0_prgm_done";
+		interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;		
+	};
+
+	mla_mem@5000000 {
+		compatible = "generic-uio";
+		linux,uio-name = "mla_mem";
+		reg = <0x0 0x5000000 0x0 0xfe00>;
+	};
+};

@@ -1192,6 +1192,13 @@ config SENSORS_TC654
 	  This driver can also be built as a module. If so, the module
 	  will be called tc654.
 
+config SENSORS_SIMAAI_MODALIX_THERMAL
+        tristate "Sima ai on chip thermal sensor"
+        depends on ARCH_SIMAAI
+        help
+         This option enables thermal sensor support on
+         SiMa.ai Modalix family
+
 config SENSORS_TPS23861
 	tristate "Texas Instruments TPS23861 PoE PSE"
 	depends on I2C

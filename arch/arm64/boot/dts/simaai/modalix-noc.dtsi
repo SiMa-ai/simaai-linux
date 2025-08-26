@@ -4,7 +4,7 @@
 */
 
 / {
-	arteris@ff20000{
+	noc: arteris@ff20000{
 		compatible="arteris,flex-noc";
 		reg = <0x0 0xff20000 0x8000>;
 
@@ -358,6 +358,28 @@
 				};
 			};
 
+		};
+		packet-probes{
+			#address-cells = <1>;
+			#size-cells = <1>;
+			prb_bsu_nvs_pkt: prb_bsu_nvs_pkt@ff24400{
+				reg = <0xff24400 0x280>;
+				probe-id=<11>;
+				num-counters = <8>;
+				label="prb_bsu_nvs_pkt";
+			};
+			prb_prc_sio12_pkt: prb_prc_sio12_pkt@ff25800{
+				reg = <0xff25800 0x250>;
+				probe-id=<12>;
+				num-counters = <5>;
+				label="prb_prc_sio12_pkt";
+			};
+			prb_prc_sio7_pkt:prb_prc_sio7_pkt@ff25c00{
+				reg = <0xff25c00 0x280>;
+				probe-id=<13>;
+				num-counters = <5>;
+				label="prb_prc_sio7_pkt";
+			};
 		};
 	};
 

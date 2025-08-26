@@ -564,7 +564,7 @@ static int module_mcfe_usecase_process_event( module_mcfe_usecase_config_t *conf
     }
 
     if ( event == MODULE_MCFE_EVENT_RAW_BUFFER_READY ) {
-		LOG (LOG_INFO, "RAW buffer ready");
+		//LOG (LOG_INFO, "RAW buffer ready");
 
         aframe_t *raw_frame_in = NULL, *raw_frame_out = NULL, *out_frame_in = NULL, *out_frame_out = NULL;
 
@@ -580,11 +580,13 @@ static int module_mcfe_usecase_process_event( module_mcfe_usecase_config_t *conf
             return MCFE_ERR_NO_RES;
         }
 
+#if 0
 		LOG( LOG_INFO, "Raw frame address :%#x:%x, out frame address : %#x:%x",
 			raw_frame_in->planes[0].address.low,
 			raw_frame_in->planes[0].address.high,
 			out_frame_in->planes[0].address.low,
 			out_frame_in->planes[0].address.high);
+#endif
 
         // Update bufset with the new raw buffer
         if ( module_mcfe_bufset_swap( raw_frame_in, &raw_frame_out, config->bufset_raw, MCFE_BUFSET_SWAP_FILLED_IN_ANY_OUT ) != MCFE_ERR_NONE ) {
@@ -610,10 +612,8 @@ static int module_mcfe_usecase_process_event( module_mcfe_usecase_config_t *conf
 
         // Check if swapped out raw frame is a valid frame pointer ( not likely, could happen if previous frame swap operation failed )
         if ( raw_frame_out ) {
-			LOG( LOG_INFO, "Got a valid raw buffer outi %#x", raw_frame_out->planes[0].address.low);
+			//LOG( LOG_INFO, "Got a valid raw buffer outi %#x", raw_frame_out->planes[0].address.low);
             frame_stream_put_frame( raw_frame_out );
-        } else {
-			LOG( LOG_INFO, " Not a valid raw framw ignoring");
 		}
 
         // Update bufset with the new out buffer
@@ -640,10 +640,8 @@ static int module_mcfe_usecase_process_event( module_mcfe_usecase_config_t *conf
 
         // Check if swapped out out frame is a valid frame pointer ( not likely, could happen if previous frame swap operation failed )
         if ( out_frame_out ) {
-			LOG( LOG_INFO, "Got a valid out buffer %#x", out_frame_out->planes[0].address.low);
+			//LOG( LOG_INFO, "Got a valid out buffer %#x", out_frame_out->planes[0].address.low);
             frame_stream_put_frame( out_frame_out );
-        } else {
-			LOG( LOG_INFO, "Not a valid out buffer ignoring");
 		}
 
         rc = module_mcfe_slot_trigger_manual( config->slot_id );
@@ -651,7 +649,7 @@ static int module_mcfe_usecase_process_event( module_mcfe_usecase_config_t *conf
             LOG( LOG_ERR, "Error, failed to trigger manual slot (context id: %u).", config->slot_id );
         }
     } else if ( event == MODULE_MCFE_EVENT_OUT_BUFFER_READY ) {
-		LOG(LOG_INFO, "RAW out buffer ready");
+		//LOG(LOG_INFO, "OUT buffer ready");
 
         aframe_t *raw_frame = NULL, *out_frame = NULL;
 

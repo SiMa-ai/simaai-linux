@@ -127,6 +127,12 @@ static int sima_mbox_tx_startup(struct mbox_chan *chan)
 
 	writel_relaxed(0, mbox->res[SIMA_MBOX_TX].regs + SIMA_MBOX_MSG_OFFSET);
 
+	ret = request_irq(mbox->res[SIMA_MBOX_TX].irq, sima_mbox_tx_interrupt, 0,
+				mbox->res[SIMA_MBOX_TX].name, chan);
+	if (unlikely(ret)) {
+		dev_err(mbox->dev, "failed to register mailbox interrupt: %d\n", ret);
+		return ret;
+	}
 	cfg |= SIMA_MBOX_CFG_TX_INT_EN;
 
 	writel_relaxed(cfg, mbox->res[SIMA_MBOX_TX].regs + SIMA_MBOX_CFG_OFFSET);
@@ -170,6 +176,23 @@ static bool sima_mbox_rx_peek_data(struct mbox_chan *chan)
 	return sima_mbox_full(mbox, SIMA_MBOX_RX);
 }
 
+static int sima_mbox_rx_startup(struct mbox_chan *chan)
+{
+	int ret;
+	struct sima_channel *mbox = mbox_chan_to_sima_chan(chan);
+
+	ret = request_irq(mbox->res[SIMA_MBOX_RX].irq, sima_mbox_rx_interrupt, 0,
+				mbox->res[SIMA_MBOX_RX].name, chan);
+	if (unlikely(ret)) {
+		dev_err(mbox->dev,
+			"failed to register mailbox interrupt: %d\n",
+			ret);
+		return -EFAULT; 
+	}
+
+	return 0;
+}
+
 static int sima_mbox_startup(struct mbox_chan *chan)
 {
 	struct sima_channel *mbox = mbox_chan_to_sima_chan(chan);
@@ -179,6 +202,12 @@ static int sima_mbox_startup(struct mbox_chan *chan)
 		return -EINVAL;
 
 	ret = sima_mbox_tx_startup(chan);
+	if (ret)
+		return ret;
+
+	ret = sima_mbox_rx_startup(chan);
+	if (ret)
+		free_irq(mbox->res[SIMA_MBOX_TX].irq, chan);  
 
 	return ret;
 }
@@ -190,6 +219,8 @@ static void sima_mbox_shutdown(struct mbox_chan *chan)
 	/* Sender is responsible for disabling mailbox */
 	writel_relaxed(0, mbox->res[SIMA_MBOX_TX].regs + SIMA_MBOX_CFG_OFFSET);
 
+	free_irq(mbox->res[SIMA_MBOX_TX].irq, chan);  
+	free_irq(mbox->res[SIMA_MBOX_RX].irq, chan);  
 }
 
 static const struct mbox_chan_ops sima_mbox_ops = {
@@ -201,11 +232,10 @@ static const struct mbox_chan_ops sima_mbox_ops = {
 };
 
 static int sima_init_rs(struct platform_device *pdev, struct sima_resource *res,
-		int chan, int dir, struct sima_mbox *mbox)
+		int chan, int dir)
 {
-	struct device *dev = &pdev->dev;
 	void __iomem * addr;
-	int offset, ret;
+	int offset;
 	const char names[][5] = { "lptx", "lprx", "hptx", "hprx",};
 
 	offset = (chan == SIMA_MBOX_LP_CHAN) ? 0 : 2;
@@ -221,18 +251,6 @@ static int sima_init_rs(struct platform_device *pdev, struct sima_resource *res,
 		return -ENOTSUPP;
 
 	snprintf(res->name, sizeof(res->name) - 1, "%s_%s", pdev->name, names[offset]);
-
-	if (dir == SIMA_MBOX_RX)
-		ret = devm_request_irq(dev, res->irq, sima_mbox_rx_interrupt, 0, res->name, &mbox->chans[chan]);
-	else
-		ret = devm_request_irq(dev, res->irq, sima_mbox_tx_interrupt, 0, res->name, &mbox->chans[chan]);
-
-	if (unlikely(ret)) {
-		dev_err(dev,
-			"failed to register mailbox interrupt: %d\n",
-			ret);
-		return -ENODEV;
-	}
 
 	return 0;
 }
@@ -254,7 +272,7 @@ static int sima_mbox_probe(struct platform_device *pdev)
 
 	for (i = 0; i < ARRAY_SIZE(rs); i++) {
 		ret = sima_init_rs(pdev, &(mbox->channels[rs[i][0]].res[rs[i][1]]),
-				   rs[i][0], rs[i][1], mbox);
+				   rs[i][0], rs[i][1]);
 		if (ret != 0)
 			return ret;
 	}

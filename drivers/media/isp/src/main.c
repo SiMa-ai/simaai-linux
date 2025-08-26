@@ -138,6 +138,7 @@ static void isp_cdma_init( void )
 #if defined( ISP_HAS_MCFE_FSM )
     uint32_t pid_reg, pid_backup , version_reg , api_reg , revision_reg;
     uint64_t ctx_backup_physaddr = PHY_ADDR_CDMA;
+    dma_addr_t ctx_backup_busaddr = 0;
 	dma_addr_t phys_isp_addr;
     int i, result;
 
@@ -149,7 +150,13 @@ static void isp_cdma_init( void )
 
     // Load product ID on back-up space to check if it's loaded.
     pid_reg = acamera_isp_id_product_read( PHY_ADDR_ISP );
-    pid_backup = acamera_isp_id_product_read( ctx_backup_physaddr );
+	result = simaai_stu_get_bus_address(stu, PHY_ADDR_CDMA, (dma_addr_t *)&ctx_backup_busaddr);
+	if (result != 0) {
+		LOG (LOG_CRIT, "ERROR : getting bus address for phys address, %#llx", PHY_ADDR_CDMA);
+		return;
+	}
+
+    pid_backup = acamera_isp_id_product_read( ctx_backup_busaddr );
     version_reg = acamera_isp_id_version_read( PHY_ADDR_ISP );
     api_reg = acamera_isp_id_api_read( PHY_ADDR_ISP );
     revision_reg =  acamera_isp_id_revision_read( PHY_ADDR_ISP );

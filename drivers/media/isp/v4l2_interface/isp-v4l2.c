@@ -270,7 +270,7 @@ static int isp_v4l2_m2m_fop_release( struct file *file )
     isp_v4l2_stream_t *pstream = file->private_data;
     int open_counter;
 
-    LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, pstream->stream_type );
+    //LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, pstream->stream_type );
 
     clear_bit( pstream->stream_type, &dev->stream_open_mask );
     clear_bit( pstream->stream_type, &dev->stream_on_mask );
@@ -869,8 +869,8 @@ static int isp_v4l2_cap_querybuf( struct file *file, void *priv, struct v4l2_buf
     isp_v4l2_stream_t *pstream = file->private_data;
 
     int rc = vb2_querybuf( &pstream->vb2_q, buf );
-    LOG( LOG_DEBUG, "%s, stream type: %d, buf->type: %d, buf->index: %d, rc: %d",
-         __func__, pstream->stream_type, buf->type, buf->index, rc );
+    //LOG( LOG_DEBUG, "%s, stream type: %d, buf->type: %d, buf->index: %d, rc: %d",
+    //     __func__, pstream->stream_type, buf->type, buf->index, rc );
 
     return rc;
 }
@@ -890,7 +890,7 @@ static int isp_v4l2_cap_qbuf( struct file *file, void *priv, struct v4l2_buffer 
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( &pstream->vb2_q, file ) );
+    //LOG( LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( &pstream->vb2_q, file ) );
     if ( isp_v4l2_is_q_busy( &pstream->vb2_q, file ) ) {
         return -EBUSY;
     }
@@ -901,8 +901,8 @@ static int isp_v4l2_cap_qbuf( struct file *file, void *priv, struct v4l2_buffer 
     int rc = vb2_qbuf( &pstream->vb2_q, buf );
 #endif
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, buf->type: %d, buf->index: %d, rc: %d",
-         __func__, pstream->stream_type, buf->type, buf->index, rc );
+    //LOG( LOG_DEBUG, "%s, stream type: %d, buf->type: %d, buf->index: %d, rc: %d",
+    //     __func__, pstream->stream_type, buf->type, buf->index, rc );
 
     return rc;
 }
@@ -935,13 +935,13 @@ static int isp_v4l2_cap_dqbuf( struct file *file, void *priv, struct v4l2_buffer
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( &pstream->vb2_q, file ) );
+    //LOG( LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( &pstream->vb2_q, file ) );
     if ( isp_v4l2_is_q_busy( &pstream->vb2_q, file ) ) {
         return -EBUSY;
     }
 
     int rc = vb2_dqbuf( &pstream->vb2_q, buf, file->f_flags & O_NONBLOCK );
-    LOG( LOG_DEBUG, "%s, stream type: %d, p->type: %d, p->index: %d, rc: %d", __func__, pstream->stream_type, buf->type, buf->index, rc );
+    //LOG( LOG_DEBUG, "%s, stream type: %d, p->type: %d, p->index: %d, rc: %d", __func__, pstream->stream_type, buf->type, buf->index, rc );
 
     return rc;
 }

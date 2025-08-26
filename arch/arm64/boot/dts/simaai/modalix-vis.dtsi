@@ -4,21 +4,7 @@
  */
 
 / {
-
-	reserved-memory {
-		#address-cells = <2>;
-		#size-cells = <2>;
-		ranges;
-
-		isp_reserved: isp_reserved@0x1C21000000 {
-			compatible = "shared-dma-pool";
-			no-map;
-			simaai,skip-memset-in-alloc;
-			reg = <0x1C 0x21000000 0x0 0x5F000000>;
-		};
-	};
-
-	al5r@4180000 {
+	decoder: al5r@4180000 {
 		compatible = "al,al5r";
 		interrupts = <GIC_SPI 95 IRQ_TYPE_LEVEL_HIGH>;
 		reg = <0x0 0x4180000 0x0 0x80000>;
@@ -27,7 +13,7 @@
 		status = "okay";
 	};
 
-	al5r@4100000 {
+	encoder: al5r@4100000 {
 		compatible = "al,al5r";
 		interrupts = <GIC_SPI 94 IRQ_TYPE_LEVEL_HIGH>;
 		reg = <0x0 0x4100000 0x0 0x80000>;
@@ -49,11 +35,10 @@
 		reg = <0x0 0x040d3000 0 0x420>;
 		simaai,stu-gfill-value = <0x0>;
 		simaai,stu-table = <0 0x0>,
-				   <2 0x82>,
-				   <4 0x90>,
-				   <5 0x91>,
-				   <6 0x92>,
-				   <7 0x93>;
+				   <4 0x80>,
+				   <5 0x81>,
+				   <6 0x82>,
+				   <7 0x83>;
 	};
 
 	isp_stu: isp_stu@4240000 {
@@ -61,9 +46,13 @@
 		reg = <0x0 0x04240000 0 0x420>;
 		simaai,stu-gfill-value = <0x0>;
 		simaai,stu-table = <0 0x0>,
-				   <1 0xE1>,
-				   <2 0xE2>,
-				   <3 0xE3>;
+				   <1 0x84>,
+				   <2 0x85>,
+				   <3 0x86>,
+				   <4 0x87>,
+				   <5 0x88>,
+				   <6 0x89>,
+				   <7 0x8A>;
 	};
 
 	evxx: simaai,evxx-rproc@0 {
@@ -72,7 +61,7 @@
 				<&ev_vdev0buffer>,<&evmem_rsvd>;
 		mboxes = <&ev74mb 1>;
 		mbox-names = "hp";
-		simaai,cvu-firmware = "modalix-evxx-fw";
+		simaai,cvu-firmware = "modalix-cvu-fw";
 		simaai,stu = <&evxx_stu>;
 		cpu-name = "ev74";
 		status = "okay";
@@ -86,6 +75,14 @@
 		st,auto-boot = <1>;
 		cpu-name = "m4";
 		status = "okay";
+		simaai,reg-list = <0x0ff00014
+				0x0ff00594
+				0xffffffff
+				0x0ff00528
+				0x0500f438
+				0x0500f638
+				0x0500f838
+				0x0500fa38>;
 	};
 
 	ev74mb: mailbox@04090000 {
@@ -229,7 +226,7 @@
 		reg = <0x0 0x04220000 0x0 0x00020000>;
 		interrupts = <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "ISP";
-		memory-region = <&isp_reserved>;
+		memory-region = <&video_reserved>;
 		simaai,stu = <&isp_stu>;
 		dmas = <&axi_vdma_vis0 0>, <&axi_vdma_vis1 0>, <&axi_vdma_vis2 0>, <&axi_vdma_vis3 0>;
 		dma-names = "vdma0", "vdma1" ,"vdma2", "vdma3";

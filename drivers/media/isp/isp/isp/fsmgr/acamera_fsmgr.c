@@ -607,7 +607,7 @@ int acamera_fsmgr_process_event( acamera_fsmgr_t *p_fsmgr )
     if ( event_id < 0 ) {
         return -1;
     }
-    LOG( LOG_INFO, "Processing event: %d (%s)", event_id, event_name[event_id] );
+    //LOG( LOG_INFO, "Processing event: %d (%s)", event_id, event_name[event_id] );
 
 // SENSOR FSM
 #if ACAMERA_ISP_PROFILING

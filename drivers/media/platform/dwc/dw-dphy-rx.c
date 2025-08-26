@@ -13,6 +13,8 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 
+static uint8_t data_lane_mask = 0xf;
+
 struct range_dphy_gen2 {
 	u32 freq;
 	u8 hsfregrange;
@@ -403,28 +405,25 @@ int poll_csi_phy_stopstate_thread(void *arg)
 {
 	struct dw_dphy_rx *dphy = (struct dw_dphy_rx *)arg;
 
-	const uint32_t phy_stopstatedata_0 = (1 << 0);
-	const uint32_t phy_stopstatedata_1 = (1 << 1);
 	const uint32_t phy_stopstateclk    = (1 << 16);
 
-	const uint32_t stopstate_poll_mask = phy_stopstatedata_0 |
-		phy_stopstatedata_1 |
-		phy_stopstateclk;
+	const uint32_t stopstate_poll_mask = data_lane_mask | phy_stopstateclk;
 
-	dev_info(dphy->dev, "THREAD : Wait until stopstatedata_n and stopstateclk are asserted\n");
+	dev_info(dphy->dev, "THREAD : Wait until stopstatedata_n and stopstateclk are assertedi %#x\n",
+			stopstate_poll_mask);
+
 	while (!kthread_should_stop()) {
 		if ((dw_dphy_read(dphy, R_CSI2_DPHY_STOPSTATE)
 				& stopstate_poll_mask) != stopstate_poll_mask) {
 			ndelay(100);//delay 100ns
 		} else {
 
-			dev_info(dphy->dev, "THREAD : STOP state asserted out of polling\n");
-
 			dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG0, 0, GLUE_CTRL_FORCE_MODE, 1);
 			dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG1, 0, GLUE_CTRL_FORCE_MODE, 1);
 			dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG2, 0, GLUE_CTRL_FORCE_MODE, 1);
 			dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG3, 0, GLUE_CTRL_FORCE_MODE, 1);
 			dphy->dphy_on = false;
+
 			return 0;
 		}
 	}
@@ -443,7 +442,7 @@ static void __dw_dphy_configure(struct dw_dphy_rx *dphy)
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLR, 1);
 	ndelay(15);//delay 15ns
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-if (dphy->mipi_generator) {
+	if (dphy->mipi_generator) {
 		dev_info(dphy->dev, "MIPI generator is connected\n");
 		dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL,0xA, GLUE_CTRL_GEN_HSFR, 7);// mipi_vis_ctrl_phy_general hsfreqrange
 	} else {
@@ -771,6 +770,27 @@ int dw_dphy_power_off(struct phy *phy)
 	struct dw_dphy_rx *dphy = phy_get_drvdata(phy);
 
 	return dw_dphy_set_phy_state(dphy, 0);
+}
+
+int dw_dphy_config(struct phy *phy, union phy_configure_opts *opts)
+{
+	switch(opts->mipi_dphy.lanes) {
+		case 1:
+			data_lane_mask = 0x1;
+			break;
+		case 2:
+			data_lane_mask = 0x3;
+			break;
+		case 3:
+			data_lane_mask = 0x7;
+			break;
+		case 4:
+			data_lane_mask = 0xf;
+			break;
+		default:
+			return 1;
+	}
+	return 0;
 }
 
 int dw_dphy_reset(struct phy *phy)

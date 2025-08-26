@@ -19,7 +19,7 @@
  */
 
 #define MAX_WIDTH      4096
-#define MAX_HEIGHT     2160
+#define MAX_HEIGHT     3280
 
 #define MIN_WIDTH      640
 #define MIN_HEIGHT     480

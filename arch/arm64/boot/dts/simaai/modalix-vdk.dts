@@ -1,0 +1,212 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix.dtsi"
+
+/ {
+	model = "SiMa.ai Modalix VDK Virtual Board";
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
+		linux,initrd-start = <0x11 0x88000000>;
+		linux,initrd-end = <0x11 0x89400000>;
+	};
+
+	aliases {
+		console = &uart12;
+		mmc0 = &nvs_sdhci0;
+		mmc1 = &nvs_sdhci1;
+	};
+
+	memory@1000000000 {
+		device_type = "memory";
+		reg = <0x00000010 0x00000000 0x00000000 0x6FC00000
+			0x00000011 0x80000000 0x00000002 0x80000000>;
+	};
+
+	virtio@20000000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x20000000 0x0 0x10000>;
+		interrupts = <GIC_SPI 957 IRQ_TYPE_LEVEL_HIGH>;
+
+		9p {
+			compatible = "virtio,device9";
+		};
+	};
+};
+
+&nvs_sdhci0 {
+	status = "okay";
+};
+
+&nvs_sdhci1 {
+	status = "okay";
+};
+
+&sio1 {
+	status = "okay";
+};
+
+&uart12 {
+	status = "okay";
+};
+
+&sio10_clk {
+	simaai,ignore-unused = <0x200>;
+};
+
+&evxx {
+	status = "disabled";
+};
+
+&m4 {
+	status = "disabled";
+};
+
+&encoder {
+	status = "disabled";
+};
+
+&decoder {
+	status = "disabled";
+};
+
+&hpi {
+	status = "disabled";
+};
+
+&evxx_stu {
+	status = "disabled";
+};
+
+&isp_stu {
+	status = "disabled";
+};
+
+&ev74mb {
+	status = "disabled";
+};
+
+&m4mb {
+	status = "disabled";
+};
+
+&m4_lp_client {
+	status = "disabled";
+};
+
+&m4_hp_client {
+	status = "disabled";
+};
+
+&sio00_clk {
+	status = "disabled";
+};
+
+&sio30_clk {
+	status = "disabled";
+};
+
+&sio40_clk {
+	status = "disabled";
+};
+
+&sio50_clk {
+	status = "disabled";
+};
+
+&sio60_clk {
+	status = "disabled";
+};
+
+&sio70_clk {
+	status = "disabled";
+};
+
+&dmac00 {
+	status = "disabled";
+};
+
+&dmac10 {
+	status = "disabled";
+};
+
+&dmac20 {
+	status = "disabled";
+};
+
+&dmac30 {
+	status = "disabled";
+};
+
+&dmac40 {
+	status = "disabled";
+};
+
+&dmac50 {
+	status = "disabled";
+};
+
+&dmac60 {
+	status = "disabled";
+};
+
+&dmac70 {
+	status = "disabled";
+};
+
+&nvs_dmac {
+	status = "disabled";
+};
+
+&dmac0 {
+	status = "disabled";
+};
+
+&dmac1 {
+	status = "disabled";
+};
+
+&dmacpy {
+	status = "disabled";
+};
+
+&noc {
+	status = "disabled";
+};
+
+&dms0_0 {
+	status = "disabled";
+};
+
+&dms0_1 {
+	status = "disabled";
+};
+
+&dms1_0 {
+	status = "disabled";
+};
+
+&dms1_1 {
+	status = "disabled";
+};
+
+&dms2_0 {
+	status = "disabled";
+};
+
+&dms2_1 {
+	status = "disabled";
+};
+
+&dms3_0 {
+	status = "disabled";
+};
+
+&dms3_1 {
+	status = "disabled";
+};

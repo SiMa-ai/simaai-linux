@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix.dtsi"
+
+/ {
+	model = "SiMa.ai Modalix SoM Board";
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
+		linux,initrd-start = <0x11 0x88000000>;
+		linux,initrd-end = <0x11 0x89400000>;
+	};
+
+	aliases {
+		console = &uart12;
+		mmc0 = &nvs_sdhci0;
+		rtc0 = &pcf85063;
+	};
+
+	memory@1000000000 {
+		device_type = "memory";
+		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
+				0x00000011 0x80000000 0x00000001 0x80000000>;
+	};
+};
+
+&sio10_clk {
+        simaai,ignore-unused = <0x100>;
+};
+
+&dms0_reserved {
+	reg = <0x00000013 0x00000000 0x00000004 0x00000000>;
+};
+
+&nvs_sdhci0 {
+	status = "okay";
+};
+
+&sio0 {
+	status = "okay";
+};
+
+&sio1 {
+	status = "okay";
+};
+
+&sio2 {
+	status = "okay";
+};
+
+&sio3 {
+	status = "okay";
+};
+
+&sio4 {
+	status = "okay";
+};
+
+&sio5 {
+	status = "okay";
+};
+
+&sio6 {
+	status = "okay";
+};
+
+&sio7 {
+	status = "okay";
+};
+
+&gpio10 {
+	pinctrl-0 = <&pins_gpio12_deafult>, <&pins_gpio13_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&gpio50 {
+	pinctrl-0 = <&pins_gpio56_deafult>, <&pins_gpio57_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&port1 {
+	snps,nr-gpios = <4>;
+       usb-hog {
+               gpio-hog;
+               gpios = <2 GPIO_ACTIVE_HIGH>;
+               output-high;
+               line-name = "usb_uart12";
+       };
+
+       perst-hog {
+               gpio-hog;
+               gpios = <3 GPIO_ACTIVE_HIGH>;
+               output-high;
+               line-name = "pcie_perst";
+       };
+};
+
+&gpio60 {
+	pinctrl-0 = <&pins_gpio60_deafult>, <&pins_gpio61_deafult>,
+		    <&pins_gpio62_deafult>, <&pins_gpio63_deafult>,
+		    <&pins_gpio64_deafult>, <&pins_gpio65_deafult>,
+		    <&pins_gpio66_deafult>, <&pins_gpio67_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&port6 {
+       uart-hog {
+               gpio-hog;
+               gpios = <0 GPIO_ACTIVE_HIGH>;
+               output-low;
+               line-name = "usb_uart60";
+       };
+};
+
+&gpio70 {
+	pinctrl-0 = <&pins_gpio70_deafult>, <&pins_gpio71_deafult>,
+		    <&pins_gpio72_deafult>, <&pins_gpio73_deafult>,
+		    <&pins_gpio74_deafult>, <&pins_gpio75_deafult>,
+		    <&pins_gpio76_deafult>, <&pins_gpio77_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&xgmac0 {
+	phy-mode = "sgmii";
+	managed = "in-band-status";
+	snps,ps-speed = <1000>;
+	phy-handle = <&ethernet_phy0>;
+	status = "okay";
+	mdio0 {
+		compatible = "snps,dwmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ethernet_phy0: ethernet-phy@0 {
+			reg = <0>;
+		};
+	};
+};
+
+&i2c00 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&i2c01 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&i2c02 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&i2c23 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	eeprom@50 {
+		compatible = "atmel,24c128";
+		reg = <0x50>;
+		pagesize = <64>;
+		num-addresses = <1>;
+	};
+
+	pcf85063: rtc@51 {
+		compatible = "nxp,pcf85063a";
+		reg = <0x51>;
+	};
+
+};
+
+&i2c52 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&uart12 {
+	status = "okay";
+};
