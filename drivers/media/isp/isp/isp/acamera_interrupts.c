@@ -711,7 +711,7 @@ void acamera_interrupt_enable( void )
 {
     const acamera_interrupt_regs_t mask = {.sof = IRQ_MASK_FRAME_START,
                                            .eof = IRQ_MASK_FRAME_END,
-                                           .stats = IRQ_MASK_STATS,
+                                           .stats = -1,
                                            .mcfe = IRQ_MASK_MCFE};
     acamera_enable_interrupts( mask );
 }

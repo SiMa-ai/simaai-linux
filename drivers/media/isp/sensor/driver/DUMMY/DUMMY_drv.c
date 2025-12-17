@@ -220,6 +220,7 @@ static void sensor_deinit( void *sensor_priv )
 //--------------------Initialization------------------------------------------------------------
 void sensor_init_dummy( void **priv_ptr, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const options )
 {
+
     sensor_private_t *priv = *priv_ptr = priv_array + location;
     sensor_param_t *cfg = &priv->param;
     system_memset( cfg, 0, sizeof( *cfg ) );

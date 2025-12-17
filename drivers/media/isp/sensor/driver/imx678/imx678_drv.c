@@ -34,7 +34,8 @@
 #include "acamera_logger.h"
 #include "acamera_math.h"
 #include "sensor_api.h"
-#include "imx477_config.h"
+#include "imx678_config.h"
+
 #include "acamera_aframe.h"
 #include "isp-v4l2.h"
 #include "acamera_isp_config.h"
@@ -47,19 +48,22 @@
 #include <linux/delay.h>
 #include <linux/workqueue.h>
 #include <asm/io.h>
-#include <linux/i2c.h>
-#include <asm/unaligned.h>
 
+// Added to communicate with the MCU I2C
+#include "isp-v4l2.h"
+#include <linux/i2c.h>
+
+#include "sensor_bus_config.h"
 #include <linux/simaai-stu.h>
 
 extern struct simaai_stu *stu;
-struct workqueue_struct *wq;
+static struct workqueue_struct *wq;
 
 // Filled in system_cma.c
 extern struct platform_device *g_pdev;
 
 #define MAX_RAW_FRAMES			(5)
-extern int32_t get_calibrations_imx477( uint32_t wdr_mode, void *param );
+extern int32_t get_calibrations_imx678( uint32_t wdr_mode, void *param );
 extern acamera_settings *get_settings_by_id(u8 ctx_id);
 extern  int8_t get_dma_index(uint32_t ctx_id);
 
@@ -68,40 +72,11 @@ extern  int8_t get_dma_index(uint32_t ctx_id);
 static sensor_mode_t supported_modes[] = {
     {
         .fps = 30 * 256,
+		.vmax = 2250,
+		.hmax = 1100,
         .wdr_mode = WDR_MODE_LINEAR,
-        .resolution.width = 2048,
-        .resolution.height = 1080,
-        .channel_info = {
-            .channel_desc = {
-                {
-                    .exposure_bit_width = 12,		    
-                    .data_type = DATA_TYPE_LINEAR,
-                    .cv = CAP_CHANNEL_PASS_THROUGH
-                }
-            },
-            .exposure_idx_to_channel_map = {
-                0
-            },
-            .exposure_max_bit_width = 12,
-            .locked_exp_info = {
-                .locked_exp_ratio_flag = false,
-                .locked_exp_ratio_val = 0,
-                .locked_exp_ratio_short_flag = false,
-                .locked_exp_ratio_short_val = 0,
-                .locked_exp_ratio_medium_flag = false,
-                .locked_exp_ratio_medium_val = 0,
-                .locked_exp_ratio_medium2_flag = false,
-                .locked_exp_ratio_medium2_val = 0
-            }
-        },
-        .exposures = 1,
-        .num_channels = 1
-    },
-    {   // PWL
-        .fps = 30 * 256,
-        .wdr_mode = WDR_MODE_LINEAR,
-        .resolution.width = 1920,
-        .resolution.height = 1080,
+        .resolution.width = SENSOR_IMAGE_WIDTH,
+        .resolution.height = SENSOR_IMAGE_HEIGHT,
         .channel_info = {
             .channel_desc = {
                 {
@@ -129,14 +104,16 @@ static sensor_mode_t supported_modes[] = {
         .num_channels = 1
     },
     {
-        .fps = 10 * 256,
+        .fps = 30 * 256,
+		.vmax = 2250,
+		.hmax = 1100,
         .wdr_mode = WDR_MODE_LINEAR,
-        .resolution.width = 4032,
-        .resolution.height =3040,
+        .resolution.width = 1920,
+        .resolution.height = 1080,
         .channel_info = {
             .channel_desc = {
                 {
-                    .exposure_bit_width = 12,
+                    .exposure_bit_width = 12,		    
                     .data_type = DATA_TYPE_LINEAR,
                     .cv = CAP_CHANNEL_PASS_THROUGH
                 }
@@ -169,10 +146,10 @@ struct mipi_dma_cb {
 
 typedef struct _sensor_private_t {
     sensor_param_t param;
-    uint16_t integration_time;
+    uint64_t integration_time;
     int32_t again;
     int32_t dgain;
-	struct i2c_client *client;
+    struct i2c_client *client; // To communicate with the MCU
 	// TODO : instead of individual function add the callback structure
 	int (*sensor_get_frame )( void *owner, void **frame );
 	int (*sensor_put_frame )( void *owner, void *frame );
@@ -199,7 +176,6 @@ struct sensor_work {
 
 static sensor_private_t priv_array[FIRMWARE_CONTEXT_NUMBER];
 
-
 //--------------------DATA-------------------------------------------------------------
 //--------------------RESET------------------------------------------------------------
 static void sensor_hw_reset_enable( void )
@@ -212,6 +188,60 @@ static void sensor_hw_reset_disable( void )
     return;
 }
 
+static int cam_read(struct i2c_client *client, u8 * val, u32 count)
+{
+        int ret;
+        struct i2c_msg msg = {
+                .addr = client->addr,
+                .flags = 0,
+                .buf = val,
+        };
+
+        msg.flags = I2C_M_RD;
+        msg.len = count;
+        ret = i2c_transfer(client->adapter, &msg, 1);
+        if (ret < 0)
+                goto err;
+
+        return 0;
+
+ err:
+        dev_err(&client->dev, "Failed reading register ret = %d!\n", ret);
+        return ret;
+}
+
+static int cam_write(struct i2c_client *client, u8 * val, u32 count)
+{
+        int ret;
+        struct i2c_msg msg = {
+                .addr = client->addr,
+                .flags = 0,
+                .len = count,
+                .buf = val,
+        };
+
+        ret = i2c_transfer(client->adapter, &msg, 1);
+        if (ret < 0) {
+                dev_err(&client->dev, "Failed writing register ret = %d!\n",
+                        ret);
+                return ret;
+        }
+
+        return 0;
+}
+
+unsigned char errorcheck(char *data, unsigned int len)
+{
+	unsigned int i = 0;
+	unsigned char crc = 0x00;
+
+	for (i = 0; i < len; i++) {
+		crc ^= data[i];
+	}
+
+	return crc;
+}
+// I2C Initialization
 static bool i2c_client_init(sensor_private_t *priv) {
 
 	isp_v4l2_dev_t *isp_dev = isp_v4l2_get_dev(priv->ctx_id);
@@ -232,60 +262,283 @@ static bool i2c_client_init(sensor_private_t *priv) {
 		return false;
 	}
 
-	LOG(LOG_DEBUG, "SUCCESS initalizing i2c client for context %d with address %#x",
+	LOG(LOG_INFO, "SUCCESS I2C context %d with address %x",
 			priv->ctx_id, priv->client->addr);
 
 	return true;
 }
-//--------------------FLASH------------------------------------------------------------
 
-static void write_register( void *sensor_priv, uint32_t address, uint32_t data );
+// Setting Gain
+int32_t cam_set_gain(void *sensor_priv, uint64_t gain)
+{
+	unsigned char mc_data[100];
+        uint32_t payload_len = 0;
+        uint16_t cmd_status = 0;
+        uint8_t retcode = 0, cmd_id = 0;
+        int ret = 0, err = 0, retry = 5;
+	int loop = 0;
+	uint16_t ctrl_val_len = 0, index = 0;
+	sensor_private_t *priv = (sensor_private_t *)sensor_priv;
+
+	if(!(priv->client)) {
+		if (i2c_client_init(priv) == false) {
+			LOG (LOG_ERR, "Failed: i2c client is not initialised");
+		}
+	}
+	/* lock semaphore */
+        mutex_lock(&mcu_i2c_mutex);
+
+	payload_len = 20;
+	ctrl_val_len = 8;
+
+	index = 0x00; // GAIN Control Index
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
+
+	ret = cam_write(priv->client, mc_data, 5);
+	if (ret != 0) {
+		LOG (LOG_ERR, "%s (%d): Failed err= %d\n", __func__, __LINE__, ret);
+		goto exit;
+	}
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	/* Index */
+	mc_data[2] = index >> 8;
+	mc_data[3] = index & 0xFF;
+	/* Control ID */
+	mc_data[4] = GAIN_CTRL_ID >> 24;
+	mc_data[5] = GAIN_CTRL_ID >> 16;
+	mc_data[6] = GAIN_CTRL_ID >> 8;
+	mc_data[7] = GAIN_CTRL_ID & 0xFF;
+	/* Ctrl Type */
+	mc_data[8] = CTRL_EXTENDED;
+	mc_data[9]  = V4L2_CTRL_TYPE_INTEGER64;
+	mc_data[10] = ctrl_val_len >> 24;
+	mc_data[11] = ctrl_val_len >> 16;
+	mc_data[12] = ctrl_val_len >> 8;
+	mc_data[13] = ctrl_val_len & 0xFF;
+	for (loop = 0;loop < ctrl_val_len; loop++)
+		mc_data[21-loop] = (gain >> (8 * loop));
+	/* CRC */
+	mc_data[22] = errorcheck(&mc_data[2], payload_len);
+
+	ret = cam_write(priv->client, mc_data, payload_len + 3);
+	if (ret != 0) {
+		LOG (LOG_ERR, "%s (%d): Failed err= %d\n", __func__, __LINE__, ret);
+		goto exit;
+	}
+exit:
+	/* unlock semaphore */
+	mutex_unlock(&mcu_i2c_mutex);
+	return ret;
+}
+
+// Setting exposure
+int32_t cam_set_exposure(void *sensor_priv, uint64_t exp)
+{
+	unsigned char mc_data[100];
+        uint32_t payload_len = 0;
+        uint16_t cmd_status = 0;
+        uint8_t retcode = 0, cmd_id = 0;
+        int ret = 0, err = 0, retry = 5;
+	int loop = 0;
+	uint16_t ctrl_val_len = 0, index = 0;
+	sensor_private_t *priv = (sensor_private_t *)sensor_priv;
+
+	if(!(priv->client)) {
+		if (i2c_client_init(priv) == false) {
+			LOG (LOG_ERR, "Failed: i2c client is not initialised");
+		}
+	}
+
+	/* lock semaphore */
+        mutex_lock(&mcu_i2c_mutex);
+
+	payload_len = 20;
+	ctrl_val_len = 8;
+
+	index = 0x01; // Exposure Control Index
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
+
+	ret = cam_write(priv->client, mc_data, 5);
+	if (ret != 0) {
+		LOG (LOG_ERR, "%s (%d): Failed err= %d\n", __func__, __LINE__, ret);
+		goto exit;
+	}
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	/* Index */
+	mc_data[2] = index >> 8;
+	mc_data[3] = index & 0xFF;
+	/* Control ID */
+	mc_data[4] = EXPOSURE_CTRL_ID >> 24;
+	mc_data[5] = EXPOSURE_CTRL_ID >> 16;
+	mc_data[6] = EXPOSURE_CTRL_ID >> 8;
+	mc_data[7] = EXPOSURE_CTRL_ID & 0xFF;
+	/* Ctrl Type */
+	mc_data[8] = CTRL_EXTENDED;
+	mc_data[9]  = V4L2_CTRL_TYPE_INTEGER64;
+	mc_data[10] = ctrl_val_len >> 24;
+	mc_data[11] = ctrl_val_len >> 16;
+	mc_data[12] = ctrl_val_len >> 8;
+	mc_data[13] = ctrl_val_len & 0xFF;
+	for (loop = 0;loop < ctrl_val_len; loop++)
+		mc_data[21-loop] = (exp >> (8 * loop));
+	/* CRC */
+	mc_data[22] = errorcheck(&mc_data[2], payload_len);
+
+	ret = cam_write(priv->client, mc_data, payload_len + 3);
+	if (ret != 0) {
+		LOG (LOG_ERR, "%s (%d): Failed err= %d\n", __func__, __LINE__, ret);
+		goto exit;
+	}
+exit:
+	/* unlock semaphore */
+	mutex_unlock(&mcu_i2c_mutex);
+	return ret;
+}
+
+// Setting frame rate
+int32_t cam_set_framerate(void *sensor_priv, uint32_t fps)
+{
+	unsigned char mc_data[100];
+        uint32_t payload_len = 0;
+        uint16_t cmd_status = 0;
+        uint8_t retcode = 0, cmd_id = 0;
+        int ret = 0, err = 0, retry = 5;
+	int loop = 0;
+	uint16_t ctrl_val_len = 0, index = 0;
+	sensor_private_t *priv = (sensor_private_t *)sensor_priv;
+	uint64_t framerate = 0;
+
+	if(!(priv->client)) {
+		if (i2c_client_init(priv) == false) {
+			LOG (LOG_ERR, "Failed: i2c client is not initialised");
+		}
+	}
+
+	// Conversion of fps to write to the mcu.
+	framerate = (fps / 256) * EXPOSURE_FACTOR;
+
+	if (framerate == 0)
+		framerate = 5000000;
+
+	/* lock semaphore */
+        mutex_lock(&mcu_i2c_mutex);
+
+	payload_len = 20;
+	ctrl_val_len = 8;
+
+	index = 0x03; // Frame rate Control Index
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
+
+	ret = cam_write(priv->client, mc_data, 5);
+	if (ret != 0) {
+		LOG (LOG_ERR, "%s (%d): Failed err= %d\n", __func__, __LINE__, ret);
+		goto exit;
+	}
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	/* Index */
+	mc_data[2] = index >> 8;
+	mc_data[3] = index & 0xFF;
+	/* Control ID */
+	mc_data[4] = FRAMERATE_CTRL_ID >> 24;
+	mc_data[5] = FRAMERATE_CTRL_ID >> 16;
+	mc_data[6] = FRAMERATE_CTRL_ID >> 8;
+	mc_data[7] = FRAMERATE_CTRL_ID & 0xFF;
+	/* Ctrl Type */
+	mc_data[8] = CTRL_EXTENDED;
+	mc_data[9]  = V4L2_CTRL_TYPE_INTEGER64;
+	mc_data[10] = ctrl_val_len >> 24;
+	mc_data[11] = ctrl_val_len >> 16;
+	mc_data[12] = ctrl_val_len >> 8;
+	mc_data[13] = ctrl_val_len & 0xFF;
+	for (loop = 0;loop < ctrl_val_len; loop++)
+		mc_data[21-loop] = (framerate >> (8 * loop));
+	/* CRC */
+	mc_data[22] = errorcheck(&mc_data[2], payload_len);
+
+	ret = cam_write(priv->client, mc_data, payload_len + 3);
+	if (ret != 0) {
+		LOG (LOG_ERR, "%s (%d): Failed err= %d\n", __func__, __LINE__, ret);
+		goto exit;
+	}
+exit:
+	/* unlock semaphore */
+	mutex_unlock(&mcu_i2c_mutex);
+
+	return 0;
+}
+
+#define AGAIN_PRECISION 12
+#define LOG10_2_AGAIN_PREC ( 1233 ) // log10(2) << AGAIN_PRECISION
+#define LOG_TO_DB ( 20 )
+#define SENSOR_AGAIN_STEP_UP ( 10 )
+#define SENSOR_AGAIN_STEP_DOWN ( 3 )
+#define NORMALISE_FACTOR (LOG2_GAIN_SHIFT - AGAIN_PRECISION)
+#define CONVERSION_FACTOR (((LOG10_2_AGAIN_PREC * LOG_TO_DB * SENSOR_AGAIN_STEP_UP) / SENSOR_AGAIN_STEP_DOWN) >> NORMALISE_FACTOR)
+#define NORMALISE_REG_FACTOR ( 2 * AGAIN_PRECISION )
 
 static int32_t sensor_alloc_analog_gain( void *sensor_priv, int32_t gain )
 {
     sensor_private_t *priv = sensor_priv;
-	return gain;
-#if 0
-	uint32_t sensor_gain = math_exp2(gain, 18, 18);
-#if 0
-	int32_t min_sensor_gain = 1 << 18
-	int32_t max_sensor_gain = 22 << 18;
+    uint32_t a_gain;
+	int32_t ret = 0;
 
-	if (sensor_gain < min_sensor_gain)
-		sensor_gain = min_sensor_gain;
-	else if (sensor_gain > max_sensor_gain)
-		sensor_gain = max_sensor_gain;
-#endif
+    if (priv->again != gain) {
+	    // Conversion of log2_gain value to corresponded sensor gain value in dB
+	    a_gain = (gain * CONVERSION_FACTOR) >> NORMALISE_REG_FACTOR;
+	    // Conversion of dB to Gain Values to parse to the MCU to configure sensor
+	    a_gain = (a_gain * 3)/10;
+	    a_gain = a_gain * GAIN_FACTOR;
+	    ret = cam_set_gain (priv, (uint64_t)a_gain);
+	    if (ret == 0) {
+		    priv->again = gain;
+	    }
 
-	/* 
-	** Below code calculates
-	** gain_reg_val = 1024 * (1 - 1/sensor_gain))
-	*/
-	u64 inv_gain_q18 = (1ULL << (2 * 18)) / sensor_gain;
-	u32 one_minus_inv_q18 = (1 << 18) - inv_gain_q18;
-	u32 gain_reg_val = ((1024 * one_minus_inv_q18) >> 18);
-	write_register(sensor_priv, 0x0204, gain_reg_val);
+    }
 
-	u32 programmed_gain = (1024U << 18) / (1024 - gain_reg_val);
-	priv->again = sensor_gain;
-
-	LOG (LOG_ERR, "in gain : %d, in gain q18 : %d, programmed gain : %d, output gain : %d, "
-					"reg_val : %d",
-    					gain, sensor_gain, programmed_gain, log2_fixed_to_fixed(sensor_gain, 18, 18),
-    					gain_reg_val);
-
-	return log2_fixed_to_fixed(programmed_gain, 18, 18);
-#endif
+    return gain;
 }
 
 static int32_t sensor_alloc_digital_gain( void *sensor_priv, int32_t gain )
 {
     sensor_private_t *priv = sensor_priv;
+    sensor_param_t *cfg = &priv->param;
+    uint32_t d_gain;
+    int32_t ret = 0;
 
-    priv->dgain = gain;
-#if 0
-	write_register(sensor_priv, 0x020E, math_exp2(gain, 18, 0));
-#endif
+    if (priv->again == cfg->again_log2_max) {
+	    if (priv->dgain != gain) {
+		    // Conversion of log2_gain value to corresponded sensor gain value in dB
+		    d_gain = (gain * CONVERSION_FACTOR) >> NORMALISE_REG_FACTOR;
+		    // Conversion of dB to Gain Values to parse to the MCU to configure sensor
+		    d_gain = ((d_gain * 3)/10) + 30; // 30 - Adding Sensor Analog Gain maximum: 30dB
+		    d_gain = (d_gain * GAIN_FACTOR);
+		    ret = cam_set_gain (priv, (uint64_t)d_gain);
+		    if (ret == 0){
+			    priv->dgain = gain;
+		    }
+	    }
+    }
 
     return gain;
 }
@@ -293,35 +546,32 @@ static int32_t sensor_alloc_digital_gain( void *sensor_priv, int32_t gain )
 static void sensor_alloc_integration_time( void *sensor_priv, integration_times_t *int_times )
 {
     sensor_private_t *priv = sensor_priv;
+    sensor_param_t *cfg = &priv->param;
     uint32_t *int_time = &int_times->int_time;
+    uint64_t exp = 0;
+    int32_t ret = 0;
 
-    priv->integration_time = *int_time;
+    if (priv->integration_time != *int_time) {
+	    // Conversion of lines to exposure time (us)
+	    exp = (uint64_t)(*int_time) * supported_modes[cfg->preset_mode].hmax;
+	    exp = (exp * EXPOSURE_FACTOR)/ SENSOR_PIXEL_CLOCK;
+	    ret = cam_set_exposure (priv, exp);
+	    if (ret == 0) {
+		    priv->integration_time = *int_time;
+	    }
+    }
 }
 
 static void sensor_alloc_white_balance_gains( void *sensor_priv, int32_t gain[4] )
 {
-
-#if 0
-	u32 iter;
-
-	for (iter = 0; iter < 4; iter++ ) {
-		u32 gain_q16 = math_exp2(gain[iter], 18, 16); // log2(Q18) -> Q16
-		u32 gain_u8u8 = (gain_q16 * 256U) >> 16;  // scale Q16 -> U8.U8
-
-		if (gain_u8u8 > 0xFFFF)
-			gain_u8u8 = 0xFFFF; // clamp to 255.999
-
-		write_register(sensor_priv, 0x0B8E + (iter*2), gain_u8u8);
-		//LOG (LOG_ERR, "add : %#x, val : %d",  0x0B8E + (iter*2), gain_u8u8);
-
-	}
-#endif
-
+	// Not supported for IMX678
+    (void)sensor_priv; //unusued
+    (void)gain;        //unusued
 }
 
 static void sensor_update( void *sensor_priv )
 {
-    (void)sensor_priv; //unusued
+	LOG (LOG_INFO, "Sensor update called");
 }
 
 static void work_queue_fn(struct work_struct *work) {
@@ -426,16 +676,11 @@ static int submit_dma_request(sensor_private_t *priv, aframe_t *input_frame) {
 	desc->callback_param = priv;
 
 	cookie = dmaengine_submit(desc);
-
-#if 0
-	if (vb2_is_streaming(vb->vb2_queue) && pstream->start_dma_async) {
-		LOG( LOG_INFO, "DMA async issue pending cookie:  %d", cookie);
-		dma_async_issue_pending(pstream->dma);
-	}
-#endif
 	if (priv->is_streaming) {
 		dma_async_issue_pending(priv->dma);
 	}
+
+	LOG( LOG_INFO, "SUCCESS : MIPI submitting buffer");
 
 	return 0;
 }
@@ -448,25 +693,30 @@ static void sensor_set_mode( void *sensor_priv, uint8_t mode )
 	aframe_t *input_frame = NULL;
 	uint32_t iter = 0;
 
+	// I2C Init
+    if (i2c_client_init(priv) == false) {
+		LOG (LOG_ERR, "Failed: i2c client is not initialised");
+    }
+	
     cfg->active.width = supported_modes[mode].resolution.width;
     cfg->active.height = supported_modes[mode].resolution.height;
-    cfg->total.width = SENSOR_TOTAL_WIDTH;
-    cfg->total.height = SENSOR_TOTAL_HEIGHT;
+    cfg->total.width = supported_modes[mode].hmax;
+    cfg->total.height = supported_modes[mode].vmax;
     cfg->integration_time_min = SENSOR_MIN_INTEGRATION_TIME;
     cfg->integration_time_max = SENSOR_MAX_INTEGRATION_TIME;
     cfg->integration_time_limit = SENSOR_MAX_INTEGRATION_TIME_LIMIT;
     cfg->preset_mode = mode;
-    cfg->lines_per_second = 0;
+    //56250; // total number of lines per second.
+    cfg->lines_per_second = SENSOR_PIXEL_CLOCK / supported_modes[mode].hmax;
 
-    LOG(LOG_INFO,"sensor : mode :%d active width %d, height %d , %d , %d",
-				mode, cfg->active.width, cfg->active.height,cfg->total.width,
-				cfg->total.height);
+	LOG(LOG_DEBUG,"sensor : mode :%d active width %d, height %d , %d , %d",
+								mode, cfg->active.width, cfg->active.height,cfg->total.width,
+								cfg->total.height);
 
     cfg->sensor_exp_number = supported_modes[mode].exposures;
     cfg->num_channel = supported_modes[mode].num_channels;
 
 	if (priv->sensor_get_frame) {
-		LOG( LOG_INFO, "get frame is called");
 
 		while (priv->last_ff_index < MAX_RAW_FRAMES) {
 			rc = priv->sensor_get_frame( priv->owner, (void **)&input_frame);
@@ -475,7 +725,7 @@ static void sensor_set_mode( void *sensor_priv, uint8_t mode )
 				return;
 			}
 
-			LOG (LOG_INFO, "SUCCESS getting frame from stramer %#llx, %#x:%x, width : %d, height : %d",
+			LOG (LOG_DEBUG, "SUCCESS getting frame from stramer %#llx, %#x:%x, width : %d, height : %d",
 					input_frame->planes[0].virt_addr, input_frame->planes[0].address.low,
 					input_frame->planes[0].address.high, input_frame->planes[0].width, input_frame->planes[0].height);
 
@@ -489,7 +739,7 @@ static void sensor_set_mode( void *sensor_priv, uint8_t mode )
 				return;
 			}
 
-			LOG( LOG_INFO, "SUCCESS submitting DMA request, iter : %u, %#llx", priv->last_ff_index, priv);
+			LOG( LOG_DEBUG, "SUCCESS submitting DMA request, iter : %u, %#llx", priv->last_ff_index, priv);
 			priv->last_ff_index++;
 		}
 
@@ -502,8 +752,7 @@ static void sensor_set_mode( void *sensor_priv, uint8_t mode )
 
 static uint16_t sensor_get_id( void *sensor_priv )
 {
-    sensor_private_t *priv = (sensor_private_t *)sensor_priv;
-    return priv->ctx_id;
+    return 0xFFFF;
 }
 
 static const sensor_param_t *sensor_get_parameters( void *sensor_priv )
@@ -515,85 +764,24 @@ static const sensor_param_t *sensor_get_parameters( void *sensor_priv )
 static uint8_t sensor_fps_control( void *sensor_priv, uint8_t fps )
 {
     // This sensor does not support FPS switching.
-	LOG( LOG_ERR, "NOT IMPLEMENTED : Sensor FPS control");
+	LOG( LOG_DEBUG, "Sensor fps control");
     return 0;
 }
 
 static uint32_t read_register( void *sensor_priv, uint32_t address )
 {
-
-	sensor_private_t *priv = (sensor_private_t *)sensor_priv;
-	u8 read_data[4];
-	u8 addr_buf[2];
-	addr_buf[0] = (address >> 8) & 0xFF;
-	addr_buf[1] = address & 0xFF;
-
-	LOG( LOG_DEBUG, "Read sensor register for address %#x", address);
-
-	if(!(priv->client)) {
-		if (i2c_client_init(priv) == false) {
-			LOG (LOG_ERR, "read register failed because i2c client is not initialised");
-			return 0;
-		}
-	}
-
-	struct i2c_msg msgs[2] = {
-		{
-			.addr = priv->client->addr,
-			.flags = 0, // Write register address first
-			.len = 2,
-			.buf = addr_buf,
-		},
-		{
-			.addr = priv->client->addr,
-			.flags = I2C_M_RD, // Read
-			.len = 2,
-			.buf = &read_data[2],
-		}
-	};
-
-	if (i2c_transfer(priv->client->adapter, msgs, 2) != 2)
-		LOG( LOG_ERR, "Failed to read 2-byte add :  %#x", address);
-	else
-		LOG( LOG_DEBUG, "Read : %#x from add : %#x", get_unaligned_be32(read_data), address);
-
- 
-    return get_unaligned_be32(read_data);
+	LOG( LOG_ERR, " Un-supported read sensor register for address %#x", address); 
+    return 0;
 }
 
 static void write_register( void *sensor_priv, uint32_t address, uint32_t data )
 {
-	sensor_private_t *priv = sensor_priv;
-	u8 write_buf[4];
-	write_buf[0] = (address >> 8) & 0xFF;	// High byte of address
-	write_buf[1] = address & 0xFF;			// Low byte of address
-	write_buf[2] = (data >> 8)  & 0xFF;		// High byte of data
-	write_buf[3] = data & 0xFF;				// Low byte of data
-
-	LOG( LOG_DEBUG, "write sensor register for address %#x value %#x", address, data);
-
-	if(!(priv->client)) {
-		if (i2c_client_init(priv) == false) {
-			LOG (LOG_ERR, "write register failed because i2c client is not initialised");
-			return;
-		}
-	}
-	struct i2c_msg write_msg = {
-		.addr = priv->client->addr,
-		.flags = 0, // Write
-		.len = sizeof(write_buf),
-		.buf = write_buf,
-	};
-
-	if (i2c_transfer(priv->client->adapter, &write_msg, 1) != 1)
-		LOG( LOG_ERR, "Failed to write 2-byte add :  %#x\n", address);
-	else
-		LOG( LOG_DEBUG, "Wrote 0x%02x to add : 0x%04x\n", get_unaligned_be16(&write_buf[2]), address);
+	LOG( LOG_ERR, "un-supported write sensor register for address %#x value %#x", address, data);
 }
 
 static void stop_streaming( void *sensor_priv ) {
 
-	LOG( LOG_INFO, "STOP streaming is called");
+	LOG( LOG_DEBUG, "STOP streaming is called");
 
     sensor_private_t *priv = sensor_priv;
 	dmaengine_terminate_sync(priv->dma);
@@ -613,6 +801,7 @@ static void request_next_frame( void *sensor_priv ) {
 
     sensor_private_t *priv = sensor_priv;
 	aframe_t *input_frame = NULL;
+
 	if (priv->sensor_get_frame) {
 		int rc = priv->sensor_get_frame( priv->owner, (void **)&input_frame);
 		if (rc < 0) {
@@ -620,7 +809,11 @@ static void request_next_frame( void *sensor_priv ) {
 			return;
 		}
 
-		// Fill the dma cb struct
+		LOG (LOG_DEBUG, "SUCCESS getting frame from stramer %#llx, %#x, width : %d, height : %d",
+				input_frame->planes[0].virt_addr, input_frame->planes[0].address.low,
+				input_frame->planes[0].width, input_frame->planes[0].height);
+
+			// Fill the dma cb struct
 		priv->dma_cb_struct[priv->last_ff_index].raw_frame = input_frame;
 		priv->dma_cb_struct[priv->last_ff_index].owner = priv->owner;
 
@@ -630,6 +823,7 @@ static void request_next_frame( void *sensor_priv ) {
 			return;
 		}
 
+		LOG( LOG_DEBUG, "SUCCESS submitting DMA request, iter : %u", priv->last_ff_index);
 		priv->last_ff_index = (priv->last_ff_index + 1) % MAX_RAW_FRAMES;	
 	}
 
@@ -638,7 +832,6 @@ static void request_next_frame( void *sensor_priv ) {
 
 static void register_frame_callbacks( void *sensor_priv, const sensor_remote_callbacks_t *callbacks ) {
 
-	LOG( LOG_INFO, "Adding register frame callbacks");
     sensor_private_t *priv = sensor_priv;
 	priv->sensor_get_frame = callbacks->get_frame;
 	priv->sensor_put_frame = callbacks->put_frame;
@@ -646,10 +839,10 @@ static void register_frame_callbacks( void *sensor_priv, const sensor_remote_cal
 
 }
 
-static void sensor_deinit_imx477( void *sensor_priv )
+static void sensor_deinit_imx678( void *sensor_priv )
 {
     sensor_private_t *priv = sensor_priv;
-	LOG( LOG_INFO, "Sensor deinit for context : %d", priv->ctx_id);
+	LOG( LOG_DEBUG, "Sensor deinit for context : %d", priv->ctx_id);
 
 	up(&priv->sem_isp_to_dma);
 	flush_workqueue(wq);
@@ -662,7 +855,7 @@ static void sensor_deinit_imx477( void *sensor_priv )
 
 //--------------------Initialization------------------------------------------------------------
 
-int isp_register_dma_channels(sensor_private_t *priv, int ctx_id) {
+static int isp_register_dma_channels(sensor_private_t *priv, int ctx_id) {
 
 	char dma_names[64];
 	int8_t dma_index;
@@ -694,9 +887,9 @@ int isp_register_dma_channels(sensor_private_t *priv, int ctx_id) {
 }
 
 
-void sensor_init_imx477( void **priv_ptr, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const options )
+void sensor_init_imx678( void **priv_ptr, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const options )
 {
-    LOG(LOG_DEBUG, "imx477 sensor init for ctx : %u", location);
+    LOG(LOG_DEBUG, "imx678 sensor init for ctx : %u", location);
 
 	char wq_name[64];
     sensor_private_t *priv = *priv_ptr = priv_array + location;
@@ -739,7 +932,7 @@ void sensor_init_imx477( void **priv_ptr, uint8_t location, sensor_control_t *ct
     ctrl->stop_streaming = stop_streaming;
     ctrl->register_frame_callbacks = register_frame_callbacks;
     ctrl->request_next_frame = request_next_frame;
-    ctrl->deinit = sensor_deinit_imx477;
+    ctrl->deinit = sensor_deinit_imx678;
 
 	/* init work queue */
 	if (!wq) {
@@ -761,28 +954,35 @@ void sensor_init_imx477( void **priv_ptr, uint8_t location, sensor_control_t *ct
 
 	rc = isp_register_dma_channels(priv, location);
 	if (rc != 0) {
-		LOG (LOG_INFO, "Failed to register dma channel for context : %d", location);
+		LOG (LOG_ERR, "Failed to register dma channel for context : %d", location);
 		return;
 	}
 
 	if (ctx_settings) {
 
-		ctx_settings->get_calibrations = get_calibrations_imx477;
+		ctx_settings->get_calibrations = get_calibrations_imx678;
 		cdma_addr = ctx_settings->isp_base;
 
-		acamera_isp_pipeline_bypass_sensor_offset_wdr_write( cdma_addr, 0 );
+		// Enable Mesh Shading
+		acamera_isp_pipeline_bypass_mesh_shading_write(cdma_addr,0);
+		// Enable ISP Digital Gain
+		acamera_isp_pipeline_bypass_digital_gain_write(cdma_addr,0);
+		// Enable CAC
+		acamera_isp_pipeline_bypass_ca_correction_write(cdma_addr,0);
+		// Enable DPC
+		acamera_isp_pipeline_bypass_defect_pixel_write(cdma_addr,0);
 		acamera_isp_pipeline_bypass_white_balance_write(cdma_addr,0);
 		acamera_isp_pipeline_bypass_out_format_write(cdma_addr, 0);
-		acamera_isp_pipeline_bypass_gamma_be_sq_write( cdma_addr, 0);
-		acamera_isp_pipeline_bypass_gamma_fe_sq_write( cdma_addr, 0);
-		acamera_isp_offset_black_00_write( cdma_addr, 0xF0000 );
-		acamera_isp_offset_black_01_write( cdma_addr, 0xF0000 );
-		acamera_isp_offset_black_10_write( cdma_addr, 0xF0000);
-		acamera_isp_offset_black_11_write( cdma_addr, 0xF0000 );
-		acamera_isp_white_balance_gain_00_write(cdma_addr, 1008);
-		acamera_isp_white_balance_gain_01_write(cdma_addr, 450);
-		acamera_isp_white_balance_gain_10_write(cdma_addr, 450);
-		acamera_isp_white_balance_gain_11_write(cdma_addr, 720);
+
+		acamera_isp_pipeline_bypass_sensor_offset_wdr_write( cdma_addr, 1 );
+		acamera_isp_pipeline_bypass_gamma_be_sq_write( cdma_addr, 1);
+		acamera_isp_pipeline_bypass_gamma_fe_sq_write( cdma_addr, 1);
+		// Black  level updated for IMX678 - 200 (dec) - 0xC8 (Hex)
+		// This offset will be effective only when white balance is enabled.
+		acamera_isp_offset_black_00_write( cdma_addr, 0xC8000 );
+		acamera_isp_offset_black_01_write( cdma_addr, 0xC8000 );
+		acamera_isp_offset_black_10_write( cdma_addr, 0xC8000);
+		acamera_isp_offset_black_11_write( cdma_addr, 0xC8000 );
 
 	} else {
 		LOG (LOG_ERR, "Failed to get the ctx pointer for ctx :%d", location);

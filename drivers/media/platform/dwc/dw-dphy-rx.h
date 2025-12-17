@@ -23,6 +23,9 @@
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
 
+/* DPHY frequency */
+#define DPHY_FREQ_297MHZ 297000000
+
 /* DPHY interface register bank*/
 #define R_CSI2_DPHY_SHUTDOWNZ 0x0
 #define R_CSI2_DPHY_RSTZ 0x4

@@ -166,8 +166,8 @@ int system_interrupts_init( void )
     /// @note       Be careful when changing workqueue type, this will affect
     ///             performance of the system and may cause MCFE output
     ///             overflow!
-    m_work_queue = create_workqueue( "isp_bh_queue" );
-
+	m_work_queue = alloc_workqueue( "isp_bh_queue",
+						WQ_UNBOUND | WQ_HIGHPRI | WQ_CPU_INTENSIVE | WQ_SYSFS | WQ_MEM_RECLAIM, 1);
     if ( m_work_queue == NULL ) {
         printk( KERN_CRIT "Failed to allocate memory for bottom half work queue." );
         return -ENOMEM;

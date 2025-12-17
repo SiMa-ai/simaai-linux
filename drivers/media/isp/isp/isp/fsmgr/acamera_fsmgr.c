@@ -164,7 +164,6 @@ void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( AE_PERF_SECTION, 1 );
 #endif /* ACAMERA_ISP_PROFILING */
-#if 0
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( HISTOGRAM_PERF_SECTION );
 #endif /* ACAMERA_ISP_PROFILING */
@@ -172,7 +171,6 @@ void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( HISTOGRAM_PERF_SECTION, 1 );
 #endif /* ACAMERA_ISP_PROFILING */
-#endif
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( AWB_PERF_SECTION );
 #endif /* ACAMERA_ISP_PROFILING */
@@ -361,7 +359,6 @@ void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( AE_PERF_SECTION, 1 );
 #endif /* ACAMERA_ISP_PROFILING */
-#if 0
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( HISTOGRAM_PERF_SECTION );
 #endif /* ACAMERA_ISP_PROFILING */
@@ -369,8 +366,6 @@ void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( HISTOGRAM_PERF_SECTION, 1 );
 #endif /* ACAMERA_ISP_PROFILING */
-#endif
-
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( AWB_PERF_SECTION );
 #endif /* ACAMERA_ISP_PROFILING */
@@ -518,7 +513,6 @@ void acamera_fsmgr_process_interrupt( acamera_fsmgr_t *p_fsmgr, uint8_t irq_even
         acamera_profiler_stop( CMOS_PERF_SECTION, 0 );
 #endif /* ACAMERA_ISP_PROFILING */
     }
-#if 0
     fsm_mask = p_fsmgr->histogram_fsm.irq_mask & mask;
     if ( fsm_mask ) {
 #if ACAMERA_ISP_PROFILING
@@ -530,7 +524,6 @@ void acamera_fsmgr_process_interrupt( acamera_fsmgr_t *p_fsmgr, uint8_t irq_even
         acamera_profiler_stop( HISTOGRAM_PERF_SECTION, 0 );
 #endif /* ACAMERA_ISP_PROFILING */
     }
-#endif
     fsm_mask = p_fsmgr->AWB_fsm.irq_mask & mask;
     if ( fsm_mask ) {
 #if ACAMERA_ISP_PROFILING
@@ -628,7 +621,6 @@ int acamera_fsmgr_process_event( acamera_fsmgr_t *p_fsmgr )
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( CONTROL_PERF_SECTION, fsm_event_processed_flag );
 #endif
-
 // DECOMPANDER FSM
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( DECOMPANDER_PERF_SECTION );
@@ -638,7 +630,6 @@ int acamera_fsmgr_process_event( acamera_fsmgr_t *p_fsmgr )
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( DECOMPANDER_PERF_SECTION, fsm_event_processed_flag );
 #endif
-
 // FRAME_STITCH FSM
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( FRAME_STITCH_PERF_SECTION );

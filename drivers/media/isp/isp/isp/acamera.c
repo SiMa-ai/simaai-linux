@@ -124,17 +124,18 @@ int32_t acamera_init( acamera_settings *settings, uint8_t num_of_contexts, semap
         p_ictx->context_id = idx;
         p_ictx->sync_sem = sem;
 
+        result = acamera_isp_ctx_init( p_ictx, &settings[idx] );
+        if ( result != 0 ) {
+            LOG( LOG_CRIT, "Failed to initialize the context %d.", (int)idx );
+            break;
+        }
+
         if ( ( p_ictx->calib_mgr_data = acamera_calib_mgr_init( settings[idx].get_calibrations ) ) == NULL ) {
             LOG( LOG_CRIT, "Failed to initialize calibration manager entry for context %d.", (int)idx );
             result = 1;
             break;
         }
 
-        result = acamera_isp_ctx_init( p_ictx, &settings[idx] );
-        if ( result != 0 ) {
-            LOG( LOG_CRIT, "Failed to initialize the context %d.", (int)idx );
-            break;
-        }
     }
 
     if ( result == 0 ) {

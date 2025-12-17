@@ -332,7 +332,7 @@ int fw_intf_isp_get_sensor_info( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_i
         acamera_command( ctx_id, TSENSOR, SENSOR_INFO_EXPOSURES, 0, COMMAND_GET, &exposures );
         acamera_command( ctx_id, TSENSOR, SENSOR_INFO_CHANNELS, 0, COMMAND_GET, &num_channels );
         acamera_command( ctx_id, TSENSOR, SENSOR_INFO_DATA_WIDTH, 0, COMMAND_GET, &data_width );
-        LOG( LOG_INFO, "index : %d, width: %04u, height: %04u", i, width, height );
+        LOG( LOG_INFO, "index : %d, width: %04u, height: %04u, data width: %d", i, width, height, data_width);
 
         /* find existing mode index from sensor_info with corresponding resolution */
         for ( j = 0; j < sensor_info->num_modes; j++ ) {
@@ -385,7 +385,7 @@ int fw_intf_isp_get_sensor_info( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_i
 
 #else
     /* Return default settings (1080p) */
-    LOG( LOG_ERR, "Sensor APIs not found, initializing sensor info structure with default values (1080p)" );
+    LOG( LOG_INFO, "Sensor APIs not found, initializing sensor info structure with default values (1080p)" );
     sensor_info->num_modes = 1;
     sensor_info->cur_mode = 0;
     sensor_info->mode[0].num_sub_modes = 1;
@@ -548,10 +548,10 @@ int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor
         return -EBUSY;
     }
 
-    LOG( LOG_DEBUG, "stream_set_resolution, context id: %u, stream type: %d, width: %d, height: %d",
+    LOG( LOG_INFO, "stream_set_resolution, context id: %u, stream type: %d, width: %d, height: %d",
          ctx_id, stream_type, *width, *height );
 
-    if ( stream_type == V4L2_STREAM_TYPE_OUT ) {
+    if ( stream_type == V4L2_STREAM_TYPE_RAW  || stream_type == V4L2_STREAM_TYPE_OUT) {
 #if defined( TSENSOR ) && defined( SENSOR_PRESET )
 
         uint32_t sensor_preset = 0;
@@ -596,7 +596,7 @@ int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor
             }
 
             /* set sensor resolution preset */
-            LOG( LOG_NOTICE, "Setting new sensor resolution: %dx%d, sensor preset: %d, fps: %d",
+            LOG( LOG_INFO, "Setting new sensor resolution: %dx%d, sensor preset: %d, fps: %d",
                  target_width, target_height, sensor_preset, fps / 256 );
 
             uint32_t ret_val;

@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix-zebu.dtsi"
+
+&uart01 {
+	status = "okay";
+};
+
+&pcie0_ep {
+	status = "okay";
+};
+
+&evxx_stu {
+	status = "okay";
+};
+
+&evxx {
+	status = "okay";
+};
+

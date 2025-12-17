@@ -133,6 +133,14 @@ static int isp_fw_process( void *data )
     return 0;
 }
 
+acamera_settings *get_settings_by_id(u8 ctx_id) {
+
+	if (ctx_id >= FIRMWARE_CONTEXT_NUMBER)
+		return NULL;
+
+	return &settings[ctx_id];
+}
+
 static void isp_cdma_init( void )
 {
 #if defined( ISP_HAS_MCFE_FSM )
@@ -314,6 +322,11 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
     }
     g_resmem_remaining = (size_t)resource_size( &resmem );
     LOG( LOG_NOTICE, "CMA region: start = 0x%zx, size = 0x%zx", (size_t)resmem.start, g_resmem_remaining );
+
+  if (dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64))) {
+      LOG(LOG_ERR, "Could not set DMA mask\n");
+      return -1;
+    }
 
     // Initialize IRQs
     irq = platform_get_irq_byname( pdev, "ISP" );

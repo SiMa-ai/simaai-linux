@@ -15,6 +15,8 @@
 
 static uint8_t data_lane_mask = 0xf;
 
+#define MAX_DPHY_FREQ (1250000000)
+
 struct range_dphy_gen2 {
 	u32 freq;
 	u8 hsfregrange;
@@ -45,27 +47,27 @@ struct range_dphy_gen3 {
 
 struct range_dphy_gen3 range_gen3[] = {
 
-	{ 80, 0x00, 0x1B6 },   { 90, 0x10, 0x1B6 },   { 100, 0x20, 0x1B6 },
-	{ 110, 0x30, 0x1B6 },  { 120, 0x01, 0x1B6 },  { 130, 0x11, 0x1B6 },
-	{ 140, 0x21, 0x1B6 },  { 150, 0x31, 0x1B6 },  { 160, 0x02, 0x1B6 },
-	{ 170, 0x12, 0x1B6 },  { 180, 0x22, 0x1B6 },  { 190, 0x32, 0x1B6 },
-	{ 205, 0x03, 0x1B6 },  { 220, 0x13, 0x1B6 },  { 235, 0x23, 0x1B6 },
-	{ 250, 0x33, 0x1B6 },  { 275, 0x04, 0x1B6 },  { 300, 0x14, 0x1B6 },
-	{ 325, 0x25, 0x1B6 },  { 350, 0x35, 0x1B6 },  { 400, 0x05, 0x1B6 },
-	{ 450, 0x16, 0x1B6 },  { 500, 0x26, 0x1B6 },  { 550, 0x37, 0x1B6 },
-	{ 600, 0x07, 0x1B6 },  { 650, 0x18, 0x1B6 },  { 700, 0x28, 0x1B6 },
-	{ 750, 0x39, 0x1B6 },  { 800, 0x09, 0x1B6 },  { 850, 0x19, 0x1B6 },
-	{ 900, 0x29, 0x1B6 },  { 950, 0x3A, 0x1B6 },  { 1000, 0x0A, 0x1B6 },
-	{ 1050, 0x1A, 0x1B6 }, { 1100, 0x2A, 0x1B6 }, { 1150, 0x3B, 0x1B6 },
-	{ 1200, 0x0B, 0x1B6 }, { 1250, 0x1B, 0x1B6 }, { 1300, 0x2B, 0x1B6 },
-	{ 1350, 0x3C, 0x1B6 }, { 1400, 0x0C, 0x1B6 }, { 1450, 0x1C, 0x1B6 },
-	{ 1500, 0x2C, 0x1B6 }, { 1550, 0x3D, 0x10F }, { 1600, 0x0D, 0x118 },
-	{ 1650, 0x1D, 0x121 }, { 1700, 0x2E, 0x12A }, { 1750, 0x3E, 0x132 },
-	{ 1800, 0x0E, 0x13B }, { 1850, 0x1E, 0x144 }, { 1900, 0x2F, 0x14D },
-	{ 1950, 0x3F, 0x155 }, { 2000, 0x0F, 0x15E }, { 2050, 0x40, 0x167 },
-	{ 2100, 0x41, 0x170 }, { 2150, 0x42, 0x178 }, { 2200, 0x43, 0x181 },
-	{ 2250, 0x44, 0x18A }, { 2300, 0x45, 0x193 }, { 2350, 0x46, 0x19B },
-	{ 2400, 0x47, 0x1A4 }, { 2450, 0x48, 0x1AD }, { 2500, 0x49, 0x1B6 }
+	{ 80, 0x00, 0x1C0 },   { 90, 0x10, 0x1C0 },   { 100, 0x20, 0x1C0 },
+	{ 110, 0x30, 0x1C0 },  { 120, 0x01, 0x1C0 },  { 130, 0x11, 0x1C0 },
+	{ 140, 0x21, 0x1C0 },  { 150, 0x31, 0x1C0 },  { 160, 0x02, 0x1C0 },
+	{ 170, 0x12, 0x1C0 },  { 180, 0x22, 0x1C0 },  { 190, 0x32, 0x1C0 },
+	{ 205, 0x03, 0x1C0 },  { 220, 0x13, 0x1C0 },  { 235, 0x23, 0x1C0 },
+	{ 250, 0x33, 0x1C0 },  { 275, 0x04, 0x1C0 },  { 300, 0x14, 0x1C0 },
+	{ 325, 0x25, 0x1C0 },  { 350, 0x35, 0x1C0 },  { 400, 0x05, 0x1C0 },
+	{ 450, 0x16, 0x1C0 },  { 500, 0x26, 0x1C0 },  { 550, 0x37, 0x1C0 },
+	{ 600, 0x07, 0x1C0 },  { 650, 0x18, 0x1C0 },  { 700, 0x28, 0x1C0 },
+	{ 750, 0x39, 0x1C0 },  { 800, 0x09, 0x1C0 },  { 850, 0x19, 0x1C0 },
+	{ 900, 0x29, 0x1C0 },  { 950, 0x3A, 0x1C0 },  { 1000, 0x0A, 0x1C0 },
+	{ 1050, 0x1A, 0x1C0 }, { 1100, 0x2A, 0x1C0 }, { 1150, 0x3B, 0x1C0 },
+	{ 1200, 0x0B, 0x1C0 }, { 1250, 0x1B, 0x1C0 }, { 1300, 0x2B, 0x1C0 },
+	{ 1350, 0x3C, 0x1C0 }, { 1400, 0x0C, 0x1C0 }, { 1450, 0x1C, 0x1C0 },
+	{ 1500, 0x2C, 0x1C0 }, { 1550, 0x3D, 0x116 }, { 1600, 0x0D, 0x11F },
+	{ 1650, 0x1D, 0x128 }, { 1700, 0x2E, 0x131 }, { 1750, 0x3E, 0x13A },
+	{ 1800, 0x0E, 0x143 }, { 1850, 0x1E, 0x14B }, { 1900, 0x2F, 0x154 },
+	{ 1950, 0x3F, 0x15D }, { 2000, 0x0F, 0x166 }, { 2050, 0x40, 0x16F },
+	{ 2100, 0x41, 0x178 }, { 2150, 0x42, 0x181 }, { 2200, 0x43, 0x18A },
+	{ 2250, 0x44, 0x193 }, { 2300, 0x45, 0x19C }, { 2350, 0x46, 0x1A5 },
+	{ 2400, 0x47, 0x1AE }, { 2450, 0x48, 0x1B7 }, { 2500, 0x49, 0x1C0 }
 };
 
 u8 dw_dphy_setup_config(struct dw_dphy_rx *dphy)
@@ -409,7 +411,7 @@ int poll_csi_phy_stopstate_thread(void *arg)
 
 	const uint32_t stopstate_poll_mask = data_lane_mask | phy_stopstateclk;
 
-	dev_info(dphy->dev, "THREAD : Wait until stopstatedata_n and stopstateclk are assertedi %#x\n",
+	dev_info(dphy->dev, "THREAD : Wait until stopstatedata_n and stopstateclk are asserted %#x\n",
 			stopstate_poll_mask);
 
 	while (!kthread_should_stop()) {
@@ -433,109 +435,161 @@ int poll_csi_phy_stopstate_thread(void *arg)
 	return 0;
 }
 
+static u8 get_range_dphy_gen3_index_for_data_rate(u32 data_rate)
+{
+	u8 data;
+	u8 range = 0;
+
+	for (range = 0; range < (ARRAY_SIZE(range_gen3) - 1); range++) {
+		if (data_rate <= range_gen3[range].freq) {
+			break;
+		}
+	}
+
+	if (range == ARRAY_SIZE(range_gen3)) {
+		pr_err("Failed to do look up for data rate %u\n", data_rate);
+		return 0;
+	}
+
+	return range;
+}
 
 static void __dw_dphy_configure(struct dw_dphy_rx *dphy)
 {
-	dev_info(dphy->dev, "Dphy configuring\n");
+	u8 index = 0;
+	u32 data_rate = 0; // in Mbps
+
 	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 0);
 	dw_dphy_write(dphy, R_CSI2_DPHY_SHUTDOWNZ, 0);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLR, 1);
 	ndelay(15);//delay 15ns
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	if (dphy->mipi_generator) {
-		dev_info(dphy->dev, "MIPI generator is connected\n");
-		dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL,0xA, GLUE_CTRL_GEN_HSFR, 7);// mipi_vis_ctrl_phy_general hsfreqrange
+
+	if (dphy->dphy_freq == 0) {
+		dev_err(dphy->dev, "dphy frequency 0. Consult documentation for correct value\n");
+		data_rate = 0;
+	} else if (dphy->dphy_freq > MAX_DPHY_FREQ) {
+		dev_err(dphy->dev, "dphy frequency %#x is out of range, truncating it to max %#x\n",
+					dphy->dphy_freq, MAX_DPHY_FREQ);
+		data_rate = ((MAX_DPHY_FREQ * 2) / 1000000);
 	} else {
-		dev_info(dphy->dev, "Camera is connected\n");
-		dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL, 0x29, GLUE_CTRL_GEN_HSFR, 7);
+		data_rate = ((dphy->dphy_freq * 2) / 1000000);
 	}
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTEN, 1);
-	ndelay(10);//delay 10ns
+
+	index = get_range_dphy_gen3_index_for_data_rate(data_rate);
+	dev_info(dphy->dev, "data rate : %u, hsfreqrange : %#x, osc_freq_target : %#x, dphy freq : %u\n",
+		data_rate, range_gen3[index].hsfregrange, range_gen3[index].osc_freq_target, dphy->dphy_freq);
+
+	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL, (range_gen3[index].hsfregrange) & 0xFF, GLUE_CTRL_GEN_HSFR, 7);
+
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTEN, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+			PHY_TESTDIN, 8);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+			PHY_TESTDIN, 8);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+			PHY_TESTDIN, 8);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xE2,
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe2,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xC0,
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, (range_gen3[index].osc_freq_target) & 0xFF,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
+
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+			PHY_TESTDIN, 8);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+	ndelay(10);//delay 10ns
+
+	//write 0xe3 -> 'h1
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xE3,
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe3,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x1,
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x01,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+			PHY_TESTDIN, 8);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+	ndelay(10);//delay 10ns
+
+	//write 0xe4 -> 'h1
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xE4,
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe4,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x1,
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x01,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
 			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
 	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
 	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x8, PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x20,
-			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	ndelay(10);//delay 10ns
+
+	if (data_rate <= 1500) {
+		//step 8
+		//write 0x08 -> 'h20
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x08,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x20,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		ndelay(10);//delay 10ns
+	}
+
+	//step 9
 	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL,
 			0X41, GLUE_CTRL_GEN_CFG_CLK, 8);
 	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG0, 1,
@@ -554,12 +608,63 @@ static void __dw_dphy_configure(struct dw_dphy_rx *dphy)
 			GLUE_CTRL_FORCE_MODE, 1);
 	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG3, 1,
 			GLUE_CTRL_FORCE_MODE, 1);
+	ndelay(15);//delay 15ns
 	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL, 1,
 			GLUE_CTRL_GEN_ENBCLK, 1);
+	ndelay(5);//delay 5ns
+
+	if (data_rate > 1000 && data_rate <= 1500) {
+		//step 17
+		//write 0xe0 -> 'h80
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe0,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x80,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		ndelay(5);//delay 5ns
+
+		//write 0xe1 -> 'h1
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe1,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x01,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
+				PHY_TESTDIN, 8);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
+		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
+		ndelay(5);//delay 5ns
+	}
 
 	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 1);
+	ndelay(5); //delay 5ns
 	dw_dphy_write(dphy, R_CSI2_DPHY_SHUTDOWNZ, 1);
-	dev_info(dphy->dev, "Dphy configuration done\n");
 
 	dphy->poll_thread = kthread_run(poll_csi_phy_stopstate_thread, (void *)dphy, "poll_thread");
 	if (IS_ERR(dphy->poll_thread)) {

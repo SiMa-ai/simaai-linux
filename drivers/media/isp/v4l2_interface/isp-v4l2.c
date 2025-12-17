@@ -1242,7 +1242,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
 
 	port = of_graph_get_port_by_id(v4l2_dev->dev->of_node, ctx_id);
 	if (!port) {
-		LOG (LOG_ERR, "failed to get port by ctx id : %u", ctx_id);
+		LOG (LOG_DEBUG, "failed to get port by ctx id : %u", ctx_id);
 		goto free_dev;
 	}
 

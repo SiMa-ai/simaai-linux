@@ -8,7 +8,7 @@
 #include "modalix.dtsi"
 
 / {
-	model = "SiMa.ai Modalix SoM Board";
+	model = "SiMa.ai Modalix SoM 8Gig Board";
 
 	chosen {
 		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
@@ -25,16 +25,18 @@
 	memory@1000000000 {
 		device_type = "memory";
 		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
-				0x00000010 0x75000000 0x00000002 0x8B000000>;
+				0x00000010 0x75000000 0x00000000 0xAB000000>;
 	};
 };
+
 
 &sio10_clk {
         simaai,ignore-unused = <0x100>;
 };
 
 &dms0_reserved {
-	reg = <0x00000013 0x00000000 0x00000004 0x00000000>;
+	// 2.5GiB for DMS0 region
+	reg = <0x00000011 0x20000000 0x00000000 0xA0000000>;
 };
 
 &nvs_sdhci0 {

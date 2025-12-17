@@ -886,7 +886,7 @@ void init_context_params( context_params *params )
     params->params[59].param_handler = NULL;
 
     // SYSTEM_FREEZE_FIRMWARE_PARAM
-    params->params[60].value = 1;
+    params->params[60].value = 0;
     params->params[60].default_value = 0;
     params->params[60].min = 0;
     params->params[60].max = 1;
@@ -949,7 +949,7 @@ void init_context_params( context_params *params )
     params->params[66].param_handler = NULL;
 
     // SYSTEM_MANUAL_AWB_PARAM
-    params->params[67].value = 1;
+    params->params[67].value = 0;
     params->params[67].default_value = 0;
     params->params[67].min = 0;
     params->params[67].max = 1;

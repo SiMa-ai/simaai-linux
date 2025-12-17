@@ -29,21 +29,25 @@
 			pins_i2c00_deafult: pins_i2c00 {
 				function = "i2c";
 				groups = "i2c0_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c01_deafult: pins_i2c01 {
 				function = "i2c";
 				groups = "i2c1_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c02_deafult: pins_i2c02 {
 				function = "i2c";
 				groups = "i2c2_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c03_deafult: pins_i2c03 {
 				function = "i2c";
 				groups = "i2c3_group";
+				drive-strength = <4>;
 			};
 
 			pins_uart00_deafult: pins_uart00 {
@@ -347,21 +351,25 @@
 			pins_i2c10_deafult: pins_i2c10 {
 				function = "i2c";
 				groups = "i2c0_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c11_deafult: pins_i2c11 {
 				function = "i2c";
 				groups = "i2c1_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c12_deafult: pins_i2c12 {
 				function = "i2c";
 				groups = "i2c2_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c13_deafult: pins_i2c13 {
 				function = "i2c";
 				groups = "i2c3_group";
+				drive-strength = <4>;
 			};
 
 			pins_uart10_deafult: pins_uart10 {
@@ -665,21 +673,25 @@
 			pins_i2c20_deafult: pins_i2c20 {
 				function = "i2c";
 				groups = "i2c0_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c21_deafult: pins_i2c21 {
 				function = "i2c";
 				groups = "i2c1_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c22_deafult: pins_i2c22 {
 				function = "i2c";
 				groups = "i2c2_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c23_deafult: pins_i2c23 {
 				function = "i2c";
 				groups = "i2c3_group";
+				drive-strength = <4>;
 			};
 
 			pins_uart20_deafult: pins_uart20 {
@@ -983,21 +995,25 @@
 			pins_i2c30_deafult: pins_i2c30 {
 				function = "i2c";
 				groups = "i2c0_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c31_deafult: pins_i2c31 {
 				function = "i2c";
 				groups = "i2c1_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c32_deafult: pins_i2c32 {
 				function = "i2c";
 				groups = "i2c2_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c33_deafult: pins_i2c33 {
 				function = "i2c";
 				groups = "i2c3_group";
+				drive-strength = <4>;
 			};
 
 			pins_uart30_deafult: pins_uart30 {
@@ -1301,21 +1317,25 @@
 			pins_i2c40_deafult: pins_i2c40 {
 				function = "i2c";
 				groups = "i2c0_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c41_deafult: pins_i2c41 {
 				function = "i2c";
 				groups = "i2c1_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c42_deafult: pins_i2c42 {
 				function = "i2c";
 				groups = "i2c2_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c43_deafult: pins_i2c43 {
 				function = "i2c";
 				groups = "i2c3_group";
+				drive-strength = <4>;
 			};
 
 			pins_uart40_deafult: pins_uart40 {
@@ -1619,21 +1639,25 @@
 			pins_i2c50_deafult: pins_i2c50 {
 				function = "i2c";
 				groups = "i2c0_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c51_deafult: pins_i2c51 {
 				function = "i2c";
 				groups = "i2c1_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c52_deafult: pins_i2c52 {
 				function = "i2c";
 				groups = "i2c2_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c53_deafult: pins_i2c53 {
 				function = "i2c";
 				groups = "i2c3_group";
+				drive-strength = <4>;
 			};
 
 			pins_uart50_deafult: pins_uart50 {
@@ -1937,21 +1961,25 @@
 			pins_i2c60_deafult: pins_i2c60 {
 				function = "i2c";
 				groups = "i2c0_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c61_deafult: pins_i2c61 {
 				function = "i2c";
 				groups = "i2c1_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c62_deafult: pins_i2c62 {
 				function = "i2c";
 				groups = "i2c2_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c63_deafult: pins_i2c63 {
 				function = "i2c";
 				groups = "i2c3_group";
+				drive-strength = <4>;
 			};
 
 			pins_uart60_deafult: pins_uart60 {
@@ -2255,21 +2283,25 @@
 			pins_i2c70_deafult: pins_i2c70 {
 				function = "i2c";
 				groups = "i2c0_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c71_deafult: pins_i2c71 {
 				function = "i2c";
 				groups = "i2c1_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c72_deafult: pins_i2c72 {
 				function = "i2c";
 				groups = "i2c2_group";
+				drive-strength = <4>;
 			};
 
 			pins_i2c73_deafult: pins_i2c73 {
 				function = "i2c";
 				groups = "i2c3_group";
+				drive-strength = <4>;
 			};
 
 			pins_uart70_deafult: pins_uart70 {

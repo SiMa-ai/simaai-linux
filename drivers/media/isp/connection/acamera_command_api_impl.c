@@ -401,11 +401,12 @@ uint8_t application_command_impl( uint8_t command_type, uint8_t command, uint32_
 {
     const uint32_t ctx_id = get_isp_param( ACTIVE_CONTEXT_PARAM );
     const uint32_t cmd_if_mode = get_context_param( get_ctx_ptr_by_id( ctx_id ), CMD_INTERFACE_MODE_PARAM );
-
+#if 0
     // If command interface is in passive mode, ignore all set commands (read-only mode)
     if ( ( cmd_if_mode != CMD_IF_MODE_ACTIVE ) && ( direction == COMMAND_SET ) ) {
         return NOT_PERMITTED;
     }
+#endif
 
     return acamera_command( ctx_id, command_type, command, value, direction, ret_value );
 }

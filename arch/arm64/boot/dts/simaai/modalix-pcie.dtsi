@@ -10,8 +10,9 @@
 			<0 0x6100070 0 0x14>,	/* dbi2 */
 			<0 0x6200000 0 0x1000>, /* asr */
 			<0 0x6300000 0 0x7f24>,	/* atu */
-			<0 0x6380000 0 0x3fac>;	/* hdma */
-		reg-names = "dbi", "dbi2", "asr", "atu", "hdma" ;
+			<0 0x6380000 0 0x3fac>,	/* hdma */
+			<0 0x5e00000 0 0x105060>; /* PCIe sys */
+		reg-names = "dbi", "dbi2", "asr", "atu", "hdma", "pcie_sys" ;
 		ocm-region = <&ocm_pcie_reserved>;
 		silicon = "modalix";
 		interrupt-parent = <&gic>;

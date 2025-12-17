@@ -34,7 +34,7 @@
  */
 
 #define MIPI_FIR_REGISTER_SIZE (64)
-#define ADDITIONAL_VB2_BUFFER_COUNT (15)
+#define ADDITIONAL_VB2_BUFFER_COUNT (5)
 
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION( 4, 8, 0 ) )
 static int isp_vb2_queue_setup( struct vb2_queue *vq,

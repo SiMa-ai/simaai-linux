@@ -21,11 +21,8 @@
 #include "acamera_settings.h"
 
 
-// Extern functions for dummy sensor
-extern void sensor_init_dummy( void **, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
+extern void sensor_init_common( void **, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
 extern int32_t get_calibrations_dummy( uint32_t wdr_mode, void *param );
-
-extern void sensor_init_imx477( void **, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
 
 
 // Context settings
@@ -33,8 +30,8 @@ extern void sensor_init_imx477( void **, uint8_t location, sensor_control_t *ctr
 static acamera_settings settings[FIRMWARE_CONTEXT_NUMBER] = {
 #if ( FIRMWARE_CONTEXT_NUMBER >= 1 )
     {
-        .sensor_init = sensor_init_imx477,
-        .sensor_name = "DUMMY",
+        .sensor_init = sensor_init_common,
+        .sensor_name = "COMMON",
 
         .sensor_options = {
             .is_remote = 1,
@@ -52,8 +49,8 @@ static acamera_settings settings[FIRMWARE_CONTEXT_NUMBER] = {
 #endif
 #if ( FIRMWARE_CONTEXT_NUMBER >= 2 )
     {
-        .sensor_init = sensor_init_imx477,
-        .sensor_name = "DUMMY",
+        .sensor_init = sensor_init_common,
+        .sensor_name = "COMMON",
 
         .sensor_options = {
             .is_remote = 1,
@@ -71,8 +68,8 @@ static acamera_settings settings[FIRMWARE_CONTEXT_NUMBER] = {
 #endif
 #if ( FIRMWARE_CONTEXT_NUMBER >= 3 )
     {
-        .sensor_init = sensor_init_imx477,
-        .sensor_name = "DUMMY",
+        .sensor_init = sensor_init_common,
+        .sensor_name = "COMMON",
 
         .sensor_options = {
             .is_remote = 1,
@@ -90,8 +87,8 @@ static acamera_settings settings[FIRMWARE_CONTEXT_NUMBER] = {
 #endif
 #if ( FIRMWARE_CONTEXT_NUMBER >= 4 )
     {
-        .sensor_init = sensor_init_imx477,
-        .sensor_name = "DUMMY",
+        .sensor_init = sensor_init_common,
+        .sensor_name = "COMMON",
 
         .sensor_options = {
             .is_remote = 1,

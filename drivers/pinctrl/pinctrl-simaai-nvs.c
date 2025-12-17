@@ -55,10 +55,9 @@ struct pcsimaai_pin_group {
 };
 
 struct pcsimaai_pin_plat {
-	struct pinctrl_pin_desc	*pins;
-	u32			num_pins;
 	const struct pcsimaai_pin_group *pin_groups;
 	u32			num_pin_groups;
+	const struct pinctrl_desc desc;
 };
 
 struct pcsimaai_pinctrl {
@@ -142,20 +141,6 @@ static const struct pcsimaai_pin_group pcsimaai_sdioemmcpin_groups[] = {
 	SIMAAI_NVS_PINGROUP(sdio),
 };
 
-struct pcsimaai_pin_plat spi_plat = {
-	.pins			= pcsimaai_spi_pins,
-	.num_pins		= ARRAY_SIZE(pcsimaai_spi_pins),
-	.pin_groups		= pcsimaai_spipin_groups,
-	.num_pin_groups		= ARRAY_SIZE(pcsimaai_spipin_groups)
-};
-
-struct pcsimaai_pin_plat sdioemmc_plat = {
-	.pins			= pcsimaai_sdioemmc_pins,
-	.num_pins		= ARRAY_SIZE(pcsimaai_sdioemmc_pins),
-	.pin_groups		= pcsimaai_sdioemmcpin_groups,
-	.num_pin_groups		= ARRAY_SIZE(pcsimaai_sdioemmcpin_groups)
-};
-
 static const struct pinconf_generic_params pcsimaai_custom_bindings[] = {
 	{"simaai,retention", SIMMAAI_NVS_PIN_CONFIG_RT, 0},
 	{"simaai,hysteresys", SIMMAAI_NVS_PIN_CONFIG_HYS, 0},
@@ -217,8 +202,8 @@ static int find_pin_id(struct pcsimaai_pinctrl *pctl, u32 pin)
 {
 	int i;
 
-	for(i = 0; i < pctl->plat->num_pins; i++) {
-		if(pctl->plat->pins[i].number == pin)
+	for(i = 0; i < pctl->plat->desc.npins; i++) {
+		if(pctl->plat->desc.pins[i].number == pin)
 			return i;
 	}
 
@@ -239,7 +224,7 @@ static int pcsimaai_pconf_get(struct pinctrl_dev *pctldev, unsigned int pin,
 	}
 
 	dev_dbg(pctl->dev, "Getting configuration for pin %s\n",
-		pctl->plat->pins[pinid].name);
+		pctl->plat->desc.pins[pinid].name);
 
 	switch (param) {
 	case SIMMAAI_NVS_PIN_CONFIG_RT:
@@ -296,7 +281,7 @@ static int pcsimaai_pconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 	}
 
 	dev_dbg(pctl->dev, "Setting configuration for pin %s\n",
-		pctl->plat->pins[pinid].name);
+		pctl->plat->desc.pins[pinid].name);
 
 	mutex_lock(&pctl->lock);
 
@@ -399,16 +384,40 @@ static const struct pinconf_ops pcsimaai_pconf_ops = {
 	.pin_config_group_set	= pcsimaai_pconf_group_set,
 };
 
-static struct pinctrl_desc pcsimaai_desc = {
-	.name			= "simaai-nvs-pinctrl",
-	.owner			= THIS_MODULE,
-	.pctlops		= &pcsimaai_pctrl_ops,
-	.confops		= &pcsimaai_pconf_ops,
-	.num_custom_params	= ARRAY_SIZE(pcsimaai_custom_bindings),
-	.custom_params		= pcsimaai_custom_bindings,
+struct pcsimaai_pin_plat spi_plat = {
+	.pin_groups		= pcsimaai_spipin_groups,
+	.num_pin_groups		= ARRAY_SIZE(pcsimaai_spipin_groups),
+	.desc			= {
+		.name		= "simaai-nvs-spi-pinctrl",
+		.owner		= THIS_MODULE,
+		.pctlops	= &pcsimaai_pctrl_ops,
+		.confops	= &pcsimaai_pconf_ops,
+		.pins		= pcsimaai_spi_pins,
+		.npins		= ARRAY_SIZE(pcsimaai_spi_pins),
+		.num_custom_params = ARRAY_SIZE(pcsimaai_custom_bindings),
+		.custom_params	= pcsimaai_custom_bindings,
 #ifdef CONFIG_DEBUG_FS
-	.custom_conf_items	= pcsimaai_conf_items,
+		.custom_conf_items = pcsimaai_conf_items,
 #endif
+	},
+};
+
+struct pcsimaai_pin_plat sdioemmc_plat = {
+	.pin_groups		= pcsimaai_sdioemmcpin_groups,
+	.num_pin_groups		= ARRAY_SIZE(pcsimaai_sdioemmcpin_groups),
+	.desc			= {
+		.name		= "simaai-nvs-sdioemmc-pinctrl",
+		.owner		= THIS_MODULE,
+		.pctlops	= &pcsimaai_pctrl_ops,
+		.confops	= &pcsimaai_pconf_ops,
+		.pins		= pcsimaai_sdioemmc_pins,
+		.npins		= ARRAY_SIZE(pcsimaai_sdioemmc_pins),
+		.num_custom_params = ARRAY_SIZE(pcsimaai_custom_bindings),
+		.custom_params	= pcsimaai_custom_bindings,
+#ifdef CONFIG_DEBUG_FS
+		.custom_conf_items = pcsimaai_conf_items,
+#endif
+	},
 };
 
 static int pcnvssimaai_probe(struct platform_device *pdev)
@@ -430,10 +439,7 @@ static int pcnvssimaai_probe(struct platform_device *pdev)
 	if (!pctl->plat)
 		return -ENOENT;
 
-	pcsimaai_desc.pins	= pctl->plat->pins,
-	pcsimaai_desc.npins	= pctl->plat->num_pins;
-
-	err = devm_pinctrl_register_and_init(&pdev->dev, &pcsimaai_desc, pctl, &pctl->pctl);
+	err = devm_pinctrl_register_and_init(&pdev->dev, &pctl->plat->desc, pctl, &pctl->pctl);
 	if (err)
 		return err;
 

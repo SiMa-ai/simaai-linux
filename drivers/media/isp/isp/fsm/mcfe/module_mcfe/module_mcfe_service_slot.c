@@ -245,48 +245,8 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
     LOG( LOG_INFO, "Slot: %d , Top configuration [width = %d, height = %d, rggb_start = %d, cfa_pattern = %d].", slot_id, width, height, rggb_start, cfa_pattern );
     isp_hwif_top_config( slot_cfg->cdma_addr, width, height, rggb_start, cfa_pattern );
 
-//Bypass the blocks not needed for now
-#if 1    
-    //acamera_isp_pipeline_isp_raw_bypass_write(slot_cfg->cdma_addr,1);
-    //acamera_isp_pipeline_bypass_demosaic_write(slot_cfg->cdma_addr,1);
-    //acamera_isp_pipeline_bypass_input_formatter_write(slot_cfg->cdma_addr,1);    
-    
-    acamera_isp_pipeline_bypass_crop_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_radial_shading_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_sensor_offset_linear_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_ca_correction_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_wdr_gain_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_sensor_offset_wdr_write(slot_cfg->cdma_addr,1);
 
-    acamera_isp_pipeline_bypass_digital_gain_iridix_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_iridix_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_mesh_shading_write(slot_cfg->cdma_addr,1);
-    //acamera_isp_pipeline_bypass_white_balance_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_gamma_be_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_sinter_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_digital_gain_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_gamma_fe_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_frame_stitch_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_defect_pixel_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_raw_frontend_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_video_test_gen_write(slot_cfg->cdma_addr,1);
-    acamera_isp_pipeline_bypass_channel_switch_write(slot_cfg->cdma_addr,1);
-
-	// NEW ARM setting
-    acamera_isp_pipeline_bypass_white_balance_write(slot_cfg->cdma_addr,0);
-    acamera_isp_pipeline_bypass_out_format_write(slot_cfg->cdma_addr, 0);
-    acamera_isp_pipeline_bypass_gamma_be_sq_write( slot_cfg->cdma_addr, 0);
-    acamera_isp_pipeline_bypass_gamma_fe_sq_write( slot_cfg->cdma_addr, 0);
-    acamera_isp_offset_black_00_write( slot_cfg->cdma_addr, 0xF0000 );
-    acamera_isp_offset_black_01_write( slot_cfg->cdma_addr, 0xF0000 );
-    acamera_isp_offset_black_10_write( slot_cfg->cdma_addr, 0xF0000);
-    acamera_isp_offset_black_11_write( slot_cfg->cdma_addr, 0xF0000 );
-    acamera_isp_white_balance_gain_00_write(slot_cfg->cdma_addr, 1008);
-    acamera_isp_white_balance_gain_01_write(slot_cfg->cdma_addr, 450);
-    acamera_isp_white_balance_gain_10_write(slot_cfg->cdma_addr, 450);
-    acamera_isp_white_balance_gain_11_write(slot_cfg->cdma_addr, 720);
-
-
+	// SIMA.AI config for FIFO
 	//************************************************************************
 	acamera_frontend_mcbe_wdma_max_awlen_write(PHY_ADDR_ISP, 7);
 	//acamera_frontend_mcbe_wdma_fifo_watermark_write(PHY_ADDR_ISP, 8);
@@ -318,7 +278,6 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
 
 	//*******************************************************************************
 
-#if 1
 	acamera_frontend_mcfe_enable_flow_control_write(PHY_ADDR_ISP, 1);
 	acamera_frontend_mcbe_enable_flow_control_write(PHY_ADDR_ISP, 1);
 
@@ -326,20 +285,7 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
 	acamera_frontend_mcbe_fifo2_watermark_write(PHY_ADDR_ISP, 240);
 	acamera_frontend_mcbe_fifo3_watermark_write(PHY_ADDR_ISP, 240);
 	acamera_frontend_mcbe_fifo4_watermark_write(PHY_ADDR_ISP, 240);
-#endif
 
-#if 0
-	acamera_frontend_mcfe_enable_flow_control_write(slot_cfg->cdma_addr, 1);
-	acamera_frontend_mcbe_enable_flow_control_write(slot_cfg->cdma_addr, 1);
-
-	acamera_frontend_mcbe_fifo1_watermark_write(slot_cfg->cdma_addr, 120);
-	acamera_frontend_mcbe_fifo2_watermark_write(slot_cfg->cdma_addr, 120);
-	acamera_frontend_mcbe_fifo3_watermark_write(slot_cfg->cdma_addr, 120);
-	acamera_frontend_mcbe_fifo4_watermark_write(slot_cfg->cdma_addr, 120);
-
-#endif
-#endif
-    
     return rc;
 }
 

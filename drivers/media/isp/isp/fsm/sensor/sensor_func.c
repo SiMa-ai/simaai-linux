@@ -66,7 +66,6 @@ void sensor_init( sensor_fsm_ptr_t p_fsm )
     acamera_isp_offset_black_10_write( p_ictx->settings.isp_base, OFFSET_BLACK_DEFAULT );
     acamera_isp_offset_black_11_write( p_ictx->settings.isp_base, OFFSET_BLACK_DEFAULT );
 
-    acamera_isp_pipeline_bypass_sensor_offset_wdr_write( p_ictx->settings.isp_base, 0 );
     acamera_isp_pipeline_bypass_sensor_offset_linear_write( p_ictx->settings.isp_base, 0 );
 
     // Initialise remote sensor callbacks

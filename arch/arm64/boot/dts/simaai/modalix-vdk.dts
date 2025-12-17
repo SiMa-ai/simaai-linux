@@ -12,8 +12,8 @@
 
 	chosen {
 		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
-		linux,initrd-start = <0x11 0x88000000>;
-		linux,initrd-end = <0x11 0x89400000>;
+		linux,initrd-start = <0x10 0x7D000000>;
+		linux,initrd-end = <0x10 0x7E400000>;
 	};
 
 	aliases {
@@ -25,7 +25,7 @@
 	memory@1000000000 {
 		device_type = "memory";
 		reg = <0x00000010 0x00000000 0x00000000 0x6FC00000
-			0x00000011 0x80000000 0x00000002 0x80000000>;
+			0x00000010 0x75000000 0x00000003 0x8B000000>;
 	};
 
 	virtio@20000000 {
@@ -209,4 +209,25 @@
 
 &dms3_1 {
 	status = "disabled";
+};
+
+&xgmac0 {
+	/delete-property/ snps,apbxpcs;
+	/delete-property/ snps,axi-config;
+	/delete-property/ snps,xpcs_skip_reset;
+
+	reg = <0 0x0A800000 0 0x3900>;
+
+	interrupts = <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "macirq";
+
+	phy-mode = "gmii";
+	snps,txpbl = <2>;
+	snps,rxpbl = <2>;
+	snps,no-pbl-x8;
+	snps,force_sf_dma_mode;
+	snps,aal;
+	snps,tso;
+
+	status = "okay";
 };

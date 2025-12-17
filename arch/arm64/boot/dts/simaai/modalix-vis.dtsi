@@ -46,13 +46,11 @@
 		reg = <0x0 0x04240000 0 0x420>;
 		simaai,stu-gfill-value = <0x0>;
 		simaai,stu-table = <0 0x0>,
-				   <1 0x84>,
-				   <2 0x85>,
-				   <3 0x86>,
-				   <4 0x87>,
-				   <5 0x88>,
-				   <6 0x89>,
-				   <7 0x8A>;
+				   <1 0x80>,
+				   <2 0x81>,
+				   <3 0x82>,
+				   <4 0x83>,
+				   <5 0x84>;
 	};
 
 	evxx: simaai,evxx-rproc@0 {
@@ -226,7 +224,7 @@
 		reg = <0x0 0x04220000 0x0 0x00020000>;
 		interrupts = <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "ISP";
-		memory-region = <&video_reserved>;
+		memory-region = <&cma_reserved>;
 		simaai,stu = <&isp_stu>;
 		dmas = <&axi_vdma_vis0 0>, <&axi_vdma_vis1 0>, <&axi_vdma_vis2 0>, <&axi_vdma_vis3 0>;
 		dma-names = "vdma0", "vdma1" ,"vdma2", "vdma3";

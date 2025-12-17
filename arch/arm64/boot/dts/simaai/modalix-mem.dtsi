@@ -38,6 +38,11 @@
 			no-map;
 		};
 
+		isp_cdma_reserved: isp_cdma@0x1074000000 {
+			no-map;
+			reg = <0x00000010 0x74000000 0x00000000 0x01000000>;
+		};
+
 		ocm_reserved: ocm@0 {
 			compatible = "shared-dma-pool";
 			no-map;
@@ -58,17 +63,7 @@
 			reg = <0x0 0x600000 0x0 0x200000>;
 		};
 
-		isp_cdma_reserved: isp_cdma@0x1080000000 {
-			no-map;
-			reg = <0x00000010 0x80000000 0x00000000 0x01000000>;
-		};
 
-		video_reserved: video@0x1081000000 {
-			compatible = "shared-dma-pool";
-			no-map;
-			simaai,skip-memset-in-alloc;
-			reg = <0x00000010 0x81000000 0x00000000 0xFF000000>;
-		};
 	};
 
 	dmacpy: simaai,memcpy-manager {

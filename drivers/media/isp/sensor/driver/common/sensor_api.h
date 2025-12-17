@@ -135,6 +135,8 @@ typedef struct _sensor_mode_t {
     const uint8_t wdr_mode;              // The wdr mode.
     const uint8_t exposures;             // How many exposures this mode supports.
     const uint8_t num_channels;          // How many virtual channels are in this mode.
+    const uint32_t vmax;		 // Added to know the current mode's frame length to be used in AE
+    const uint32_t hmax;		 // Added to know the current mode's clock number per line to be used in AE
 } sensor_mode_t;
 
 // Function prototypes to support remote sensors

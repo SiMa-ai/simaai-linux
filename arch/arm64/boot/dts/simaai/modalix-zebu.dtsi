@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix.dtsi"
+
+/ {
+	model = "SiMa.ai Modalix Zebu";
+
+	chosen {
+		bootargs = "earlycon=uart8250,mmio32,0x04006000 console=ttyS0,15625000n8 root=/dev/ram0 rw rootfstype=ramfs";
+		linux,initrd-start = <0x10 0x7D000000>;
+		linux,initrd-end = <0x10 0xA2E00000>;
+	};
+
+	aliases {
+		console   = &uart00;
+	};
+
+	memory@1000000000 {
+		device_type = "memory";
+		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
+				0x00000010 0x75000000 0x00000000 0xAB000000>;
+	};
+};
+
+&dms0_reserved {
+	// 2.5GiB for DMS0 region
+	reg = <0x00000011 0x20000000 0x00000000 0xA0000000>;
+};
+
+&sio0 {
+	status = "okay";
+};
+
+&uart00 {
+	status = "okay";
+};
+
+&nvs {
+	status = "disabled";
+};
+
+&pvt0 {
+	status = "disabled";
+};
+
+&isp_stu {
+	status = "disabled";
+};
+
+&dmac00 {
+	status = "disabled";
+};
+
+&dmac10 {
+	status = "disabled";
+};
+
+&dmac20 {
+	status = "disabled";
+};
+
+&dmac30 {
+	status = "disabled";
+};
+
+&dmac40 {
+	status = "disabled";
+};
+
+&dmac50 {
+	status = "disabled";
+};
+
+&dmac60 {
+	status = "disabled";
+};
+
+&dmac70 {
+	status = "disabled";
+};
+
+&dmac0 {
+	status = "disabled";
+};
+
+&dmac1 {
+	status = "disabled";
+};
+
+&mipi_dphy_rx0 {
+	status = "disabled";
+};
+
+&mipi_dphy_rx1 {
+	status = "disabled";
+};
+
+&mipi_dphy_rx2 {
+	status = "disabled";
+};
+
+&mipi_dphy_rx3 {
+	status = "disabled";
+};

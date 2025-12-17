@@ -18859,6 +18859,41 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/i3c/silvaco,i3c-master.yaml
 F:	drivers/i3c/master/svc-i3c-master.c
 
+SIMAAI SIO CLOCK DIVIDER DRIVER
+M:	Yurii Konovalenko <orientua@gmail.com>
+S:	Supported
+F:	Documentation/devicetree/bindings/clock/simaai,clkdiv-sio.yaml
+F:	drivers/clk/clk-simaai-siodiv.c
+
+SIMAAI DEVICE TREE SUPPORT
+M:	Yurii Konovalenko <orientua@gmail.com>
+M:	Arun Kumar <arun.kumar@sima.ai>
+M:	Nilesh Raghuvanshi <nilesh.r@sima.ai>
+M:	Gopal Devarapu <gopal.devarapu@sima.ai>
+S:	Supported
+F:	arch/arm64/boot/dts/simaai/
+
+SIMAAI SIO AND NVS PINCTRL AND PINMUX DRIVER
+M:	Yurii Konovalenko <orientua@gmail.com>
+S:	Supported
+F:	Documentation/devicetree/bindings/pinctrl/simaai,pinctrl-sio.yaml
+F:	Documentation/devicetree/bindings/pinctrl/simaai,pinctrl-nvs.yaml
+F:	drivers/clk/pinctrl-simaai-sio.c
+F:	drivers/clk/pinctrl-simaai-nvs.c
+F:	include/dt-bindings/pinctrl/pinctrl-simaai-sio.h
+
+SIMAAI SIO RESET DRIVER
+M:	Yurii Konovalenko <orientua@gmail.com>
+S:	Supported
+F:	Documentation/devicetree/bindings/reset/simaai,sio-reset.yaml
+F:	drivers/reset/simaai-sio-reset.c
+
+SIMAAI STU DRIVER
+M:	Nilesh Raghuvanshi <nilesh.r@sima.ai>
+S:	Supported
+F:	Documentation/devicetree/bindings/misc/simaai,stu.yaml
+F:	drivers/misc/simaai-stu.c
+
 SIMPLEFB FB DRIVER
 M:	Hans de Goede <hdegoede@redhat.com>
 L:	linux-fbdev@vger.kernel.org

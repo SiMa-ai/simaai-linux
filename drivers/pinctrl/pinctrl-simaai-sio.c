@@ -37,6 +37,17 @@
 #define SIMMAAI_SIO_PIN_CONFIG_HYS	(PIN_CONFIG_END + 2)
 #define SIMMAAI_SIO_PIN_CONFIG_ODPOL	(PIN_CONFIG_END + 3)
 
+/* Allowed mA values */
+#define PCSIMA_DRIVE_MA_MIN      2
+#define PCSIMA_DRIVE_MA_MAX      8
+#define PCSIMA_DRIVE_MA_STEP     2
+
+/* Encoded field values */
+#define PCSIMA_FIELD_2MA         0x00
+#define PCSIMA_FIELD_4MA         0x11
+#define PCSIMA_FIELD_6MA         0x22
+#define PCSIMA_FIELD_8MA         0x33
+
 #define pcsimaai_spioe			0x7
 #define pcsimaai_spiie			0xf
 #define pcsimaai_i2coe			0x3
@@ -304,11 +315,16 @@ static int pcsimaai_pmx_set(struct pinctrl_dev *pctldev, unsigned int func,
 	return 0;
 }
 
-///TODO: Implement actual mA to field conversion
-
 static u32 pcsimaai_pconf_mA_to_field(u32 mA)
 {
-	return mA & 0xf;
+        /* validate mA */
+        if (mA < PCSIMA_DRIVE_MA_MIN ||
+            mA > PCSIMA_DRIVE_MA_MAX ||
+            (mA % PCSIMA_DRIVE_MA_STEP))
+                return PCSIMA_FIELD_2MA; //safe fallback
+
+        /* Convert: 2 → 0x0, 4 → 0x1, 6 → 0x2, 8 → 0x3 */
+        return ((mA / 2) - 1) * 0x1;
 }
 
 static u32 pcsimaai_pconf_field_to_mA(u32 field)
@@ -419,6 +435,7 @@ static int pcsimaai_pconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 			break;
 		case PIN_CONFIG_DRIVE_STRENGTH:
 			val = pcsimaai_pconf_mA_to_field(arg);
+			val = val << (pin * 4);
 			mask = 0xf << (pin * 4);
 			offset = SIMMAAI_SIO_STR_ADDR;
 			break;

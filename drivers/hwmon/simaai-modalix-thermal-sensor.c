@@ -13,9 +13,6 @@
 #include <linux/delay.h>
 #include "simaai-modalix-pvt-addr-map.h"
 
-/* --- Register Offsets --- */
-#define PVT_CK_RST 0x514
-
 /* --- Constants --- */
 #define SDIF_BUSY_BIT BIT(0)
 #define SDIF_LOCK_BIT BIT(1)
@@ -74,7 +71,6 @@
 
 struct thermal_priv {
 	void __iomem *pvt_base; /* Base address for PVT block */
-	void __iomem *prc_base; /* Base address for PRC block */
 	struct device *dev; /* Back-reference to device */
 	struct device *hwmon_dev; /* HWMON registered device */
 	struct mutex lock; /* Per-device lock */
@@ -292,7 +288,7 @@ static const struct hwmon_chip_info thermal_chip_info = {
 static int thermal_sensor_probe(struct platform_device *pdev)
 {
 	struct thermal_priv *priv;
-	u32 data, pvt_ck_rst_val;
+	u32 data;
 	int ret;
 
 	dev_dbg(&pdev->dev, "thermal_sensor probe started\n");
@@ -308,24 +304,7 @@ static int thermal_sensor_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->pvt_base))
 		return PTR_ERR(priv->pvt_base);
 
-	priv->prc_base = devm_platform_ioremap_resource_byname(pdev, "prc");
-	if (IS_ERR(priv->prc_base))
-		return PTR_ERR(priv->prc_base);
-
 	dev_dbg(&pdev->dev, "pvt base = %p\n", priv->pvt_base);
-	dev_dbg(&pdev->dev, "prc base = %p\n", priv->prc_base);
-
-	/* Mandatory DT property: fail if not present */
-	ret = of_property_read_u32(pdev->dev.of_node, "pvt-ck-rst-val",
-				   &pvt_ck_rst_val);
-	if (ret) {
-		dev_err(&pdev->dev,
-			"Missing required property: pvt-ck-rst-val\n");
-		return ret;
-	}
-
-	/* Write reset value */
-	iowrite32(pvt_ck_rst_val, priv->prc_base + PVT_CK_RST);
 
 	/* Verify hardware identity */
 	data = ioread32(priv->pvt_base +
@@ -391,8 +370,7 @@ static int thermal_sensor_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, priv);
 
-	dev_info(&pdev->dev, "thermal sensor probed successfully, reset=0x%x\n",
-		 pvt_ck_rst_val);
+	dev_info(&pdev->dev, "thermal sensor probed successfully");
 	return 0;
 }
 

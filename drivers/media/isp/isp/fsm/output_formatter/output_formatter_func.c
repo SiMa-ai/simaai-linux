@@ -407,7 +407,6 @@ static int32_t output_formatter_config_format( output_formatter_fsm_ptr_t p_fsm 
 
         // RAW formats
         case OUT_FORMAT_OUTPUT_MODE_RAW8:
-            printk("OUTPUT FORMAT RAW8\n");	    
             cfg->num_planes = 1;
             cfg->plane[0].axi = 1;
             cfg->plane[0].axi_format = OUT_FORMAT_AXI_FORMAT_RAW_RAW8;
@@ -420,7 +419,6 @@ static int32_t output_formatter_config_format( output_formatter_fsm_ptr_t p_fsm 
             break;
 
         case OUT_FORMAT_OUTPUT_MODE_RAW12:
-	    printk("OUT_FORMAT_OUTPUT_MODE_RAW12\n");
             cfg->num_planes = 1;
             cfg->plane[0].axi = 1;
             cfg->plane[0].axi_format = OUT_FORMAT_AXI_FORMAT_RAW_RAW12_DENSE;
@@ -695,7 +693,6 @@ static int32_t output_formatter_config_format( output_formatter_fsm_ptr_t p_fsm 
             break;
 
         case OUT_FORMAT_OUTPUT_MODE_RGB888:
-            printk("select OUT_FORMAT_OUTPUT_MODE_RGB888");	    
             cfg->num_planes = 1;
             cfg->plane[0].axi = 1;
             cfg->plane[0].axi_format = OUT_FORMAT_AXI_FORMAT_RGB_RGB24;

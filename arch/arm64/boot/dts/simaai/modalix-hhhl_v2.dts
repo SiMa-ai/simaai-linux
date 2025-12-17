@@ -37,12 +37,12 @@
 
 			trips {
 				board_alert: board-alert {
-					temperature = <50000>;
+					temperature = <75000>;
 					hysteresis = <3000>;
 					type = "active";
 				};
 				board_crit: board-crit {
-					temperature = <70000>;
+					temperature = <85000>;
 					hysteresis = <2000>;
 					type = "critical";
 				};
@@ -85,7 +85,6 @@
 };
 
 &nvs_sdhci1 {
-	max-frequency = <25000000>;
 	status = "okay";
 };
 
