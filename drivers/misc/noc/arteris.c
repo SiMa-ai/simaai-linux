@@ -22,7 +22,7 @@ struct noc_device {
   dev_t dev_num;
   struct device *dev;
   struct cdev cdev;
-  struct class *dev_class;
+  struct class dev_class;
 };
 
 struct nocDesc {
@@ -452,19 +452,20 @@ static int noc_platform_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	nocdev->dev_class = class_create(THIS_MODULE, SIMAAI_NOC_DEV_NAME);
-	if (IS_ERR(nocdev->dev_class)) {
+	nocdev->dev_class.name = SIMAAI_NOC_DEV_NAME;
+	ret = class_register(&nocdev->dev_class);
+	if (ret) {
 		dev_err(dev, "Failed: class_create\n");
-		ret = PTR_ERR(nocdev->dev_class);
 		/*TODO: Clean-up exit*/
 		return ret;
 	}
 
-	sysDev = device_create(nocdev->dev_class, NULL, nocdev->dev_num, NULL,
+	sysDev = device_create(&nocdev->dev_class, NULL, nocdev->dev_num, NULL,
 			       SIMAAI_NOC_DEV_NAME);
 	if (IS_ERR(sysDev)) {
 		dev_err(dev, "Could not create a sysfs entry\n");
-		ret = PTR_ERR(nocdev->dev_class);
+		ret = PTR_ERR(sysDev);
+		class_unregister(&nocdev->dev_class);
 		/*TODO: Clean-up exit*/
 		return ret;
 	}
@@ -485,19 +486,17 @@ static int noc_platform_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int noc_platform_remove(struct platform_device *pdev)
+static void noc_platform_remove(struct platform_device *pdev)
 {
 	struct noc_device *nocdev = (struct noc_device *)platform_get_drvdata(pdev);
 	struct device *dev = &pdev->dev;
 	dev_info(dev, "Removing platform device: %s\n", SIMAAI_NOC_DEV_NAME);
 
 	// Remove cdev and unregister device number
-	device_destroy(nocdev->dev_class, nocdev->dev_num);
-	class_destroy(nocdev->dev_class);
+	device_destroy(&nocdev->dev_class, nocdev->dev_num);
+	class_unregister(&nocdev->dev_class);
 	cdev_del(&nocdev->cdev);
 	unregister_chrdev_region(nocdev->dev_num, 1);
-
-	return 0;
 }
 
 static const struct of_device_id noc_platform_of_match[] = {

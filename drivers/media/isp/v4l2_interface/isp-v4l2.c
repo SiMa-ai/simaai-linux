@@ -38,7 +38,6 @@
 #include "isp-vb2.h"
 
 #define ISP_V4L2_NUM_INPUTS 1
-#define MIPI_ISP_INTEGRATION 1
 
 // Default device capabilities for capture and memory-to-memory modes
 #define ISP_V4L2_DEVICE_CAPS_CAP ( V4L2_CAP_VIDEO_CAPTURE_MPLANE | V4L2_CAP_STREAMING | V4L2_CAP_READWRITE )
@@ -46,6 +45,8 @@
 
 /* isp_v4l2_dev_t to destroy video device */
 static isp_v4l2_dev_t *g_isp_v4l2_devs[FIRMWARE_CONTEXT_NUMBER];
+
+extern struct platform_device *g_pdev;
 
 /**
  * @brief Payload data structure for V4L2_EVENT_ACAMERA_FRAME_READY event
@@ -111,24 +112,11 @@ static int isp_v4l2_cap_fop_open( struct file *file )
         goto vb2_q_fail;
     }
 
-    /* update dma channel */
-    //dev->pstreams[stream_type]->dma = dev->dma;
-	//LOG (LOG_INFO, "DMA assigned");
-
-    /* powering on MIPI CSI */
-    if(stream_type == V4L2_STREAM_TYPE_RAW) {
-
-		rc = (dev->sd[SD_MIPI_CSI])->ops->core->s_power(dev->sd[SD_MIPI_CSI], 1);
-		if( rc < 0 ) {
-			LOG( LOG_ERR, "ERROR : calling power on subdev operation on MIPI CSI: %d\n", rc);
-		}
-	}
-
     // Update file private data and initialize file handle
     file->private_data = pstream;
 
     v4l2_fh_init( &pstream->fh, video_dev );
-    v4l2_fh_add( &pstream->fh );
+    v4l2_fh_add( &pstream->fh, file );
 
     /* update open counter */
     atomic_add( 1, &dev->opened );
@@ -198,7 +186,7 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
     file->private_data = pstream;
 
     v4l2_fh_init( &pstream->fh, video_dev );
-    v4l2_fh_add( &pstream->fh );
+    v4l2_fh_add( &pstream->fh, file );
 
     /* update open counter */
     atomic_add( 1, &dev->opened );
@@ -239,23 +227,13 @@ static int isp_v4l2_cap_fop_release( struct file *file )
         mutex_unlock( pstream->vb2_q.lock );
     }
 
-	/* powering off MIPI CSI */
-	if (pstream->stream_type  == V4L2_STREAM_TYPE_RAW) {
-		if((dev->sd[SD_MIPI_CSI])->ops->core->s_power) {
-			rc = (dev->sd[SD_MIPI_CSI])->ops->core->s_power(dev->sd[SD_MIPI_CSI], 0);
-			if( rc < 0 ) {
-				LOG( LOG_ERR, "ERROR : calling power off subdev operation on MIPI CSI: %d\n", rc);
-			}
-		}	
-	}
-
     // Update device stream pointers
     if ( pstream->stream_type < V4L2_STREAM_TYPE_MAX ) {
         dev->pstreams[pstream->stream_type] = NULL;
     }
 
     // Release file handle
-    v4l2_fh_del( &pstream->fh );
+    v4l2_fh_del( &pstream->fh, file);
     v4l2_fh_exit( &pstream->fh );
 
     // Free stream memory
@@ -288,7 +266,7 @@ static int isp_v4l2_m2m_fop_release( struct file *file )
     v4l2_m2m_ctx_release( pstream->fh.m2m_ctx );
 
     // Release file handle
-    v4l2_fh_del( &pstream->fh );
+    v4l2_fh_del( &pstream->fh, file);
     v4l2_fh_exit( &pstream->fh );
 
     // Free stream memory
@@ -437,14 +415,14 @@ static int isp_v4l2_g_fmt_vid_cap( struct file *file, void *priv, struct v4l2_fo
 
     LOG( LOG_DEBUG, "v4l2_format: type: %u, w: %u, h: %u, pixelformat: 0x%x, field: %u, colorspace: %u, sizeimage: %u, bytesperline: %u, flags: %u",
          f->type,
-         f->fmt.pix.width,
-         f->fmt.pix.height,
-         f->fmt.pix.pixelformat,
-         f->fmt.pix.field,
-         f->fmt.pix.colorspace,
-         f->fmt.pix.sizeimage,
-         f->fmt.pix.bytesperline,
-         f->fmt.pix.flags );
+         f->fmt.pix_mp.width,
+         f->fmt.pix_mp.height,
+         f->fmt.pix_mp.pixelformat,
+         f->fmt.pix_mp.field,
+         f->fmt.pix_mp.colorspace,
+         f->fmt.pix_mp.plane_fmt[0].sizeimage,
+         f->fmt.pix_mp.plane_fmt[0].bytesperline,
+         f->fmt.pix_mp.flags );
 
     return 0;
 }
@@ -459,14 +437,14 @@ static int isp_v4l2_g_fmt_vid_out( struct file *file, void *priv, struct v4l2_fo
 
     LOG( LOG_DEBUG, "v4l2_format: type: %u, w: %u, h: %u, pixelformat: 0x%x, field: %u, colorspace: %u, sizeimage: %u, bytesperline: %u, flags: %u",
          f->type,
-         f->fmt.pix.width,
-         f->fmt.pix.height,
-         f->fmt.pix.pixelformat,
-         f->fmt.pix.field,
-         f->fmt.pix.colorspace,
-         f->fmt.pix.sizeimage,
-         f->fmt.pix.bytesperline,
-         f->fmt.pix.flags );
+         f->fmt.pix_mp.width,
+         f->fmt.pix_mp.height,
+         f->fmt.pix_mp.pixelformat,
+         f->fmt.pix_mp.field,
+         f->fmt.pix_mp.colorspace,
+         f->fmt.pix_mp.plane_fmt[0].sizeimage,
+         f->fmt.pix_mp.plane_fmt[0].bytesperline,
+         f->fmt.pix_mp.flags );
 
     return 0;
 }
@@ -475,7 +453,7 @@ static int isp_v4l2_enum_fmt_vid_cap( struct file *file, void *priv, struct v4l2
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
     return isp_v4l2_stream_enum_format( pstream, V4L2_STREAM_DIRECTION_CAP, f );
 }
@@ -484,7 +462,7 @@ static int isp_v4l2_enum_fmt_vid_out( struct file *file, void *priv, struct v4l2
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
     return isp_v4l2_stream_enum_format( pstream, V4L2_STREAM_DIRECTION_OUT, f );
 }
@@ -493,7 +471,7 @@ static int isp_v4l2_try_fmt_vid_cap( struct file *file, void *priv, struct v4l2_
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
     return isp_v4l2_stream_try_format( pstream, V4L2_STREAM_DIRECTION_CAP, f );
 }
@@ -502,7 +480,7 @@ static int isp_v4l2_try_fmt_vid_out( struct file *file, void *priv, struct v4l2_
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
     return isp_v4l2_stream_try_format( pstream, V4L2_STREAM_DIRECTION_OUT, f );
 }
@@ -513,7 +491,6 @@ static int isp_v4l2_s_fmt_vid_cap( struct file *file, void *priv, struct v4l2_fo
 	isp_v4l2_dev_t *dev = video_drvdata( file );
     struct vb2_queue *q;
 	int rc =0;
-	struct v4l2_subdev_format fmt;
 
     // Check stream type and get correct vb queue pointer
     if ( pstream->stream_type == V4L2_STREAM_TYPE_M2M ) {
@@ -533,42 +510,7 @@ static int isp_v4l2_s_fmt_vid_cap( struct file *file, void *priv, struct v4l2_fo
         return rc;
     }
 
-    if (pstream->stream_type == V4L2_STREAM_TYPE_RAW) {
-        fmt.format.width = f->fmt.pix.width;
-        fmt.format.height = f->fmt.pix.height;
-		fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-		fmt.pad = 0; // TODO : hard coded to 0. Need better way to get this
-
-		//LOG( LOG_INFO, "S_FMT RAW data \n" );
-        if (f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_SRGGB8)
-            fmt.format.code = MEDIA_BUS_FMT_SRGGB8_1X8;
-        else if (f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_SRGGB12)
-            fmt.format.code = MEDIA_BUS_FMT_SRGGB12_1X12;
-        else if (f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_SRGGB14)
-            fmt.format.code = MEDIA_BUS_FMT_SRGGB14_1X14;
-		else if (f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_SRGGB16)	
-            fmt.format.code = MEDIA_BUS_FMT_SRGGB16_1X16;	
-		else {
-            LOG( LOG_ERR, "Unsupported isp_v4l2_stream_set_format RAW failed" );
-	    	return -EINVAL;          
-		}
-
-		fmt.format.colorspace = V4L2_COLORSPACE_SRGB;
-
-		rc = (dev->sd[SD_MIPI_CSI])->ops->pad->set_fmt(dev->sd[SD_MIPI_CSI], NULL, &fmt);
-		if ( rc < 0) {
-			LOG( LOG_ERR, "ERROR calling set_fmt direct on subdevice rc = %d, %#llx\n", rc, dev->sd[SD_MIPI_CSI]);
-			return rc;
-		}
-		rc = (dev->sd[SD_CAMERA])->ops->pad->set_fmt(dev->sd[SD_CAMERA], NULL, &fmt);
-		if ( rc < 0) {
-			LOG( LOG_ERR, "ERROR calling set_fmt direct on subdevice rc = %d, %#llx\n", rc, dev->sd[SD_CAMERA]);
-			return rc;
-		}	
-		LOG(LOG_INFO,"SUCCESS : invoking set_fmt on mipi subdev\n");
-    }
-
-    return 0;
+    return rc;
 }
 
 static int isp_v4l2_s_fmt_vid_out( struct file *file, void *priv, struct v4l2_format *f )
@@ -583,7 +525,7 @@ static int isp_v4l2_s_fmt_vid_out( struct file *file, void *priv, struct v4l2_fo
         q = &pstream->vb2_q;
     }
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
     if ( vb2_is_busy( q ) ) {
         return -EBUSY;
     }
@@ -601,9 +543,45 @@ static int isp_v4l2_enum_framesizes( struct file *file, void *priv, struct v4l2_
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
-    return isp_v4l2_stream_enum_framesizes( pstream, V4L2_STREAM_DIRECTION_CAP, fsize );
+	switch (fsize->pixel_format) {
+		case V4L2_PIX_FMT_SRGGB8:
+		case V4L2_PIX_FMT_SRGGB10:
+		case V4L2_PIX_FMT_SRGGB12:
+		case V4L2_PIX_FMT_SRGGB14:
+		case V4L2_PIX_FMT_SRGGB16:
+		case V4L2_PIX_FMT_SGRBG8:
+		case V4L2_PIX_FMT_SGRBG10:
+		case V4L2_PIX_FMT_SGRBG12:
+		case V4L2_PIX_FMT_SGRBG14:
+		case V4L2_PIX_FMT_SGRBG16:
+		case V4L2_PIX_FMT_SGBRG8:
+		case V4L2_PIX_FMT_SGBRG10:
+		case V4L2_PIX_FMT_SGBRG12:
+		case V4L2_PIX_FMT_SGBRG14:
+		case V4L2_PIX_FMT_SGBRG16:
+		case V4L2_PIX_FMT_SBGGR8:
+		case V4L2_PIX_FMT_SBGGR10:
+		case V4L2_PIX_FMT_SBGGR12:
+		case V4L2_PIX_FMT_SBGGR14:
+		case V4L2_PIX_FMT_SBGGR16:
+		{
+			LOG (LOG_DEBUG, " OUT :%#x", fsize->pixel_format);
+			return isp_v4l2_stream_enum_framesizes( pstream, V4L2_STREAM_DIRECTION_OUT, fsize );
+		}
+		case V4L2_PIX_FMT_RGB24:
+		case V4L2_PIX_FMT_ABGR32:
+		case V4L2_PIX_FMT_NV12:
+		{
+			LOG (LOG_DEBUG, " CAP :%#x", fsize->pixel_format);
+			return isp_v4l2_stream_enum_framesizes( pstream, V4L2_STREAM_DIRECTION_CAP, fsize );
+		}
+		default:
+			LOG (LOG_ERR, "unspported type %#x", fsize->pixel_format);
+	}
+
+	return -EINVAL;
 }
 
 /* Per-stream control operations */
@@ -636,14 +614,6 @@ static int isp_v4l2_cap_streamon( struct file *file, void *priv, enum v4l2_buf_t
         isp_v4l2_stream_off( pstream, V4L2_STREAM_DIRECTION_CAP, dev->stream_on_mask );
         return rc;
     }
-	if (pstream->stream_type  == V4L2_STREAM_TYPE_OUT) {
-		rc = (dev->sd[SD_CAMERA])->ops->video->s_stream(dev->sd[SD_CAMERA], 1);
-		if ( rc < 0) {
-		     LOG( LOG_ERR, "ERROR calling set_fmt direct on subdevice rc = %d, %#llx\n", rc, dev->sd[SD_CAMERA]);
-	    	 return rc;
-		}	
-		LOG (LOG_INFO, "stream ON called on camera");
-	}
 
     if ( rc > 0 ) {
         set_bit( pstream->stream_type, &dev->stream_on_mask );
@@ -697,15 +667,6 @@ static int isp_v4l2_cap_streamoff( struct file *file, void *priv, enum v4l2_buf_
     if ( isp_v4l2_is_q_busy( &pstream->vb2_q, file ) ) {
         return -EBUSY;
     }
-
-	if (pstream->stream_type  == V4L2_STREAM_TYPE_OUT) {
-		rc = (dev->sd[SD_CAMERA])->ops->video->s_stream(dev->sd[SD_CAMERA], 0);
-		if ( rc < 0) {
-		     LOG( LOG_ERR, "ERROR calling set_fmt direct on subdevice rc = %d, %#llx\n", rc, dev->sd[SD_CAMERA]);
-	    	 return rc;
-		}	
-		LOG (LOG_INFO, "stream OFF called on camera");
-	}
 
     /* Stop hardware */
     rc = isp_v4l2_stream_off( pstream, V4L2_STREAM_DIRECTION_CAP, dev->stream_on_mask );
@@ -764,7 +725,7 @@ static int isp_v4l2_enum_input( struct file *file, void *fh, struct v4l2_input *
         return -EINVAL;
     }
 
-    strlcpy( input->name, "camera", sizeof( input->name ) );
+    strncpy( input->name, "camera", sizeof( input->name ) );
     input->type = V4L2_INPUT_TYPE_CAMERA;
 
     return 0;
@@ -1057,6 +1018,7 @@ static const struct v4l2_ioctl_ops isp_v4l2_m2m_ioctl_ops = {
 
     /* vb2 customization for multi-stream support */
     .vidioc_reqbufs = isp_v4l2_m2m_reqbufs,
+    .vidioc_create_bufs = v4l2_m2m_ioctl_create_bufs,
     .vidioc_expbuf = isp_v4l2_m2m_expbuf,
     .vidioc_querybuf = isp_v4l2_m2m_querybuf,
     .vidioc_qbuf = isp_v4l2_m2m_qbuf,
@@ -1095,120 +1057,10 @@ static void isp_v4l2_m2m_job_abort( void *priv )
     }
 }
 
-static struct v4l2_m2m_ops isp_v4l2_m2m_ops = {
+static const struct v4l2_m2m_ops isp_v4l2_m2m_ops = {
     .device_run = isp_v4l2_m2m_device_run,
     .job_abort = isp_v4l2_m2m_job_abort,
 };
-
-static int
-subdev_notifier_bound(struct v4l2_async_notifier *notifier,
-                     struct v4l2_subdev *subdev, struct v4l2_async_subdev *asd)
-{
-    isp_v4l2_dev_t *dev = container_of(notifier, isp_v4l2_dev_t, subdev_notifier);
-    int i = 0;
-    LOG( LOG_INFO, "BOUND : notification for subdev : %s, ctx_id: %u",
-			subdev->name, dev->ctx_id);
-
-    for (i = 0; i < SD_MAX; i++) {
-        if (dev->asd[i].match.fwnode == of_fwnode_handle(subdev->dev->of_node)) {
-            LOG( LOG_INFO, "BOUND : found match, %d, %#llx", i, of_fwnode_handle(subdev->dev->of_node));
-           	dev->sd[i] = subdev;
-			break;
-        }
-    }
-
-    if (i == SD_MAX) {
-        LOG( LOG_ERR, "BOUND : no match found");
-        return -EINVAL;
-    }
-
-
-   return 0;
-}
-
-static int
-subdev_notifier_complete(struct v4l2_async_notifier *notifier)
-{
-    isp_v4l2_dev_t *dev = container_of(notifier, isp_v4l2_dev_t, subdev_notifier);
-    int i = 0;
-    int rc = 0;
-    struct video_device *vfd;
-	
-    LOG( LOG_INFO, "COMPLETE :  notification for context %u", dev->ctx_id);
-
-	// Custom device names
-    static char device_names[FIRMWARE_CONTEXT_NUMBER][V4L2_STREAM_TYPE_MAX][16];
-
-    //-1 is because we dont want to register meta , gstreamer v4l2src probes it
-    for ( i = 0; i < V4L2_STREAM_TYPE_MAX; ++i ) {
-
-        vfd = &dev->video_dev[i];
-        vfd->ctrl_handler = &dev->isp_v4l2_ctrl.ctrl_hdl_std_ctrl;
-
-        snprintf( vfd->name, sizeof( vfd->name ), "isp_v4l2-vid-cap-%s", isp_v4l2_get_stream_name( i ) );
-        snprintf( device_names[dev->ctx_id][i], sizeof( device_names[dev->ctx_id][i] ), "video%u%s", dev->ctx_id, isp_v4l2_get_stream_name( i ) );
-
-        // Set appropriate file ops and ioctl depending on the stream type
-        if ( i == V4L2_STREAM_TYPE_M2M ) {
-            vfd->fops = &isp_v4l2_m2m_fops;
-            vfd->ioctl_ops = &isp_v4l2_m2m_ioctl_ops;
-            vfd->vfl_dir = VFL_DIR_M2M;
-            vfd->device_caps = ISP_V4L2_DEVICE_CAPS_M2M;
-        } else {
-            vfd->fops = &isp_v4l2_cap_fops;
-            vfd->ioctl_ops = &isp_v4l2_cap_ioctl_ops;
-            vfd->vfl_dir = VFL_DIR_RX;
-            vfd->device_caps = ISP_V4L2_DEVICE_CAPS_CAP;
-        }
-
-        vfd->release = video_device_release_empty;
-        vfd->v4l2_dev = dev->v4l2_dev;
-        vfd->queue = NULL; // queue will be customized in file handle
-        vfd->tvnorms = 0;
-        vfd->vfl_type = VFL_TYPE_VIDEO;
-        vfd->dev.init_name = device_names[dev->ctx_id][i];
-
-        /*
-         * Provide a mutex to v4l2 core. It will be used to protect
-         * all fops and v4l2 ioctls.
-         */
-        vfd->lock = &dev->mlock;
-        video_set_drvdata( vfd, dev );
-
-        /* videoX start number, -1 is autodetect */
-        rc = video_register_device( vfd, VFL_TYPE_VIDEO, -1 );
-        if ( rc < 0 ) {
-            LOG( LOG_ERR, "ERROR : registerig video device for contex id: %u", dev->ctx_id);
-			goto unreg_dev;
-        }
-
-        LOG( LOG_INFO, "V4L2 capture device for context id: %u, registered as: %s",
-             dev->ctx_id, video_device_node_name( vfd ) );
-    }
-
-	rc = v4l2_device_register_subdev_nodes(dev->v4l2_dev);
-	if (rc < 0) {
-		LOG( LOG_ERR, "Failed to create subdev nodes\n");
-		goto unreg_dev;
-	}
-	return 0;
-
-unreg_dev:
-    for ( i = 0; i < V4L2_STREAM_TYPE_MAX; ++i )
-        video_unregister_device( &dev->video_dev[i] );
-
-	return rc;
-}
-static const struct v4l2_async_notifier_operations subdev_notifier_ops = {
-    .bound = subdev_notifier_bound,
-    .complete = subdev_notifier_complete,
-};
-
-struct subdev_async_priv_data {
-    struct v4l2_async_subdev asd;
-    struct v4l2_subdev *sd;
-};
-
 
 static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
 {
@@ -1216,10 +1068,6 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
     struct video_device *vfd;
     int rc = 0;
     int i;
-    struct device_node *node = NULL;
-    struct device_node *port = NULL;
-    struct device_node *remote = NULL;
-    struct v4l2_fwnode_endpoint endpoint;
 
     // Custom device names
     static char device_names[FIRMWARE_CONTEXT_NUMBER][V4L2_STREAM_TYPE_MAX][16];
@@ -1237,62 +1085,9 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
 
     memset( dev, 0x0, sizeof( isp_v4l2_dev_t ) );
 
-#if MIPI_ISP_INTEGRATION
-    v4l2_async_nf_init(&dev->subdev_notifier);
-
-	port = of_graph_get_port_by_id(v4l2_dev->dev->of_node, ctx_id);
-	if (!port) {
-		LOG (LOG_DEBUG, "failed to get port by ctx id : %u", ctx_id);
-		goto free_dev;
-	}
-
-	
-    for_each_child_of_node(port, node) {
-		LOG( LOG_INFO, "endpoint name : %s, full_name %s", node->name, node->full_name);
-		remote = of_graph_get_remote_port_parent(node);
-		if (!remote) {
-			LOG( LOG_ERR, "ERROR : getting remote endpoint");
-			goto free_dev; //Check this
-	 	}
-#if 0
-		ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(node), &endpoint);
-		if ( ret < 0) {
-			LOG (LOG_ERR, "Failed to parse remote endpoint");
-			goto free_dev;
-		}
-		
-		LOG( LOG_ERR, "endpoint id %d, endpoint port %d\n", endpoint.base.id, endpoint.base.port);
-#endif
-
-		struct subdev_async_priv_data *pd = v4l2_async_nf_add_fwnode(&dev->subdev_notifier,
-											of_fwnode_handle(remote), struct subdev_async_priv_data);
-		if(IS_ERR(pd)) {
-			LOG( LOG_ERR, "ERROR : registering notifier for %s", remote->name);
-			rc = PTR_ERR(pd);
-			goto free_dev;
-		}
-
-		if(!strncmp(remote->name, "csi", 3)) {
-			dev->asd[SD_MIPI_CSI].match.fwnode = of_fwnode_handle(remote);
-		} else {
-			dev->asd[SD_CAMERA].match.fwnode = of_fwnode_handle(remote);
-		}
-		LOG( LOG_INFO, "SUCCESS : registered remote endpoint for %s, fwnode : %#llx", remote->name,  of_fwnode_handle(remote));
-	}
-
-	of_node_put(port);
-#endif
-
     /* register v4l2_device */
     dev->v4l2_dev = v4l2_dev;
     dev->ctx_id = ctx_id;
-
-    /* init v4l2 controls */
-    dev->isp_v4l2_ctrl.v4l2_dev = dev->v4l2_dev;
-    rc = isp_v4l2_ctrl_init( ctx_id, &dev->isp_v4l2_ctrl );
-    if ( rc ) {
-        goto free_dev;
-    }
 
     /* initialize locks */
     mutex_init( &dev->mlock );
@@ -1300,16 +1095,6 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
     /* initialize open counter */
     atomic_set( &dev->opened, 0 );
 
-    /* registering async notifier */
-    dev->subdev_notifier.ops = &subdev_notifier_ops;
-    dev->subdev_notifier.v4l2_dev = v4l2_dev;
-    rc = v4l2_async_nf_register(v4l2_dev, &dev->subdev_notifier);
-    if (rc) {
-		LOG( LOG_ERR, "Error registering async notifier %#x", rc);
-		goto free_dev;
-    }
-
-    // Initialise m2m driver structures
     dev->v4l2_m2m_dev = v4l2_m2m_init( &isp_v4l2_m2m_ops );
     if ( IS_ERR( dev->v4l2_m2m_dev ) ) {
         rc = PTR_ERR( dev->v4l2_m2m_dev );
@@ -1318,7 +1103,13 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
         goto free_dev;
     }
 
-#if !MIPI_ISP_INTEGRATION
+    /* init v4l2 controls */
+    dev->isp_v4l2_ctrl.v4l2_dev = dev->v4l2_dev;
+    rc = isp_v4l2_ctrl_init( ctx_id, &dev->isp_v4l2_ctrl );
+    if ( rc ) {
+        goto free_dev;
+    }
+
     /* finally start creating the device nodes */
     for ( i = 0; i < V4L2_STREAM_TYPE_MAX; ++i ) {
         vfd = &dev->video_dev[i];
@@ -1344,6 +1135,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
         vfd->v4l2_dev = dev->v4l2_dev;
         vfd->queue = NULL; // queue will be customized in file handle
         vfd->tvnorms = 0;
+		vfd->vfl_type = VFL_TYPE_VIDEO;
         vfd->dev.init_name = device_names[ctx_id][i];
 
         /*
@@ -1354,7 +1146,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
         video_set_drvdata( vfd, dev );
 
         /* videoX start number, -1 is autodetect */
-        rc = video_register_device( vfd, VFL_TYPE_GRABBER, -1 );
+        rc = video_register_device( vfd, VFL_TYPE_VIDEO, -1 );
         if ( rc < 0 ) {
             goto unreg_dev;
         }
@@ -1362,20 +1154,17 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
         LOG( LOG_INFO, "V4L2 device for context id: %u, registered as: %s",
              ctx_id, video_device_node_name( vfd ) );
     }
-#endif
 
     /* store dev pointer to destroy later and find stream */
     g_isp_v4l2_devs[ctx_id] = dev;
 
-    return rc;
+	return rc;
 
-#if !MIPI_ISP_INTEGRATION
 unreg_dev:
     v4l2_m2m_release( dev->v4l2_m2m_dev );
     for ( i = 0; i < V4L2_STREAM_TYPE_MAX; ++i ) {
         video_unregister_device( &dev->video_dev[i] );
     }
-#endif
     isp_v4l2_ctrl_deinit( &dev->isp_v4l2_ctrl );
 
 free_dev:
@@ -1454,7 +1243,7 @@ int isp_v4l2_create_instance( struct v4l2_device *v4l2_dev )
         LOG( LOG_ERR, "Invalid parameter, v4l2_dev is NULL" );
         return -EINVAL;
     }
-
+    
     /* initialize v4l2 layer devices */
     for ( ctx_id = 0; ctx_id < FIRMWARE_CONTEXT_NUMBER; ctx_id++ ) {
         rc = isp_v4l2_init_dev( ctx_id, v4l2_dev );
@@ -1462,16 +1251,6 @@ int isp_v4l2_create_instance( struct v4l2_device *v4l2_dev )
             LOG( LOG_ERR, "isp_v4l2_init_dev for context id: %d failed.", ctx_id );
             goto unreg_dev;
         }
-
-#if 0
-		rc = isp_v4l2_register_dma_channels(ctx_id);
-        if ( rc ) {
-            LOG( LOG_ERR, "dma channel registration for context id: %d failed.",
-							ctx_id );
-            goto unreg_dev;
-        }
-#endif
-
     }
 
     /* initialize stream related resources to prepare for streaming.

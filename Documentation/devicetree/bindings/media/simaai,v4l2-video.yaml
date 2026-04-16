@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/ssimaai,v4l2-video.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SiMa.ai CSI2 Video Capture Interface
+
+maintainers:
+  - Yurii Konovalenko <yurii.konovalenko@sima.ai>
+
+description: |
+  The SiMa.ai CSI2 Video module acts as the V4L2 master device. It aggregates
+  streams from the VDMA engine, ISP and registers video device nodes (/dev/videoX)
+  for userspace consumption.
+
+properties:
+  compatible:
+    const: simaai,v4l2-video
+
+  ports:
+    $ref: /schemas/graph.yaml#/properties/ports
+
+    properties:
+      port@0:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Connection to VDMA Channel 0
+
+        properties:
+          endpoint:
+            properties:
+              label:
+                $ref: /schemas/types.yaml#/definitions/string
+                description: |
+                  Optional label for the video node. If present, this string
+                  is used to name the /dev/videoX device (e.g., "Front Camera").
+
+      port@1:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Connection to VDMA Channel 1
+
+        properties:
+          endpoint:
+            properties:
+              label:
+                $ref: /schemas/types.yaml#/definitions/string
+                description: Optional label for the video node.
+
+      port@2:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Connection to VDMA Channel 2
+
+        properties:
+          endpoint:
+            properties:
+              label:
+                $ref: /schemas/types.yaml#/definitions/string
+                description: Optional label for the video node.
+
+      port@3:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Connection to VDMA Channel 3
+
+        properties:
+          endpoint:
+            properties:
+              label:
+                $ref: /schemas/types.yaml#/definitions/string
+                description: Optional label for the video node.
+
+    required:
+      - port@0
+
+required:
+  - compatible
+  - ports
+
+additionalProperties: false
+
+examples:
+  - |
+    csi2_video {
+        compatible = "simaai,v4l2-video";
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            port@0 {
+                reg = <0>;
+                csi2_vid_in0: endpoint {
+                    remote-endpoint = <&vdma_out0>;
+                    label = "front-cam";
+                };
+            };
+
+            port@1 {
+                reg = <1>;
+                csi2_vid_in1: endpoint {
+                    remote-endpoint = <&vdma_out1>;
+                    label = "rear-cam";
+                };
+            };
+        };
+    };

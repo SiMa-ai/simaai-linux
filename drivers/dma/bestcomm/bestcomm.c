@@ -14,9 +14,8 @@
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_device.h>
 #include <linux/of_irq.h>
-#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/mpc52xx.h>
@@ -456,7 +455,7 @@ error_ofput:
 }
 
 
-static int mpc52xx_bcom_remove(struct platform_device *op)
+static void mpc52xx_bcom_remove(struct platform_device *op)
 {
 	/* Clean up the engine */
 	bcom_engine_cleanup();
@@ -474,8 +473,6 @@ static int mpc52xx_bcom_remove(struct platform_device *op)
 	/* Release memory */
 	kfree(bcom_eng);
 	bcom_eng = NULL;
-
-	return 0;
 }
 
 static const struct of_device_id mpc52xx_bcom_of_match[] = {

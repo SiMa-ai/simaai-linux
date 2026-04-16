@@ -30,6 +30,77 @@
 #define FDO_PWM_MODE_STATIC  1
 #define FDO_PWM_MODE_STATIC_RPM 5
 
+#define SMU_IH_INTERRUPT_ID_TO_DRIVER                   0xFE
+#define SMU_IH_INTERRUPT_CONTEXT_ID_BACO                0x2
+#define SMU_IH_INTERRUPT_CONTEXT_ID_AC                  0x3
+#define SMU_IH_INTERRUPT_CONTEXT_ID_DC                  0x4
+#define SMU_IH_INTERRUPT_CONTEXT_ID_AUDIO_D0            0x5
+#define SMU_IH_INTERRUPT_CONTEXT_ID_AUDIO_D3            0x6
+#define SMU_IH_INTERRUPT_CONTEXT_ID_THERMAL_THROTTLING  0x7
+#define SMU_IH_INTERRUPT_CONTEXT_ID_FAN_ABNORMAL        0x8
+#define SMU_IH_INTERRUPT_CONTEXT_ID_FAN_RECOVERY        0x9
+
+#define SMU_IGNORE_IF_VERSION 0xFFFFFFFF
+
+#define smu_cmn_init_soft_gpu_metrics(ptr, frev, crev)                   \
+	do {                                                             \
+		typecheck(struct gpu_metrics_v##frev##_##crev *, (ptr)); \
+		struct gpu_metrics_v##frev##_##crev *tmp = (ptr);        \
+		struct metrics_table_header *header =                    \
+			(struct metrics_table_header *)tmp;              \
+		memset(header, 0xFF, sizeof(*tmp));                      \
+		header->format_revision = frev;                          \
+		header->content_revision = crev;                         \
+		header->structure_size = sizeof(*tmp);                   \
+	} while (0)
+
+#define smu_cmn_init_partition_metrics(ptr, fr, cr)                        \
+	do {                                                               \
+		typecheck(struct amdgpu_partition_metrics_v##fr##_##cr *,  \
+			  (ptr));                                          \
+		struct amdgpu_partition_metrics_v##fr##_##cr *tmp = (ptr); \
+		struct metrics_table_header *header =                      \
+			(struct metrics_table_header *)tmp;                \
+		memset(header, 0xFF, sizeof(*tmp));                        \
+		header->format_revision = fr;                              \
+		header->content_revision = cr;                             \
+		header->structure_size = sizeof(*tmp);                     \
+	} while (0)
+
+#define smu_cmn_init_baseboard_temp_metrics(ptr, fr, cr)                        \
+	do {                                                                    \
+		typecheck(struct amdgpu_baseboard_temp_metrics_v##fr##_##cr *,  \
+			  (ptr));                                               \
+		struct amdgpu_baseboard_temp_metrics_v##fr##_##cr *tmp = (ptr); \
+		struct metrics_table_header *header =                           \
+			(struct metrics_table_header *)tmp;                     \
+		memset(header, 0xFF, sizeof(*tmp));                             \
+		header->format_revision = fr;                                   \
+		header->content_revision = cr;                                  \
+		header->structure_size = sizeof(*tmp);                          \
+	} while (0)
+
+#define smu_cmn_init_gpuboard_temp_metrics(ptr, fr, cr)                         \
+	do {                                                                    \
+		typecheck(struct amdgpu_gpuboard_temp_metrics_v##fr##_##cr *,   \
+			  (ptr));                                               \
+		struct amdgpu_gpuboard_temp_metrics_v##fr##_##cr *tmp = (ptr);  \
+		struct metrics_table_header *header =                           \
+			(struct metrics_table_header *)tmp;                     \
+		memset(header, 0xFF, sizeof(*tmp));                             \
+		header->format_revision = fr;                                   \
+		header->content_revision = cr;                                  \
+		header->structure_size = sizeof(*tmp);                          \
+	} while (0)
+
+extern const int link_speed[];
+
+/* Helper to Convert from PCIE Gen 1/2/3/4/5/6 to 0.1 GT/s speed units */
+static inline int pcie_gen_to_speed(uint32_t gen)
+{
+	return ((gen == 0) ? link_speed[0] : link_speed[gen - 1]);
+}
+
 int smu_cmn_send_msg_without_waiting(struct smu_context *smu,
 				     uint16_t msg_index,
 				     uint32_t param);
@@ -44,6 +115,9 @@ int smu_cmn_send_smc_msg(struct smu_context *smu,
 
 int smu_cmn_send_debug_smc_msg(struct smu_context *smu,
 			 uint32_t msg);
+
+int smu_cmn_send_debug_smc_msg_with_param(struct smu_context *smu,
+			 uint32_t msg, uint32_t param);
 
 int smu_cmn_wait_for_response(struct smu_context *smu);
 
@@ -104,8 +178,6 @@ int smu_cmn_get_metrics_table(struct smu_context *smu,
 
 int smu_cmn_get_combo_pptable(struct smu_context *smu);
 
-void smu_cmn_init_soft_gpu_metrics(void *table, uint8_t frev, uint8_t crev);
-
 int smu_cmn_set_mp1_state(struct smu_context *smu,
 			  enum pp_mp1_state mp1_state);
 
@@ -123,6 +195,12 @@ static inline void smu_cmn_get_sysfs_buf(char **buf, int *offset)
 }
 
 bool smu_cmn_is_audio_func_enabled(struct amdgpu_device *adev);
+void smu_cmn_generic_soc_policy_desc(struct smu_dpm_policy *policy);
+void smu_cmn_generic_plpd_policy_desc(struct smu_dpm_policy *policy);
+
+void smu_cmn_get_backend_workload_mask(struct smu_context *smu,
+				       u32 workload_mask,
+				       u32 *backend_workload_mask);
 
 #endif
 #endif

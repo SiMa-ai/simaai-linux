@@ -71,11 +71,11 @@
 #include <asm/vdso_datapage.h>
 #include <asm/firmware.h>
 #include <asm/mce.h>
+#include <asm/systemcfg.h>
 
 /* powerpc clocksource/clockevent code */
 
 #include <linux/clockchips.h>
-#include <linux/timekeeper_internal.h>
 
 static u64 timebase_read(struct clocksource *);
 static struct clocksource clocksource_timebase = {
@@ -130,14 +130,14 @@ unsigned long tb_ticks_per_jiffy;
 unsigned long tb_ticks_per_usec = 100; /* sane default */
 EXPORT_SYMBOL(tb_ticks_per_usec);
 unsigned long tb_ticks_per_sec;
-EXPORT_SYMBOL(tb_ticks_per_sec);	/* for cputime_t conversions */
+EXPORT_SYMBOL(tb_ticks_per_sec);	/* for cputime conversions */
 
 DEFINE_SPINLOCK(rtc_lock);
 EXPORT_SYMBOL_GPL(rtc_lock);
 
 static u64 tb_to_ns_scale __read_mostly;
 static unsigned tb_to_ns_shift __read_mostly;
-static u64 boot_tb __read_mostly;
+static u64 boot_tb __ro_after_init;
 
 extern struct timezone sys_tz;
 static long timezone_offset;
@@ -150,21 +150,6 @@ EXPORT_SYMBOL_GPL(ppc_tb_freq);
 bool tb_invalid;
 
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
-/*
- * Factor for converting from cputime_t (timebase ticks) to
- * microseconds. This is stored as 0.64 fixed-point binary fraction.
- */
-u64 __cputime_usec_factor;
-EXPORT_SYMBOL(__cputime_usec_factor);
-
-static void calc_cputime_factors(void)
-{
-	struct div_result res;
-
-	div128_by_32(1000000, 0, tb_ticks_per_sec, &res);
-	__cputime_usec_factor = res.result_low;
-}
-
 /*
  * Read the SPURR on systems that have it, otherwise the PURR,
  * or if that doesn't exist return the timebase value passed in.
@@ -370,9 +355,28 @@ void vtime_flush(struct task_struct *tsk)
 	acct->softirq_time = 0;
 }
 
-#else /* ! CONFIG_VIRT_CPU_ACCOUNTING_NATIVE */
-#define calc_cputime_factors()
-#endif
+/*
+ * Called from the context switch with interrupts disabled, to charge all
+ * accumulated times to the current process, and to prepare accounting on
+ * the next process.
+ */
+void vtime_task_switch(struct task_struct *prev)
+{
+	if (is_idle_task(prev))
+		vtime_account_idle(prev);
+	else
+		vtime_account_kernel(prev);
+
+	vtime_flush(prev);
+
+	if (!IS_ENABLED(CONFIG_PPC64)) {
+		struct cpu_accounting_data *acct = get_accounting(current);
+		struct cpu_accounting_data *acct0 = get_accounting(prev);
+
+		acct->starttime = acct0->starttime;
+	}
+}
+#endif /* CONFIG_VIRT_CPU_ACCOUNTING_NATIVE */
 
 void __no_kcsan __delay(unsigned long loops)
 {
@@ -635,6 +639,12 @@ notrace unsigned long long sched_clock(void)
 	return mulhdu(get_tb() - boot_tb, tb_to_ns_scale) << tb_to_ns_shift;
 }
 
+#ifdef CONFIG_PPC_SPLPAR
+u64 get_boot_tb(void)
+{
+	return boot_tb;
+}
+#endif
 
 #ifdef CONFIG_PPC_PSERIES
 
@@ -691,7 +701,7 @@ static int __init get_freq(char *name, int cells, unsigned long *val)
 
 static void start_cpu_decrementer(void)
 {
-#ifdef CONFIG_BOOKE_OR_40x
+#ifdef CONFIG_BOOKE
 	unsigned int tcr;
 
 	/* Clear any pending timer interrupts */
@@ -897,6 +907,38 @@ void secondary_cpu_time_init(void)
 	register_decrementer_clockevent(smp_processor_id());
 }
 
+/*
+ * Divide a 128-bit dividend by a 32-bit divisor, leaving a 128 bit
+ * result.
+ */
+static __init void div128_by_32(u64 dividend_high, u64 dividend_low,
+				unsigned int divisor, struct div_result *dr)
+{
+	unsigned long a, b, c, d;
+	unsigned long w, x, y, z;
+	u64 ra, rb, rc;
+
+	a = dividend_high >> 32;
+	b = dividend_high & 0xffffffff;
+	c = dividend_low >> 32;
+	d = dividend_low & 0xffffffff;
+
+	w = a / divisor;
+	ra = ((u64)(a - (w * divisor)) << 32) + b;
+
+	rb = ((u64)do_div(ra, divisor) << 32) + c;
+	x = ra;
+
+	rc = ((u64)do_div(rb, divisor) << 32) + d;
+	y = rb;
+
+	do_div(rc, divisor);
+	z = rc;
+
+	dr->result_high = ((u64)w << 32) + x;
+	dr->result_low  = ((u64)y << 32) + z;
+}
+
 /* This function is only called on the boot processor */
 void __init time_init(void)
 {
@@ -905,7 +947,11 @@ void __init time_init(void)
 	unsigned shift;
 
 	/* Normal PowerPC with timebase register */
-	ppc_md.calibrate_decr();
+	if (ppc_md.calibrate_decr)
+		ppc_md.calibrate_decr();
+	else
+		generic_calibrate_decr();
+
 	printk(KERN_DEBUG "time_init: decrementer frequency = %lu.%.6lu MHz\n",
 	       ppc_tb_freq / 1000000, ppc_tb_freq % 1000000);
 	printk(KERN_DEBUG "time_init: processor frequency   = %lu.%.6lu MHz\n",
@@ -914,7 +960,6 @@ void __init time_init(void)
 	tb_ticks_per_jiffy = ppc_tb_freq / HZ;
 	tb_ticks_per_sec = ppc_tb_freq;
 	tb_ticks_per_usec = ppc_tb_freq / 1000000;
-	calc_cputime_factors();
 
 	/*
 	 * Compute scale factor for sched_clock.
@@ -943,7 +988,10 @@ void __init time_init(void)
 		sys_tz.tz_dsttime = 0;
 	}
 
-	vdso_data->tb_ticks_per_sec = tb_ticks_per_sec;
+	vdso_k_arch_data->tb_ticks_per_sec = tb_ticks_per_sec;
+#ifdef CONFIG_PPC64_PROC_SYSTEMCFG
+	systemcfg->tb_ticks_per_sec = tb_ticks_per_sec;
+#endif
 
 	/* initialise and enable the large decrementer (if we have one) */
 	set_decrementer_max();
@@ -962,39 +1010,6 @@ void __init time_init(void)
 
 	of_clk_init(NULL);
 	enable_sched_clock_irqtime();
-}
-
-/*
- * Divide a 128-bit dividend by a 32-bit divisor, leaving a 128 bit
- * result.
- */
-void div128_by_32(u64 dividend_high, u64 dividend_low,
-		  unsigned divisor, struct div_result *dr)
-{
-	unsigned long a, b, c, d;
-	unsigned long w, x, y, z;
-	u64 ra, rb, rc;
-
-	a = dividend_high >> 32;
-	b = dividend_high & 0xffffffff;
-	c = dividend_low >> 32;
-	d = dividend_low & 0xffffffff;
-
-	w = a / divisor;
-	ra = ((u64)(a - (w * divisor)) << 32) + b;
-
-	rb = ((u64) do_div(ra, divisor) << 32) + c;
-	x = ra;
-
-	rc = ((u64) do_div(rb, divisor) << 32) + d;
-	y = rb;
-
-	do_div(rc, divisor);
-	z = rc;
-
-	dr->result_high = ((u64)w << 32) + x;
-	dr->result_low  = ((u64)y << 32) + z;
-
 }
 
 /* We don't need to calibrate delay, we use the CPU timebase for that */

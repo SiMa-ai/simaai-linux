@@ -216,8 +216,8 @@ static int efx_allocate_msix_channels(struct efx_nic *efx,
 
 	if (efx_separate_tx_channels) {
 		efx->n_tx_channels =
-			min(max(n_channels / 2, 1U),
-			    efx->max_tx_channels);
+			clamp(n_channels / 2, 1U,
+			      efx->max_tx_channels);
 		efx->tx_channel_offset =
 			n_channels - efx->n_tx_channels;
 		efx->n_rx_channels =
@@ -301,6 +301,7 @@ int efx_probe_interrupts(struct efx_nic *efx)
 		efx->tx_channel_offset = 0;
 		efx->n_xdp_channels = 0;
 		efx->xdp_channel_offset = efx->n_channels;
+		efx->xdp_txq_queues_mode = EFX_XDP_TX_QUEUES_BORROWED;
 		rc = pci_enable_msi(efx->pci_dev);
 		if (rc == 0) {
 			efx_get_channel(efx, 0)->irq = efx->pci_dev->irq;
@@ -322,6 +323,7 @@ int efx_probe_interrupts(struct efx_nic *efx)
 		efx->tx_channel_offset = efx_separate_tx_channels ? 1 : 0;
 		efx->n_xdp_channels = 0;
 		efx->xdp_channel_offset = efx->n_channels;
+		efx->xdp_txq_queues_mode = EFX_XDP_TX_QUEUES_BORROWED;
 		efx->legacy_irq = efx->pci_dev->irq;
 	}
 
@@ -711,9 +713,6 @@ int efx_probe_channels(struct efx_nic *efx)
 	struct efx_channel *channel;
 	int rc;
 
-	/* Restart special buffer allocation */
-	efx->next_buffer_table = 0;
-
 	/* Probe channels in reverse, so that any 'extra' channels
 	 * use the start of the buffer table. This allows the traffic
 	 * channels to be resized without moving them or wasting the
@@ -847,35 +846,13 @@ int efx_realloc_channels(struct efx_nic *efx, u32 rxq_entries, u32 txq_entries)
 	struct efx_channel *other_channel[EFX_MAX_CHANNELS], *channel,
 			   *ptp_channel = efx_ptp_channel(efx);
 	struct efx_ptp_data *ptp_data = efx->ptp_data;
-	unsigned int i, next_buffer_table = 0;
 	u32 old_rxq_entries, old_txq_entries;
+	unsigned int i;
 	int rc, rc2;
 
 	rc = efx_check_disabled(efx);
 	if (rc)
 		return rc;
-
-	/* Not all channels should be reallocated. We must avoid
-	 * reallocating their buffer table entries.
-	 */
-	efx_for_each_channel(channel, efx) {
-		struct efx_rx_queue *rx_queue;
-		struct efx_tx_queue *tx_queue;
-
-		if (channel->type->copy)
-			continue;
-		next_buffer_table = max(next_buffer_table,
-					channel->eventq.index +
-					channel->eventq.entries);
-		efx_for_each_channel_rx_queue(rx_queue, channel)
-			next_buffer_table = max(next_buffer_table,
-						rx_queue->rxd.index +
-						rx_queue->rxd.entries);
-		efx_for_each_channel_tx_queue(tx_queue, channel)
-			next_buffer_table = max(next_buffer_table,
-						tx_queue->txd.index +
-						tx_queue->txd.entries);
-	}
 
 	efx_device_detach_sync(efx);
 	efx_stop_all(efx);
@@ -901,9 +878,6 @@ int efx_realloc_channels(struct efx_nic *efx, u32 rxq_entries, u32 txq_entries)
 	efx->txq_entries = txq_entries;
 	for (i = 0; i < efx->n_channels; i++)
 		swap(efx->channel[i], other_channel[i]);
-
-	/* Restart buffer table allocation */
-	efx->next_buffer_table = next_buffer_table;
 
 	for (i = 0; i < efx->n_channels; i++) {
 		channel = efx->channel[i];
@@ -1119,10 +1093,16 @@ void efx_start_channels(struct efx_nic *efx)
 	struct efx_channel *channel;
 
 	efx_for_each_channel_rev(channel, efx) {
+		if (channel->type->start)
+			channel->type->start(channel);
 		efx_for_each_channel_tx_queue(tx_queue, channel) {
 			efx_init_tx_queue(tx_queue);
 			atomic_inc(&efx->active_queues);
 		}
+
+		/* reset per-queue stats */
+		channel->old_n_rx_hw_drops = efx_get_queue_stat_rx_hw_drops(channel);
+		channel->old_n_rx_hw_drop_overruns = channel->n_rx_nodesc_trunc;
 
 		efx_for_each_channel_rx_queue(rx_queue, channel) {
 			efx_init_rx_queue(rx_queue);
@@ -1143,8 +1123,13 @@ void efx_stop_channels(struct efx_nic *efx)
 	struct efx_channel *channel;
 	int rc = 0;
 
-	/* Stop RX refill */
+	/* Stop special channels and RX refill.
+	 * The channel's stop has to be called first, since it might wait
+	 * for a sentinel RX to indicate the channel has fully drained.
+	 */
 	efx_for_each_channel(channel, efx) {
+		if (channel->type->stop)
+			channel->type->stop(channel);
 		efx_for_each_channel_rx_queue(rx_queue, channel)
 			rx_queue->refill_enabled = false;
 	}
@@ -1228,6 +1213,8 @@ static int efx_process_channel(struct efx_channel *channel, int budget)
 						  tx_queue->pkts_compl,
 						  tx_queue->bytes_compl);
 		}
+		tx_queue->complete_packets += tx_queue->pkts_compl;
+		tx_queue->complete_bytes += tx_queue->bytes_compl;
 	}
 
 	/* Receive any packets we queued up */
@@ -1279,7 +1266,8 @@ static int efx_poll(struct napi_struct *napi, int budget)
 
 	spent = efx_process_channel(channel, budget);
 
-	xdp_do_flush_map();
+	if (budget)
+		xdp_do_flush();
 
 	if (spent < budget) {
 		if (efx_channel_has_rx_queue(channel) &&
@@ -1293,7 +1281,7 @@ static int efx_poll(struct napi_struct *napi, int budget)
 		time = jiffies - channel->rfs_last_expiry;
 		/* Would our quota be >= 20? */
 		if (channel->rfs_filter_count * time >= 600 * HZ)
-			mod_delayed_work(system_wq, &channel->filter_work, 0);
+			mod_delayed_work(system_percpu_wq, &channel->filter_work, 0);
 #endif
 
 		/* There is no race here; although napi_disable() will

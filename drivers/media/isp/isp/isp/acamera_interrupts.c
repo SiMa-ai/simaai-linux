@@ -566,7 +566,7 @@ void acamera_interrupt_handler( void *param )
             const uint32_t mcfe_slot_mask = mask.mcfe >> ACAMERA_FRONTEND_INTERRUPTS_SLOT_1_FIELD_OFFSET;
 
             if ( !is_power_of_two( mcfe_slot_mask ) ) {
-                LOG( LOG_ERR, "More than one MCFE slot done, failed to proccess previous slot (MCFE:0x%x).", mcfe_slot_mask );
+                LOG( LOG_DEBUG, "More than one MCFE slot done, failed to proccess previous slot (MCFE:0x%x).", mcfe_slot_mask );
             }
 
             uint8_t slot;
@@ -574,7 +574,7 @@ void acamera_interrupt_handler( void *param )
             for ( slot = 0; slot < MIN( ISP_MCFE_MAX_SLOT, FIRMWARE_CONTEXT_NUMBER ); ++slot ) {
                 if ( mcfe_slot_mask & ( 1u << slot ) ) {
                     if ( slot != last_isp_slot ) {
-                        LOG( LOG_ERR, "FS slot %u doesn't match CDMA out slot %u!!!", last_isp_slot, slot );
+                        LOG( LOG_DEBUG, "FS slot %u doesn't match CDMA out slot %u!!!", last_isp_slot, slot );
                     }
                     // No need for range check, it has to be correct due to
                     // loop constraint.
@@ -594,7 +594,7 @@ void acamera_interrupt_handler( void *param )
             if ( last_isp_slot < ISP_MCFE_MAX_SLOT ) {
                 irq_masks[last_isp_slot] |= BIT( ACAMERA_IRQ_BE_FRAME_END );
             } else {
-                LOG( LOG_ERR, "Frame end received before frame start on first processing!!!" );
+                LOG( LOG_DEBUG, "Frame end received before frame start on first processing!!!" );
             }
         }
     }

@@ -36,6 +36,10 @@ struct mlxsw_fw_rev;
 unsigned int mlxsw_core_max_ports(const struct mlxsw_core *mlxsw_core);
 
 int mlxsw_core_max_lag(struct mlxsw_core *mlxsw_core, u16 *p_max_lag);
+enum mlxsw_cmd_mbox_config_profile_lag_mode
+mlxsw_core_lag_mode(struct mlxsw_core *mlxsw_core);
+enum mlxsw_cmd_mbox_config_profile_flood_mode
+mlxsw_core_flood_mode(struct mlxsw_core *mlxsw_core);
 
 void *mlxsw_core_driver_priv(struct mlxsw_core *mlxsw_core);
 
@@ -68,7 +72,14 @@ struct mlxsw_tx_info {
 	bool is_emad;
 };
 
+struct mlxsw_txhdr_info {
+	struct mlxsw_tx_info tx_info;
+	bool data;
+	u16 max_fid; /* Used for PTP packets which are sent as data. */
+};
+
 struct mlxsw_rx_md_info {
+	struct napi_struct *napi;
 	u32 cookie_index;
 	u32 latency;
 	u32 tx_congestion;
@@ -90,7 +101,7 @@ struct mlxsw_rx_md_info {
 bool mlxsw_core_skb_transmit_busy(struct mlxsw_core *mlxsw_core,
 				  const struct mlxsw_tx_info *tx_info);
 int mlxsw_core_skb_transmit(struct mlxsw_core *mlxsw_core, struct sk_buff *skb,
-			    const struct mlxsw_tx_info *tx_info);
+			    const struct mlxsw_txhdr_info *txhdr_info);
 void mlxsw_core_ptp_transmitted(struct mlxsw_core *mlxsw_core,
 				struct sk_buff *skb, u16 local_port);
 
@@ -264,10 +275,9 @@ int mlxsw_core_cpu_port_init(struct mlxsw_core *mlxsw_core,
 			     const unsigned char *switch_id,
 			     unsigned char switch_id_len);
 void mlxsw_core_cpu_port_fini(struct mlxsw_core *mlxsw_core);
-void mlxsw_core_port_eth_set(struct mlxsw_core *mlxsw_core, u16 local_port,
-			     void *port_driver_priv, struct net_device *dev);
-void mlxsw_core_port_clear(struct mlxsw_core *mlxsw_core, u16 local_port,
-			   void *port_driver_priv);
+void mlxsw_core_port_netdev_link(struct mlxsw_core *mlxsw_core, u16 local_port,
+				 void *port_driver_priv,
+				 struct net_device *dev);
 struct devlink_port *
 mlxsw_core_port_devlink_port_get(struct mlxsw_core *mlxsw_core,
 				 u16 local_port);
@@ -321,7 +331,12 @@ struct mlxsw_config_profile {
 	u16	max_regions;
 	u8	max_flood_tables;
 	u8	max_vid_flood_tables;
+
+	/* Flood mode to use if used_flood_mode. If flood_mode_prefer_cff,
+	 * the backup flood mode (if any) when CFF unsupported.
+	 */
 	u8	flood_mode;
+
 	u8	max_fid_offset_flood_tables;
 	u16	fid_offset_flood_table_size;
 	u8	max_fid_flood_tables;
@@ -336,6 +351,8 @@ struct mlxsw_config_profile {
 	u8	kvd_hash_single_parts;
 	u8	kvd_hash_double_parts;
 	u8	cqe_time_stamp_type;
+	bool	lag_mode_prefer_sw;
+	bool	flood_mode_prefer_cff;
 	struct mlxsw_swid_config swid_config[MLXSW_CONFIG_PROFILE_SWID_COUNT];
 };
 
@@ -415,15 +432,11 @@ struct mlxsw_driver {
 	int (*trap_policer_counter_get)(struct mlxsw_core *mlxsw_core,
 					const struct devlink_trap_policer *policer,
 					u64 *p_drops);
-	void (*txhdr_construct)(struct sk_buff *skb,
-				const struct mlxsw_tx_info *tx_info);
 	int (*resources_register)(struct mlxsw_core *mlxsw_core);
 	int (*kvd_sizes_get)(struct mlxsw_core *mlxsw_core,
 			     const struct mlxsw_config_profile *profile,
 			     u64 *p_single_size, u64 *p_double_size,
 			     u64 *p_linear_size);
-	int (*params_register)(struct mlxsw_core *mlxsw_core);
-	void (*params_unregister)(struct mlxsw_core *mlxsw_core);
 
 	/* Notify a driver that a timestamped packet was transmitted. Driver
 	 * is responsible for freeing the passed-in SKB.
@@ -431,7 +444,6 @@ struct mlxsw_driver {
 	void (*ptp_transmitted)(struct mlxsw_core *mlxsw_core,
 				struct sk_buff *skb, u16 local_port);
 
-	u8 txhdr_len;
 	const struct mlxsw_config_profile *profile;
 	bool sdq_supports_cqe_v2;
 };
@@ -448,8 +460,6 @@ u32 mlxsw_core_read_utc_sec(struct mlxsw_core *mlxsw_core);
 u32 mlxsw_core_read_utc_nsec(struct mlxsw_core *mlxsw_core);
 
 bool mlxsw_core_sdq_supports_cqe_v2(struct mlxsw_core *mlxsw_core);
-
-void mlxsw_core_emad_string_tlv_enable(struct mlxsw_core *mlxsw_core);
 
 bool mlxsw_core_res_valid(struct mlxsw_core *mlxsw_core,
 			  enum mlxsw_res_id res_id);
@@ -480,7 +490,7 @@ struct mlxsw_bus {
 	bool (*skb_transmit_busy)(void *bus_priv,
 				  const struct mlxsw_tx_info *tx_info);
 	int (*skb_transmit)(void *bus_priv, struct sk_buff *skb,
-			    const struct mlxsw_tx_info *tx_info);
+			    const struct mlxsw_txhdr_info *txhdr_info);
 	int (*cmd_exec)(void *bus_priv, u16 opcode, u8 opcode_mod,
 			u32 in_mod, bool out_mbox_direct,
 			char *in_mbox, size_t in_mbox_size,
@@ -490,6 +500,8 @@ struct mlxsw_bus {
 	u32 (*read_frc_l)(void *bus_priv);
 	u32 (*read_utc_sec)(void *bus_priv);
 	u32 (*read_utc_nsec)(void *bus_priv);
+	enum mlxsw_cmd_mbox_config_profile_lag_mode (*lag_mode)(void *bus_priv);
+	enum mlxsw_cmd_mbox_config_profile_flood_mode (*flood_mode)(void *priv);
 	u8 features;
 };
 
@@ -629,7 +641,7 @@ struct mlxsw_linecards {
 	struct mlxsw_linecard_types_info *types_info;
 	struct list_head event_ops_list;
 	struct mutex event_ops_list_lock; /* Locks accesses to event ops list */
-	struct mlxsw_linecard linecards[];
+	struct mlxsw_linecard linecards[] __counted_by(count);
 };
 
 static inline struct mlxsw_linecard *

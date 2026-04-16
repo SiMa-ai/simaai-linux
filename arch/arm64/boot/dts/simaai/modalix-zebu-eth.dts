@@ -1,0 +1,77 @@
+
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix-zebu.dtsi"
+
+&uart01 {
+	status = "okay";
+};
+
+&evxx_stu {
+	status = "okay";
+};
+
+&evxx {
+	status = "okay";
+};
+
+&xgmac0 {
+	reg = <0x0 0xa800000 0x0 0x3180>;
+	reg-names = "gmac";
+	interrupts = <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "macirq";
+	/delete-property/ snps,apbxpcs;
+	/delete-property/ snps,xpcs_skip_reset;
+	status = "okay";
+	fixed-link {
+	speed = <10000>;
+		full-duplex;
+	};
+};
+
+&xgmac1 {
+	reg = <0x0 0xb800000 0x0 0x3180>;
+	reg-names = "gmac";
+	interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "macirq";
+	/delete-property/ snps,apbxpcs;
+	/delete-property/ snps,xpcs_skip_reset;
+	status = "okay";
+	fixed-link {
+		speed = <10000>;
+		full-duplex;
+	};
+};
+
+&xgmac2 {
+	reg = <0x0 0xc800000 0x0 0x3180>;
+	reg-names = "gmac";
+	interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "macirq";
+	/delete-property/ snps,apbxpcs;
+	/delete-property/ snps,xpcs_skip_reset;
+	status = "okay";
+	fixed-link {
+		speed = <10000>;
+		full-duplex;
+	};
+};
+
+&xgmac3 {
+	reg = <0x0 0xd800000 0x0 0x3180>;
+	reg-names = "gmac";
+	interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "macirq";
+	/delete-property/ snps,apbxpcs;
+	/delete-property/ snps,xpcs_skip_reset;
+	status = "okay";
+	fixed-link {
+		speed = <10000>;
+		full-duplex;
+	};
+};

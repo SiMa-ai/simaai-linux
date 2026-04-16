@@ -135,90 +135,6 @@
 		status = "okay";
 	};
 
-	axi_vdma_vis0: dma-controller@40c1000 {
-		compatible = "snps,axi-dma-1.01a";
-		#dma-cells = <1>;
-		reg = <0x0 0x40c1000 0x0 0x1000>;
-		clocks = <&sys_clk>, <&sys_clk>;
-		clock-names = "core-clk", "cfgr-clk";
-		interrupts = 	<GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>, 
-						<GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>,
-						<GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>,
-						<GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
-
-		dma-channels = <4>;
-		snps,dma-masters = <2>;
-		snps,data-width = <3>;
-		snps,block-size = <4096 4096 4096 4096>;
-		snps,priority = <0 0 0 0>;
-		snps,axi-max-burst-len = <16>;
-		status = "disabled";
-		snps,perch_irq = "true";
-	};
-
-	axi_vdma_vis1: dma-controller@40c4000 {
-		compatible = "snps,axi-dma-1.01a";
-		#dma-cells = <1>;
-		reg = <0x0 0x40c4000 0x0 0x1000>;
-		clocks = <&sys_clk>, <&sys_clk>;
-		clock-names = "core-clk", "cfgr-clk";
-		interrupts = 	<GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>, 
-						<GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>,
-						<GIC_SPI 62 IRQ_TYPE_LEVEL_HIGH>,
-						<GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
-
-		dma-channels = <4>;
-		snps,dma-masters = <2>;
-		snps,data-width = <4>;
-		snps,block-size = <4096 4096 4096 4096>;
-		snps,priority = <0 0 0 0>;
-		snps,axi-max-burst-len = <16>;
-		status = "disabled";
-		snps,perch_irq = "true";
-	};
-
-	axi_vdma_vis2: dma-controller@40c7000 {
-		compatible = "snps,axi-dma-1.01a";
-		#dma-cells = <1>;
-		reg = <0x0 0x40c7000 0x0 0x1000>;
-		clocks = <&sys_clk>, <&sys_clk>;
-		clock-names = "core-clk", "cfgr-clk";
-		interrupts = 	<GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>, 
-						<GIC_SPI 67 IRQ_TYPE_LEVEL_HIGH>,
-						<GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
-						<GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
-
-		dma-channels = <4>;
-		snps,dma-masters = <2>;
-		snps,data-width = <4>;
-		snps,block-size = <4096 4096 4096 4096>;
-		snps,priority = <0 0 0 0>;
-		snps,axi-max-burst-len = <16>;
-		status = "disabled";
-		snps,perch_irq = "true";
-	};
-
-	axi_vdma_vis3: dma-controller@40ca000 {
-		compatible = "snps,axi-dma-1.01a";
-		#dma-cells = <1>;
-		reg = <0x0 0x40ca000 0x0 0x1000>;
-		clocks = <&sys_clk>, <&sys_clk>;
-		clock-names = "core-clk", "cfgr-clk";
-		interrupts = 	<GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>, 
-						<GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>,
-						<GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>,
-						<GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
-
-		dma-channels = <4>;
-		snps,dma-masters = <2>;
-		snps,data-width = <4>;
-		snps,block-size = <4096 4096 4096 4096>;
-		snps,priority = <0 0 0 0>;
-		snps,axi-max-burst-len = <16>;
-		status = "disabled";
-		snps,perch_irq = "true";
-	};
-
 	isp: isp@0x04220000 {
 		compatible = "arm,isp";
 		reg = <0x0 0x04220000 0x0 0x00020000>;
@@ -226,13 +142,8 @@
 		interrupt-names = "ISP";
 		memory-region = <&cma_reserved>;
 		simaai,stu = <&isp_stu>;
-		dmas = <&axi_vdma_vis0 0>, <&axi_vdma_vis1 0>, <&axi_vdma_vis2 0>, <&axi_vdma_vis3 0>;
+		dmas = <&axi_vdma0 0>, <&axi_vdma1 0>, <&axi_vdma2 0>, <&axi_vdma3 0>;
 		dma-names = "vdma0", "vdma1" ,"vdma2", "vdma3";
-		status = "disabled";
-	};
-
-	virtual_camera: zebu_camera0 {
-		compatible = "simaai,zebu-camera";
-		status = "disabled";
+		status = "okay";
 	};
 };

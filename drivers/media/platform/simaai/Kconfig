@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+# V4L drivers
+
+comment "SiMa.ai media platform drivers"
+
+config VIDEO_DWC_MIPI_CSI2
+	tristate "DesignWare Cores MIPI CSI-2 receiver found on Modalix platform"
+	depends on VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  Video4Linux2 sub-device driver for the DesignWare Cores MIPI
+	  CSI-2 receiver used on Modalix platform.
+
+config SIMAAI_V4L2_VDMA
+	tristate "SiMa.ai v4l2 vision DMA driver"
+	depends on HAS_DMA
+	select V4L2_FWNODE
+	select VIDEO_V4L2_SUBDEV_API
+	select VIDEOBUF2_DMA_CONTIG
+	help
+	  This driver supports the SiMa.ai Vision DMA (VDMA) controller.
+	  It functions as a V4L2 subdevice bridge that manages DMA channels
+	  to transfer video data from upstream CSI receivers into system
+	  memory.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called simaai-v4l2-vdma.
+
+config SIMAAI_V4L2_VIDEO
+	tristate "SiMa.ai V4L2 video capture driver"
+	depends on SIMAAI_V4L2_VDMA
+	depends on VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  This driver supports the SiMa.ai V4L2 Video Capture interface.
+	  It acts as the V4L2 master device, aggregating streams from the
+	  underlying VDMA engine and registering the standard /dev/videoX
+	  nodes for userspace consumption.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called simaai-v4l2-video.

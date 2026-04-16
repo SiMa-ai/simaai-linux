@@ -15,7 +15,7 @@
 #include <linux/log2.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/regmap.h>
@@ -398,7 +398,7 @@ static const struct ata_port_info ahci_dwc_port_info = {
 	.port_ops	= &ahci_dwc_port_ops,
 };
 
-static struct scsi_host_template ahci_dwc_scsi_info = {
+static const struct scsi_host_template ahci_dwc_scsi_info = {
 	AHCI_SHT(DRV_NAME),
 };
 

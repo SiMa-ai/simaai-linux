@@ -42,6 +42,8 @@ typedef __s16 s16;
 typedef __u8  u8;
 typedef __s8  s8;
 
+typedef unsigned long long	ullong;
+
 #ifdef __CHECKER__
 #define __bitwise	__attribute__((bitwise))
 #else
@@ -49,7 +51,12 @@ typedef __s8  s8;
 #endif
 
 #define __force
+/* This is defined in linux/compiler_types.h and is left for backward
+ * compatibility.
+ */
+#ifndef __user
 #define __user
+#endif
 #define __must_check
 #define __cold
 

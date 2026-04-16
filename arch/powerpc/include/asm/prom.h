@@ -17,6 +17,8 @@
 struct device_node;
 struct property;
 
+#define MIN_RMA			768		/* Minimum RMA (in MB) for CAS negotiation */
+
 #define OF_DT_BEGIN_NODE	0x1		/* Start of node, full name */
 #define OF_DT_END_NODE		0x2		/* End node */
 #define OF_DT_PROP		0x3		/* Property: name off, size,
@@ -85,6 +87,7 @@ struct of_drc_info {
 extern int of_read_drc_info_cell(struct property **prop,
 			const __be32 **curval, struct of_drc_info *data);
 
+extern unsigned int boot_cpu_node_count;
 
 /*
  * There are two methods for telling firmware what our capabilities are.

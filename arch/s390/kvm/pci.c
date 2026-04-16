@@ -103,7 +103,7 @@ static int zpci_reset_aipb(u8 nisc)
 	/*
 	 * AEN registration can only happen once per system boot.  If
 	 * an aipb already exists then AEN was already registered and
-	 * we can re-use the aipb contents.  This can only happen if
+	 * we can reuse the aipb contents.  This can only happen if
 	 * the KVM module was removed and re-inserted.  However, we must
 	 * ensure that the same forwarding ISC is used as this is assigned
 	 * during KVM module load.
@@ -112,7 +112,7 @@ static int zpci_reset_aipb(u8 nisc)
 		return -EINVAL;
 
 	aift->sbv = zpci_aif_sbv;
-	aift->gait = (struct zpci_gaite *)zpci_aipb->aipb.gait;
+	aift->gait = phys_to_virt(zpci_aipb->aipb.gait);
 
 	return 0;
 }
@@ -208,13 +208,12 @@ static inline int account_mem(unsigned long nr_pages)
 
 	page_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 
+	cur_pages = atomic_long_read(&user->locked_vm);
 	do {
-		cur_pages = atomic_long_read(&user->locked_vm);
 		new_pages = cur_pages + nr_pages;
 		if (new_pages > page_limit)
 			return -ENOMEM;
-	} while (atomic_long_cmpxchg(&user->locked_vm, cur_pages,
-					new_pages) != cur_pages);
+	} while (!atomic_long_try_cmpxchg(&user->locked_vm, &cur_pages, new_pages));
 
 	atomic64_add(nr_pages, &current->mm->pinned_vm);
 
@@ -427,7 +426,7 @@ static void kvm_s390_pci_dev_release(struct zpci_dev *zdev)
 
 
 /*
- * Register device with the specified KVM. If interpetation facilities are
+ * Register device with the specified KVM. If interpretation facilities are
  * available, enable them and let userspace indicate whether or not they will
  * be used (specify SHM bit to disable).
  */
@@ -480,13 +479,7 @@ static int kvm_s390_pci_register_kvm(void *opaque, struct kvm *kvm)
 	 */
 	zdev->gisa = (u32)virt_to_phys(&kvm->arch.sie_page2->gisa);
 
-	rc = zpci_enable_device(zdev);
-	if (rc)
-		goto clear_gisa;
-
-	/* Re-register the IOMMU that was already created */
-	rc = zpci_register_ioat(zdev, 0, zdev->start_dma, zdev->end_dma,
-				virt_to_phys(zdev->dma_table));
+	rc = zpci_reenable_device(zdev);
 	if (rc)
 		goto clear_gisa;
 
@@ -549,12 +542,7 @@ static void kvm_s390_pci_unregister_kvm(void *opaque)
 			goto out;
 	}
 
-	if (zpci_enable_device(zdev))
-		goto out;
-
-	/* Re-register the IOMMU that was already created */
-	zpci_register_ioat(zdev, 0, zdev->start_dma, zdev->end_dma,
-			   virt_to_phys(zdev->dma_table));
+	zpci_reenable_device(zdev);
 
 out:
 	spin_lock(&kvm->arch.kzdev_list_lock);
@@ -670,7 +658,7 @@ out:
 	return r;
 }
 
-int kvm_s390_pci_init(void)
+int __init kvm_s390_pci_init(void)
 {
 	zpci_kvm_hook.kvm_register = kvm_s390_pci_register_kvm;
 	zpci_kvm_hook.kvm_unregister = kvm_s390_pci_unregister_kvm;

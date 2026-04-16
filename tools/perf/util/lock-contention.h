@@ -5,6 +5,25 @@
 #include <linux/list.h>
 #include <linux/rbtree.h>
 
+struct lock_filter {
+	int			nr_types;
+	int			nr_addrs;
+	int			nr_syms;
+	int			nr_cgrps;
+	int			nr_slabs;
+	unsigned int		*types;
+	unsigned long		*addrs;
+	char			**syms;
+	u64			*cgrps;
+	char			**slabs;
+};
+
+struct lock_delay {
+	char			*sym;
+	unsigned long		addr;
+	unsigned long		time;
+};
+
 struct lock_stat {
 	struct hlist_node	hash_entry;
 	struct rb_node		rb;		/* used for sorting */
@@ -56,6 +75,12 @@ struct lock_stat {
  */
 #define MAX_LOCK_DEPTH 48
 
+/* based on kernel/lockdep.c */
+#define LOCKHASH_BITS		12
+#define LOCKHASH_SIZE		(1UL << LOCKHASH_BITS)
+
+extern struct hlist_head *lockhash_table;
+
 /*
  * struct lock_seq_stat:
  * Place to put on state of one lock sequence
@@ -91,7 +116,7 @@ struct thread_stat {
  * Number of stack trace entries to skip when finding callers.
  * The first few entries belong to the locking implementation itself.
  */
-#define CONTENTION_STACK_SKIP  3
+#define CONTENTION_STACK_SKIP  4
 
 /*
  * flags for lock:contention_begin
@@ -108,24 +133,51 @@ struct evlist;
 struct machine;
 struct target;
 
+struct lock_contention_fails {
+	int task;
+	int stack;
+	int time;
+	int data;
+};
+
 struct lock_contention {
 	struct evlist *evlist;
 	struct target *target;
 	struct machine *machine;
 	struct hlist_head *result;
+	struct lock_filter *filters;
+	struct lock_delay *delays;
+	struct lock_contention_fails fails;
+	struct rb_root cgroups;
+	void *btf;
 	unsigned long map_nr_entries;
-	int lost;
 	int max_stack;
 	int stack_skip;
+	int aggr_mode;
+	int owner;
+	int nr_filtered;
+	int nr_delays;
+	bool save_callstack;
 };
 
-#ifdef HAVE_BPF_SKEL
+struct option;
+int parse_call_stack(const struct option *opt, const char *str, int unset);
+bool needs_callstack(void);
 
+struct lock_stat *lock_stat_find(u64 addr);
+struct lock_stat *lock_stat_findnew(u64 addr, const char *name, int flags);
+
+bool match_callstack_filter(struct machine *machine, u64 *callstack, int max_stack_depth);
+
+
+#ifdef HAVE_BPF_SKEL
 int lock_contention_prepare(struct lock_contention *con);
 int lock_contention_start(void);
 int lock_contention_stop(void);
 int lock_contention_read(struct lock_contention *con);
-int lock_contention_finish(void);
+int lock_contention_finish(struct lock_contention *con);
+
+struct lock_stat *pop_owner_stack_trace(struct lock_contention *con);
 
 #else  /* !HAVE_BPF_SKEL */
 
@@ -136,15 +188,21 @@ static inline int lock_contention_prepare(struct lock_contention *con __maybe_un
 
 static inline int lock_contention_start(void) { return 0; }
 static inline int lock_contention_stop(void) { return 0; }
-static inline int lock_contention_finish(void) { return 0; }
+static inline int lock_contention_finish(struct lock_contention *con __maybe_unused)
+{
+	return 0;
+}
 
 static inline int lock_contention_read(struct lock_contention *con __maybe_unused)
 {
 	return 0;
 }
 
-#endif  /* HAVE_BPF_SKEL */
+static inline struct lock_stat *pop_owner_stack_trace(struct lock_contention *con __maybe_unused)
+{
+	return NULL;
+}
 
-bool is_lock_function(struct machine *machine, u64 addr);
+#endif  /* HAVE_BPF_SKEL */
 
 #endif  /* PERF_LOCK_CONTENTION_H */

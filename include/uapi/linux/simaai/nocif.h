@@ -138,7 +138,6 @@ struct pktProbeDesc {
   uint8_t nFilterCount;
   char label[64];
   uint64_t bytesCount;
-  uint64_t prevBytesCount;
   struct pktFilterDesc fltDesc[4];
   struct counterDesc pktCounterDesc;
 };

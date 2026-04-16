@@ -445,7 +445,7 @@ static int awb_is_crc_valid( const uint32_t base_address )
     const uint32_t crc_hw = awb_get_data( base_address, AWB_STATS_CRC_INDEX );
 
     if ( crc16 != crc_hw ) {
-        LOG( LOG_ERR, "No CRC match for awb 0x%x read, 0x%x calced", crc_hw, crc16 );
+        LOG( LOG_DEBUG, "No CRC match for awb 0x%x read, 0x%x calced", crc_hw, crc16 );
         return 0;
     }
 
@@ -559,7 +559,7 @@ void AWB_fsm_process_interrupt( const AWB_fsm_t *p_fsm, uint8_t irq_event )
         if ( rc == 0 ) {
             fsm_raise_event( p_fsm, event_id_isphw_stats_ready_awb );
         } else {
-            LOG( LOG_ERR, "Failed to read statistics, error: %d", rc );
+            LOG( LOG_DEBUG, "Failed to read statistics, error: %d", rc );
         }
     } break;
     }

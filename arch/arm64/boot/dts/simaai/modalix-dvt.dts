@@ -174,22 +174,20 @@
 &xgmac2 {
 	clocks = <&eth_clk>, <&ptp_clk>;
 	clock-names = "stmmaceth", "ptp_ref";
-	interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>;
-	interrupt-names = "macirq";
 
 	phy-mode = "usxgmii";
 	managed = "in-band-status";
+	snps,donot_discover_phy;
 	status = "okay";
 };
 
 &xgmac3 {
 	clocks = <&eth_clk>, <&ptp_clk>;
 	clock-names = "stmmaceth", "ptp_ref";
-	interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>;
-	interrupt-names = "macirq";
 
 	phy-mode = "usxgmii";
 	managed = "in-band-status";
+	snps,donot_discover_phy;
 	status = "okay";
 };
 

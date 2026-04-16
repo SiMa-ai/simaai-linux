@@ -21,7 +21,7 @@
 #include "isp_params.h"
 
 // Map API command id to param id
-#define COMMAND_TO_PARAM_MAP_MAX_ID 0x00000064
+#define COMMAND_TO_PARAM_MAP_MAX_ID 0x00000065
 
 static uint32_t command_to_param_map[COMMAND_TO_PARAM_MAP_MAX_ID + 1] = {
     FW_REVISION_PARAM,                             // FW_REVISION
@@ -124,7 +124,8 @@ static uint32_t command_to_param_map[COMMAND_TO_PARAM_MAP_MAX_ID + 1] = {
     ISP_MODULES_MANUAL_BLACK_LEVEL_PARAM,          // ISP_MODULES_MANUAL_BLACK_LEVEL
     ISP_MODULES_MANUAL_SHADING_PARAM,              // ISP_MODULES_MANUAL_SHADING
     ISP_MODULES_MANUAL_DEMOSAIC_PARAM,             // ISP_MODULES_MANUAL_DEMOSAIC
-    ISP_MODULES_FORCE_BIST_MISMATCH_PARAM          // ISP_MODULES_FORCE_BIST_MISMATCH
+    ISP_MODULES_FORCE_BIST_MISMATCH_PARAM,         // ISP_MODULES_FORCE_BIST_MISMATCH
+    SENSOR_INFO_PIXEL_FORMAT_PARAM                 // SENSOR_INFO_PIXEL_FORMAT
 };
 
 // Translate command id to parameter id

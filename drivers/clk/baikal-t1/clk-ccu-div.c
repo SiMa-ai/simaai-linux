@@ -20,7 +20,6 @@
 #include <linux/mfd/syscon.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_platform.h>
 #include <linux/ioport.h>
 #include <linux/regmap.h>
 
@@ -406,7 +405,7 @@ static void ccu_div_clk_unregister(struct ccu_div_data *data, bool defer)
 {
 	int idx;
 
-	/* Uninstall only the clocks registered on the specfied stage */
+	/* Uninstall only the clocks registered on the specified stage */
 	for (idx = 0; idx < data->divs_num; ++idx) {
 		if (!!(data->divs_info[idx].features & CCU_DIV_BASIC) ^ defer)
 			continue;

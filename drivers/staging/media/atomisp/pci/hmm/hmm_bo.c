@@ -5,17 +5,6 @@
  * Copyright (c) 2010 Intel Corporation. All Rights Reserved.
  *
  * Copyright (c) 2010 Silicon Hive www.siliconhive.com.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- *
  */
 /*
  * This file contains functions for buffer object structure management
@@ -48,8 +37,6 @@ static int __bo_init(struct hmm_bo_device *bdev, struct hmm_buffer_object *bo,
 		     unsigned int pgnr)
 {
 	check_bodev_null_return(bdev, -EINVAL);
-	var_equal_return(hmm_bo_device_inited(bdev), 0, -EINVAL,
-			 "hmm_bo_device not inited yet.\n");
 	/* prevent zero size buffer object */
 	if (pgnr == 0) {
 		dev_err(atomisp_dev, "0 size buffer is not allowed.\n");
@@ -288,7 +275,7 @@ static void __bo_take_off_handling(struct hmm_buffer_object *bo)
 		/* 3. when bo->prev != NULL && bo->next == NULL, bo is not a rbtree
 		 *	node, bo is the last element of the linked list after rbtree
 		 *	node, to take off this bo, we just need set the "prev/next"
-		 *	pointers to NULL, the free rbtree stays unchaged
+		 *	pointers to NULL, the free rbtree stays unchanged
 		 */
 	} else if (bo->prev && !bo->next) {
 		bo->prev->next = NULL;
@@ -296,7 +283,7 @@ static void __bo_take_off_handling(struct hmm_buffer_object *bo)
 		/* 4. when bo->prev != NULL && bo->next != NULL ,bo is not a rbtree
 		 *	node, bo is in the middle of the linked list after rbtree node,
 		 *	to take off this bo, we just set take the "prev/next" pointers
-		 *	to NULL, the free rbtree stays unchaged
+		 *	to NULL, the free rbtree stays unchanged
 		 */
 	} else if (bo->prev && bo->next) {
 		bo->next->prev = bo->prev;
@@ -352,7 +339,6 @@ int hmm_bo_device_init(struct hmm_bo_device *bdev,
 	spin_lock_init(&bdev->list_lock);
 	mutex_init(&bdev->rbtree_mutex);
 
-	bdev->flag = HMM_BO_DEVICE_INITED;
 
 	INIT_LIST_HEAD(&bdev->entire_bo_list);
 	bdev->allocated_rbtree = RB_ROOT;
@@ -386,6 +372,8 @@ int hmm_bo_device_init(struct hmm_bo_device *bdev,
 	spin_unlock_irqrestore(&bdev->list_lock, flags);
 
 	__bo_insert_to_free_rbtree(&bdev->free_rbtree, bo);
+
+	bdev->flag = HMM_BO_DEVICE_INITED;
 
 	return 0;
 }
@@ -635,9 +623,10 @@ static int alloc_private_pages(struct hmm_buffer_object *bo)
 	const gfp_t gfp = __GFP_NOWARN | __GFP_RECLAIM | __GFP_FS;
 	int ret;
 
-	ret = alloc_pages_bulk_array(gfp, bo->pgnr, bo->pages);
+	ret = alloc_pages_bulk(gfp, bo->pgnr, bo->pages);
 	if (ret != bo->pgnr) {
 		free_pages_bulk_array(ret, bo->pages);
+		dev_err(atomisp_dev, "alloc_pages_bulk() failed\n");
 		return -ENOMEM;
 	}
 
@@ -651,61 +640,34 @@ static int alloc_private_pages(struct hmm_buffer_object *bo)
 	return 0;
 }
 
-static void free_user_pages(struct hmm_buffer_object *bo,
-			    unsigned int page_nr)
+static int alloc_vmalloc_pages(struct hmm_buffer_object *bo, void *vmalloc_addr)
 {
+	void *vaddr = vmalloc_addr;
 	int i;
 
-	for (i = 0; i < page_nr; i++)
-		put_page(bo->pages[i]);
-}
-
-/*
- * Convert user space virtual address into pages list
- */
-static int alloc_user_pages(struct hmm_buffer_object *bo,
-			    const void __user *userptr)
-{
-	int page_nr;
-
-	userptr = untagged_addr(userptr);
-
-	/* Handle frame buffer allocated in user space */
-	mutex_unlock(&bo->mutex);
-	page_nr = get_user_pages_fast((unsigned long)userptr, bo->pgnr, 1, bo->pages);
-	mutex_lock(&bo->mutex);
-
-	/* can be written by caller, not forced */
-	if (page_nr != bo->pgnr) {
-		dev_err(atomisp_dev,
-			"get_user_pages err: bo->pgnr = %d, pgnr actually pinned = %d.\n",
-			bo->pgnr, page_nr);
-		if (page_nr < 0)
-			page_nr = 0;
-		goto out_of_mem;
+	for (i = 0; i < bo->pgnr; i++) {
+		bo->pages[i] = vmalloc_to_page(vaddr);
+		if (!bo->pages[i]) {
+			dev_err(atomisp_dev, "Error could not get page %d of vmalloc buf\n", i);
+			return -ENOMEM;
+		}
+		vaddr += PAGE_SIZE;
 	}
 
 	return 0;
-
-out_of_mem:
-
-	free_user_pages(bo, page_nr);
-
-	return -ENOMEM;
 }
 
 /*
  * allocate/free physical pages for the bo.
  *
  * type indicate where are the pages from. currently we have 3 types
- * of memory: HMM_BO_PRIVATE, HMM_BO_USER.
+ * of memory: HMM_BO_PRIVATE, HMM_BO_VMALLOC.
  *
- * userptr is only valid when type is HMM_BO_USER, it indicates
- * the start address from user space task.
+ * vmalloc_addr is only valid when type is HMM_BO_VMALLOC.
  */
 int hmm_bo_alloc_pages(struct hmm_buffer_object *bo,
 		       enum hmm_bo_type type,
-		       const void __user *userptr)
+		       void *vmalloc_addr)
 {
 	int ret = -EINVAL;
 
@@ -720,14 +682,10 @@ int hmm_bo_alloc_pages(struct hmm_buffer_object *bo,
 		goto alloc_err;
 	}
 
-	/*
-	 * TO DO:
-	 * add HMM_BO_USER type
-	 */
 	if (type == HMM_BO_PRIVATE) {
 		ret = alloc_private_pages(bo);
-	} else if (type == HMM_BO_USER) {
-		ret = alloc_user_pages(bo, userptr);
+	} else if (type == HMM_BO_VMALLOC) {
+		ret = alloc_vmalloc_pages(bo, vmalloc_addr);
 	} else {
 		dev_err(atomisp_dev, "invalid buffer type.\n");
 		ret = -EINVAL;
@@ -771,8 +729,8 @@ void hmm_bo_free_pages(struct hmm_buffer_object *bo)
 
 	if (bo->type == HMM_BO_PRIVATE)
 		free_private_bo_pages(bo);
-	else if (bo->type == HMM_BO_USER)
-		free_user_pages(bo, bo->pgnr);
+	else if (bo->type == HMM_BO_VMALLOC)
+		; /* No-op, nothing to do */
 	else
 		dev_err(atomisp_dev, "invalid buffer type.\n");
 
@@ -1102,7 +1060,7 @@ int hmm_bo_mmap(struct vm_area_struct *vma, struct hmm_buffer_object *bo)
 	vma->vm_private_data = bo;
 
 	vma->vm_ops = &hmm_bo_vm_ops;
-	vma->vm_flags |= VM_IO | VM_DONTEXPAND | VM_DONTDUMP;
+	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
 
 	/*
 	 * call hmm_bo_vm_open explicitly.

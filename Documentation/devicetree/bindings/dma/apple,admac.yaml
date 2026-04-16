@@ -18,15 +18,21 @@ maintainers:
   - Martin Povišer <povik+lin@cutebit.org>
 
 allOf:
-  - $ref: "dma-controller.yaml#"
+  - $ref: dma-controller.yaml#
 
 properties:
   compatible:
-    items:
-      - enum:
-          - apple,t6000-admac
-          - apple,t8103-admac
-      - const: apple,admac
+    oneOf:
+      - items:
+          - const: apple,t6020-admac
+          - const: apple,t8103-admac
+      - items:
+          - enum:
+              # Do not add additional SoC to this list.
+              - apple,t6000-admac
+              - apple,t8103-admac
+              - apple,t8112-admac
+          - const: apple,admac
 
   reg:
     maxItems: 1
@@ -54,6 +60,9 @@ properties:
     maxItems: 2
 
   power-domains:
+    maxItems: 1
+
+  resets:
     maxItems: 1
 
 required:

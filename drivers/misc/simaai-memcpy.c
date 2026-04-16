@@ -36,7 +36,7 @@ struct simaai_sdma_channel {
 static struct simaai_sdma_channel memcpy_channels[NUM_MEMCPY_SDMA_CHANNELS] = {0};
 static const struct of_device_id simaai_memcpy_id_table[] = {
 	{ .compatible = "simaai,memcpy-manager" },
-	{}
+	{},
 };
 
 MODULE_DEVICE_TABLE(of, simaai_memcpy_id_table);
@@ -140,15 +140,13 @@ static int simaai_memcpy_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int simaai_memcpy_remove(struct platform_device *pdev)
+static void simaai_memcpy_remove(struct platform_device *pdev)
 {
 
 	for(int i=0; i<NUM_MEMCPY_SDMA_CHANNELS; i++) { 
 		if(memcpy_channels[i].chan)
 			dma_release_channel(memcpy_channels[i].chan);
 	}
-
-	return 0;
 }
 
 static struct platform_driver simaai_memcpy_driver = {

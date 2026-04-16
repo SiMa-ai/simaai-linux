@@ -20,6 +20,8 @@
 #ifndef __DUMMY_CONFIG_H__
 #define __DUMMY_CONFIG_H__
 
+#include <linux/mutex.h>
+
 #define FULL_EXTRA_HEIGHT 0
 #define FULL_EXTRA_WIDTH 0
 #define ISP_IMAGE_HEIGHT SENSOR_IMAGE_HEIGHT
@@ -68,9 +70,9 @@
 
 #endif
 
-int32_t cam_set_exposure(void *sensor_priv, uint64_t exp);
-int32_t cam_set_gain(void *sensor_priv, uint64_t gain);
-int32_t cam_set_framerate(void *sensor_priv, uint32_t fps);
+static int32_t cam_set_exposure(void *sensor_priv, uint64_t exp);
+static int32_t cam_set_gain(void *sensor_priv, uint64_t gain);
+static int32_t cam_set_framerate(void *sensor_priv, uint32_t fps);
 
 /* ---------------- Mutex Macro Definition ------------------ */
 

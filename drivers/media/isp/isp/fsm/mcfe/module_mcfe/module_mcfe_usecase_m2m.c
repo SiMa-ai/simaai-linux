@@ -25,6 +25,7 @@
 #include "module_mcfe.h"
 #include "module_mcfe_service.h" // Types
 #include "module_mcfe_usecase.h" // module_mcfe_usecase_functbl_t
+#include "acamera_frontend_config.h"
 
 #define BUFSET_RAW_FRAME_COUNT ( 1 )
 #define BUFSET_OUT_FRAME_COUNT ( 1 )
@@ -423,6 +424,9 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
     config->output_config = *output_config;
 
     config->config_states.last = config->config_states.curr;
+
+    acamera_frontend_frame_counter_isp_control_stat_reset_write(PHY_ADDR_ISP, 1);
+    acamera_frontend_frame_counter_isp_control_stat_reset_write(PHY_ADDR_ISP, 0);
 
     return rc;
 }

@@ -14,13 +14,22 @@ description: |
 maintainers:
   - Martin Povišer <povik+lin@cutebit.org>
 
+allOf:
+  - $ref: dai-common.yaml#
+
 properties:
   compatible:
-    items:
-      - enum:
-          - apple,t6000-mca
-          - apple,t8103-mca
-      - const: apple,mca
+    oneOf:
+      - items:
+          - const: apple,t6020-mca
+          - const: apple,t8103-mca
+      - items:
+          - enum:
+              # Do not add additional SoC to this list.
+              - apple,t6000-mca
+              - apple,t8103-mca
+              - apple,t8112-mca
+          - const: apple,mca
 
   reg:
     items:
@@ -106,7 +115,7 @@ required:
   - power-domains
   - '#sound-dai-cells'
 
-additionalProperties: false
+unevaluatedProperties: false
 
 examples:
   - |

@@ -20,7 +20,7 @@ struct simaai_hpi {
 	void __iomem *base;
 	struct device *dev;
 	struct cdev cdev;
-	struct class *dev_class;
+	struct class dev_class;
 	dev_t dev_no;
 	int dev_open_count;
 	wait_queue_head_t q;
@@ -113,14 +113,13 @@ static int simaai_hpi_create_dev(struct simaai_hpi *hpi)
 		goto err_cdev;
 	}
 
-	hpi->dev_class = class_create(THIS_MODULE, SIMAAI_HPI_DEV_NAME);
-	if (IS_ERR(hpi->dev_class)) {
+	ret = class_register(&hpi->dev_class);
+	if (ret) {
 		dev_err(hpi->dev, "Failed: class_create\n");
-		ret = PTR_ERR(hpi->dev_class);
 		goto err_class;
 	}
 
-	device_create(hpi->dev_class, NULL, hpi->dev_no, NULL, SIMAAI_HPI_DEV_NAME);
+	device_create(&hpi->dev_class, NULL, hpi->dev_no, NULL, SIMAAI_HPI_DEV_NAME);
 
 	return 0;
 
@@ -133,8 +132,8 @@ err_cdev:
 
 static void remove_char_dev(struct simaai_hpi *hpi)
 {
-	device_destroy(hpi->dev_class, hpi->dev_no);
-	class_destroy(hpi->dev_class);
+	device_destroy(&hpi->dev_class, hpi->dev_no);
+	class_unregister(&hpi->dev_class);
 	cdev_del(&hpi->cdev);
 	unregister_chrdev_region(hpi->dev_no, 1);
 }
@@ -178,6 +177,7 @@ static int simaai_hpi_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	hpi->dev_class.name = SIMAAI_HPI_DEV_NAME;
 	init_waitqueue_head(&hpi->q);
 	atomic_set(&hpi->data_avail_to_read, 0);
 	platform_set_drvdata(pdev, hpi);
@@ -188,13 +188,11 @@ static int simaai_hpi_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int simaai_hpi_remove(struct platform_device *pdev)
+static void simaai_hpi_remove(struct platform_device *pdev)
 {
 	struct simaai_hpi *hpi = platform_get_drvdata(pdev);
 
 	remove_char_dev(hpi);
-
-	return 0;
 }
 
 static const struct of_device_id simaai_hpi_match[] = {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2016 Red Hat, Inc. All rights reserved.
  *
@@ -23,33 +24,33 @@ struct dm_rq_target_io {
 	union map_info info;
 	struct dm_stats_aux stats_aux;
 	unsigned long duration_jiffies;
-	unsigned n_sectors;
-	unsigned completed;
+	unsigned int n_sectors;
+	unsigned int completed;
 };
 
 #define DM_MQ_NR_HW_QUEUES 1
 #define DM_MQ_QUEUE_DEPTH 2048
-static unsigned dm_mq_nr_hw_queues = DM_MQ_NR_HW_QUEUES;
-static unsigned dm_mq_queue_depth = DM_MQ_QUEUE_DEPTH;
+static unsigned int dm_mq_nr_hw_queues = DM_MQ_NR_HW_QUEUES;
+static unsigned int dm_mq_queue_depth = DM_MQ_QUEUE_DEPTH;
 
 /*
  * Request-based DM's mempools' reserved IOs set by the user.
  */
 #define RESERVED_REQUEST_BASED_IOS	256
-static unsigned reserved_rq_based_ios = RESERVED_REQUEST_BASED_IOS;
+static unsigned int reserved_rq_based_ios = RESERVED_REQUEST_BASED_IOS;
 
-unsigned dm_get_reserved_rq_based_ios(void)
+unsigned int dm_get_reserved_rq_based_ios(void)
 {
 	return __dm_get_module_param(&reserved_rq_based_ios,
 				     RESERVED_REQUEST_BASED_IOS, DM_RESERVED_MAX_IOS);
 }
 
-static unsigned dm_get_blk_mq_nr_hw_queues(void)
+static unsigned int dm_get_blk_mq_nr_hw_queues(void)
 {
 	return __dm_get_module_param(&dm_mq_nr_hw_queues, 1, 32);
 }
 
-static unsigned dm_get_blk_mq_queue_depth(void)
+static unsigned int dm_get_blk_mq_queue_depth(void)
 {
 	return __dm_get_module_param(&dm_mq_queue_depth,
 				     DM_MQ_QUEUE_DEPTH, BLK_MQ_MAX_DEPTH);
@@ -127,6 +128,7 @@ static void rq_end_stats(struct mapped_device *md, struct request *orig)
 {
 	if (unlikely(dm_stats_used(&md->stats))) {
 		struct dm_rq_target_io *tio = tio_from_request(orig);
+
 		tio->duration_jiffies = jiffies - tio->duration_jiffies;
 		dm_stats_account_io(&md->stats, rq_data_dir(orig),
 				    blk_rq_pos(orig), tio->n_sectors, true,
@@ -215,10 +217,10 @@ static void dm_done(struct request *clone, blk_status_t error, bool mapped)
 	if (unlikely(error == BLK_STS_TARGET)) {
 		if (req_op(clone) == REQ_OP_DISCARD &&
 		    !clone->q->limits.max_discard_sectors)
-			disable_discard(tio->md);
+			blk_queue_disable_discard(tio->md->queue);
 		else if (req_op(clone) == REQ_OP_WRITE_ZEROES &&
 			 !clone->q->limits.max_write_zeroes_sectors)
-			disable_write_zeroes(tio->md);
+			blk_queue_disable_write_zeroes(tio->md->queue);
 	}
 
 	switch (r) {
@@ -434,6 +436,7 @@ static void dm_start_request(struct mapped_device *md, struct request *orig)
 
 	if (unlikely(dm_stats_used(&md->stats))) {
 		struct dm_rq_target_io *tio = tio_from_request(orig);
+
 		tio->duration_jiffies = jiffies;
 		tio->n_sectors = blk_rq_sectors(orig);
 		dm_stats_account_io(&md->stats, rq_data_dir(orig),
@@ -493,8 +496,10 @@ static blk_status_t dm_mq_queue_rq(struct blk_mq_hw_ctx *hctx,
 
 		map = dm_get_live_table(md, &srcu_idx);
 		if (unlikely(!map)) {
+			DMERR_LIMIT("%s: mapping table unavailable, erroring io",
+				    dm_device_name(md));
 			dm_put_live_table(md, srcu_idx);
-			return BLK_STS_RESOURCE;
+			return BLK_STS_IOERR;
 		}
 		ti = dm_table_find_target(map, 0);
 		dm_put_live_table(md, srcu_idx);
@@ -542,7 +547,7 @@ int dm_mq_init_request_queue(struct mapped_device *md, struct dm_table *t)
 	md->tag_set->ops = &dm_mq_ops;
 	md->tag_set->queue_depth = dm_get_blk_mq_queue_depth();
 	md->tag_set->numa_node = md->numa_node_id;
-	md->tag_set->flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_STACKING;
+	md->tag_set->flags = BLK_MQ_F_STACKING;
 	md->tag_set->nr_hw_queues = dm_get_blk_mq_nr_hw_queues();
 	md->tag_set->driver_data = md;
 
@@ -581,16 +586,16 @@ void dm_mq_cleanup_mapped_device(struct mapped_device *md)
 	}
 }
 
-module_param(reserved_rq_based_ios, uint, S_IRUGO | S_IWUSR);
+module_param(reserved_rq_based_ios, uint, 0644);
 MODULE_PARM_DESC(reserved_rq_based_ios, "Reserved IOs in request-based mempools");
 
 /* Unused, but preserved for userspace compatibility */
 static bool use_blk_mq = true;
-module_param(use_blk_mq, bool, S_IRUGO | S_IWUSR);
+module_param(use_blk_mq, bool, 0644);
 MODULE_PARM_DESC(use_blk_mq, "Use block multiqueue for request-based DM devices");
 
-module_param(dm_mq_nr_hw_queues, uint, S_IRUGO | S_IWUSR);
+module_param(dm_mq_nr_hw_queues, uint, 0644);
 MODULE_PARM_DESC(dm_mq_nr_hw_queues, "Number of hardware queues for request-based dm-mq devices");
 
-module_param(dm_mq_queue_depth, uint, S_IRUGO | S_IWUSR);
+module_param(dm_mq_queue_depth, uint, 0644);
 MODULE_PARM_DESC(dm_mq_queue_depth, "Queue depth for request-based dm-mq devices");

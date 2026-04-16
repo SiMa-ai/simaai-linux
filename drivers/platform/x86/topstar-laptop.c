@@ -296,8 +296,8 @@ static int topstar_acpi_add(struct acpi_device *device)
 	if (!topstar)
 		return -ENOMEM;
 
-	strcpy(acpi_device_name(device), "Topstar TPSACPI");
-	strcpy(acpi_device_class(device), TOPSTAR_LAPTOP_CLASS);
+	strscpy(acpi_device_name(device), "Topstar TPSACPI");
+	strscpy(acpi_device_class(device), TOPSTAR_LAPTOP_CLASS);
 	device->driver_data = topstar;
 	topstar->device = device;
 
@@ -332,7 +332,7 @@ err_free:
 	return err;
 }
 
-static int topstar_acpi_remove(struct acpi_device *device)
+static void topstar_acpi_remove(struct acpi_device *device)
 {
 	struct topstar_laptop *topstar = acpi_driver_data(device);
 
@@ -344,7 +344,6 @@ static int topstar_acpi_remove(struct acpi_device *device)
 	topstar_acpi_exit(topstar);
 
 	kfree(topstar);
-	return 0;
 }
 
 static const struct acpi_device_id topstar_device_ids[] = {

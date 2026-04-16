@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/phy/snps,dphy-rx.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Synopsys DesignWare MIPI D-PHY RX
+
+maintainers:
+  - Luis Oliveira <Luis.Oliveira@synopsys.com>
+
+description: |
+  Synopsys DesignWare MIPI D-PHY RX Controller. This PHY handles the
+  physical layer for MIPI CSI-2 receivers.
+
+properties:
+  compatible:
+    const: snps,dphy-rx
+
+  reg:
+    minItems: 2
+    maxItems: 3
+    items:
+      - description: Primary D-PHY register bank
+      - description: Glue/Wrapper logic register bank
+      - description: Secondary D-PHY interface bank (required for 8-lane Gen3)
+
+  reg-names:
+    minItems: 2
+    maxItems: 3
+    items:
+      - const: dphy
+      - const: glue
+      - const: dphy-ext
+
+  "#phy-cells":
+    const: 0
+
+  snps,dphy-te-len:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Configuration value for the Tearing Effect (TE) length.
+      Specific to the integration of the D-PHY in the SoC.
+
+  snps,config-gpios:
+    maxItems: 1
+    description:
+      GPIO used for configuration/reset logic in 8-lane configurations.
+      (Mapped to the first GPIO index in the driver).
+
+required:
+  - compatible
+  - reg
+  - "#phy-cells"
+  - snps,dphy-te-len
+
+additionalProperties: false
+
+examples:
+  - |
+    phy@50000 {
+        compatible = "snps,dphy-rx";
+        reg = <0x50000 0x1000>,
+              <0x51000 0x1000>;
+        reg-names = "dphy", "glue";
+        #phy-cells = <0>;
+        snps,dphy-te-len = <0x100>;
+    };
+
+  - |
+    /* Example for 8-lane Gen3 configuration */
+    phy@60000 {
+        compatible = "snps,dphy-rx";
+        reg = <0x60000 0x1000>,
+              <0x61000 0x1000>,
+              <0x62000 0x1000>;
+        reg-names = "dphy", "glue", "dphy-ext";
+        #phy-cells = <0>;
+        snps,dphy-te-len = <0x200>;
+        snps,config-gpios = <&gpio1 5 0>;
+    };

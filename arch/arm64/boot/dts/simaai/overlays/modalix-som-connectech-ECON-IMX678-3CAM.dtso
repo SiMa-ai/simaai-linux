@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include "modalix-som-connectech-3CAM.dtsi"
+
+&{/} {
+    imx678_vana_3: csi3_fixedregulator@0 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx678_vana_3";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+
+    imx678_vdig_3: csi3_fixedregulator@1 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx678_vdig_3";
+        regulator-min-microvolt = <110000>;
+        regulator-max-microvolt = <110000>;
+        regulator-always-on;
+    };
+
+    imx678_vddl_3: csi3_fixedregulator@2 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx678_vddl_3";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+
+    imx678_clk_3: csi3_camera-clk {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+};
+
+&csi30in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <1040000000>;
+    remote-endpoint = <&cam30out>;
+    clock-continuous;
+};
+
+&i2c3 {
+    tca6424_camera3: tca6424@22 {
+        compatible = "ti,tca6424";
+        gpio-controller;
+        #gpio-cells = <2>;
+        reg = <0x22>;
+        status = "okay";
+    };
+
+    imx678s3: imx678@42 {
+        compatible = "sony,imx678";
+        reg = <0x42>;
+
+        clocks = <&imx678_clk_3>;
+        clock-names = "xclk";
+
+        VANA-supply = <&imx678_vana_3>;
+        VDIG-supply = <&imx678_vdig_3>;
+        VDDL-supply = <&imx678_vddl_3>;
+
+        reset-gpios = <&tca6424_camera3 0 0>;
+        boot-gpios = <&tca6424_camera3 6 0>;
+
+        camera_mipi_lanes = <2>;
+        cam_fw_name = "imx678_cam_fw.bin";
+
+        port@1 {
+            cam30out: endpoint@0 {
+                clock-lanes = <0>;
+                data-lanes = <1 2>;
+                link-frequencies = /bits/ 64 <1040000000>;
+                remote-endpoint = <&csi30in>;
+                clock-continuous;
+            };
+        };
+    };
+};

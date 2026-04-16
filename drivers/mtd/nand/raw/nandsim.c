@@ -552,9 +552,8 @@ static int __init ns_alloc_device(struct nandsim *ns)
 			err = -EINVAL;
 			goto err_close_filp;
 		}
-		ns->pages_written =
-			vzalloc(array_size(sizeof(unsigned long),
-					   BITS_TO_LONGS(ns->geom.pgnum)));
+		ns->pages_written = vcalloc(BITS_TO_LONGS(ns->geom.pgnum),
+					    sizeof(unsigned long));
 		if (!ns->pages_written) {
 			NS_ERR("alloc_device: unable to allocate pages written array\n");
 			err = -ENOMEM;
@@ -578,7 +577,7 @@ err_close_filp:
 		return err;
 	}
 
-	ns->pages = vmalloc(array_size(sizeof(union ns_mem), ns->geom.pgnum));
+	ns->pages = vmalloc_array(ns->geom.pgnum, sizeof(union ns_mem));
 	if (!ns->pages) {
 		NS_ERR("alloc_device: unable to allocate page array\n");
 		return -ENOMEM;
@@ -1381,7 +1380,7 @@ static inline union ns_mem *NS_GET_PAGE(struct nandsim *ns)
 }
 
 /*
- * Retuns a pointer to the current byte, within the current page.
+ * Returns a pointer to the current byte, within the current page.
  */
 static inline u_char *NS_PAGE_BYTE_OFF(struct nandsim *ns)
 {
@@ -1405,9 +1404,9 @@ static void ns_do_bit_flips(struct nandsim *ns, int num)
 	if (bitflips && get_random_u16() < (1 << 6)) {
 		int flips = 1;
 		if (bitflips > 1)
-			flips = prandom_u32_max(bitflips) + 1;
+			flips = get_random_u32_inclusive(1, bitflips);
 		while (flips--) {
-			int pos = prandom_u32_max(num * 8);
+			int pos = get_random_u32_below(num * 8);
 			ns->buf.byte[pos / 8] ^= (1 << (pos % 8));
 			NS_WARN("read_page: flipping bit %d in page %d "
 				"reading from %d ecc: corrected=%u failed=%u\n",
@@ -2160,8 +2159,23 @@ static int ns_exec_op(struct nand_chip *chip, const struct nand_operation *op,
 	const struct nand_op_instr *instr = NULL;
 	struct nandsim *ns = nand_get_controller_data(chip);
 
-	if (check_only)
+	if (check_only) {
+		/* The current implementation of nandsim needs to know the
+		 * ongoing operation when performing the address cycles. This
+		 * means it cannot make the difference between a regular read
+		 * and a continuous read. Hence, this hack to manually refuse
+		 * supporting sequential cached operations.
+		 */
+		for (op_id = 0; op_id < op->ninstrs; op_id++) {
+			instr = &op->instrs[op_id];
+			if (instr->type == NAND_OP_CMD_INSTR &&
+			    (instr->ctx.cmd.opcode == NAND_CMD_READCACHEEND ||
+			     instr->ctx.cmd.opcode == NAND_CMD_READCACHESEQ))
+				return -EOPNOTSUPP;
+		}
+
 		return 0;
+	}
 
 	ns->lines.ce = 1;
 

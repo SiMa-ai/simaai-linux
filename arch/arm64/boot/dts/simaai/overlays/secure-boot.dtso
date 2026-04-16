@@ -1,0 +1,46 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    /* * Fragment 1: Add the secure memory nodes
+     * Target the base 'reserved-memory' node.
+     */
+    fragment@20 {
+	target-path = "/reserved-memory";
+        __overlay__ {
+            atf_reserved: atf@1160000000 {
+                no-map;
+                reg = <0x11 0x60000000 0x0 0x100000>;
+            };
+
+            optee_os_reserved: optee_os@1160100000 {
+                no-map;
+                reg = <0x11 0x60100000 0x0 0x7000000>;
+            };
+
+            optee_shm_reserved: optee_shm@1167100000 {
+                no-map;
+                reg = <0x11 0x67100000 0x0 0x8000000>;
+            };
+        };
+    };
+
+    /* * Fragment 2: Add the firmware and psci nodes
+     * Target the root node (/) to add new top-level nodes.
+     */
+    fragment@21 {
+        target-path = "/";
+        __overlay__ {
+            firmware {
+                optee {
+                    compatible = "linaro,optee-tz";
+                    method = "smc";
+                };
+            };
+            psci {
+                compatible = "arm,psci-0.2";
+                method = "smc";
+            };
+        };
+    };
+};

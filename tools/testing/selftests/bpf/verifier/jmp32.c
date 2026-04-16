@@ -84,11 +84,10 @@
 	BPF_JMP32_IMM(BPF_JSET, BPF_REG_7, 0x10, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP32_IMM(BPF_JGE, BPF_REG_7, 0x10, 1),
+	/* unpriv: nospec (inserted to prevent "R9 !read_ok") */
 	BPF_LDX_MEM(BPF_B, BPF_REG_8, BPF_REG_9, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R9 !read_ok",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 },
 {
@@ -149,11 +148,10 @@
 	BPF_JMP32_IMM(BPF_JEQ, BPF_REG_7, 0x10, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP32_IMM(BPF_JSGE, BPF_REG_7, 0xf, 1),
+	/* unpriv: nospec (inserted to prevent "R9 !read_ok") */
 	BPF_LDX_MEM(BPF_B, BPF_REG_8, BPF_REG_9, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R9 !read_ok",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 },
 {
@@ -214,11 +212,10 @@
 	BPF_JMP32_IMM(BPF_JNE, BPF_REG_7, 0x10, 1),
 	BPF_JMP_IMM(BPF_JNE, BPF_REG_7, 0x10, 1),
 	BPF_EXIT_INSN(),
+	/* unpriv: nospec (inserted to prevent "R9 !read_ok") */
 	BPF_LDX_MEM(BPF_B, BPF_REG_8, BPF_REG_9, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R9 !read_ok",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 },
 {
@@ -283,13 +280,13 @@
 	BPF_JMP32_REG(BPF_JGE, BPF_REG_7, BPF_REG_8, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP32_IMM(BPF_JGE, BPF_REG_7, 0x7ffffff0, 1),
+	/* unpriv: nospec (inserted to prevent "R0 invalid mem access 'scalar'") */
 	BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R0 invalid mem access 'scalar'",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 	.retval = 2,
+	.flags = F_NEEDS_EFFICIENT_UNALIGNED_ACCESS,
 },
 {
 	"jgt32: BPF_K",
@@ -353,13 +350,13 @@
 	BPF_JMP32_REG(BPF_JGT, BPF_REG_7, BPF_REG_8, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP_IMM(BPF_JGT, BPF_REG_7, 0x7ffffff0, 1),
+	/* unpriv: nospec (inserted to prevent "R0 invalid mem access 'scalar'") */
 	BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R0 invalid mem access 'scalar'",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 	.retval = 2,
+	.flags = F_NEEDS_EFFICIENT_UNALIGNED_ACCESS,
 },
 {
 	"jle32: BPF_K",
@@ -423,13 +420,13 @@
 	BPF_JMP32_REG(BPF_JLE, BPF_REG_7, BPF_REG_8, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP32_IMM(BPF_JLE, BPF_REG_7, 0x7ffffff0, 1),
+	/* unpriv: nospec (inserted to prevent "R0 invalid mem access 'scalar'") */
 	BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R0 invalid mem access 'scalar'",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 	.retval = 2,
+	.flags = F_NEEDS_EFFICIENT_UNALIGNED_ACCESS,
 },
 {
 	"jlt32: BPF_K",
@@ -493,13 +490,13 @@
 	BPF_JMP32_REG(BPF_JLT, BPF_REG_7, BPF_REG_8, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP_IMM(BPF_JSLT, BPF_REG_7, 0x7ffffff0, 1),
+	/* unpriv: nospec (inserted to prevent "R0 invalid mem access 'scalar'") */
 	BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R0 invalid mem access 'scalar'",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 	.retval = 2,
+	.flags = F_NEEDS_EFFICIENT_UNALIGNED_ACCESS,
 },
 {
 	"jsge32: BPF_K",
@@ -563,13 +560,13 @@
 	BPF_JMP32_REG(BPF_JSGE, BPF_REG_7, BPF_REG_8, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP_IMM(BPF_JSGE, BPF_REG_7, 0x7ffffff0, 1),
+	/* unpriv: nospec (inserted to prevent "R0 invalid mem access 'scalar'") */
 	BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R0 invalid mem access 'scalar'",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 	.retval = 2,
+	.flags = F_NEEDS_EFFICIENT_UNALIGNED_ACCESS,
 },
 {
 	"jsgt32: BPF_K",
@@ -633,13 +630,13 @@
 	BPF_JMP32_REG(BPF_JSGT, BPF_REG_7, BPF_REG_8, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP_IMM(BPF_JSGT, BPF_REG_7, -2, 1),
+	/* unpriv: nospec (inserted to prevent "R0 invalid mem access 'scalar'") */
 	BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R0 invalid mem access 'scalar'",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 	.retval = 2,
+	.flags = F_NEEDS_EFFICIENT_UNALIGNED_ACCESS,
 },
 {
 	"jsle32: BPF_K",
@@ -703,13 +700,13 @@
 	BPF_JMP32_REG(BPF_JSLE, BPF_REG_7, BPF_REG_8, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP_IMM(BPF_JSLE, BPF_REG_7, 0x7ffffff0, 1),
+	/* unpriv: nospec (inserted to prevent "R0 invalid mem access 'scalar'") */
 	BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R0 invalid mem access 'scalar'",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 	.retval = 2,
+	.flags = F_NEEDS_EFFICIENT_UNALIGNED_ACCESS,
 },
 {
 	"jslt32: BPF_K",
@@ -773,13 +770,13 @@
 	BPF_JMP32_REG(BPF_JSLT, BPF_REG_7, BPF_REG_8, 1),
 	BPF_EXIT_INSN(),
 	BPF_JMP32_IMM(BPF_JSLT, BPF_REG_7, -1, 1),
+	/* unpriv: nospec (inserted to prevent "R0 invalid mem access 'scalar'") */
 	BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.errstr_unpriv = "R0 invalid mem access 'scalar'",
-	.result_unpriv = REJECT,
 	.result = ACCEPT,
 	.retval = 2,
+	.flags = F_NEEDS_EFFICIENT_UNALIGNED_ACCESS,
 },
 {
 	"jgt32: range bound deduction, reg op imm",

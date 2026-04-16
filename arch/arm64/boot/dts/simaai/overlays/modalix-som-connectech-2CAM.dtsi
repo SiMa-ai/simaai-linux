@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include "modalix-som-connectech-common.dtsi"
+
+&port6 {
+    cam-hog2 {
+        gpio-hog;
+        /* Set port6 gpio5 to GPIO_ACTIVE_HIGH mode */
+        gpios = <5 0>;
+        output-high;
+        line-name = "cam2_powdn";
+    };
+};
+
+&csi2 {
+    status = "okay";
+};
+
+&axi_vdma2 {
+    status = "okay";
+};
+
+&mipi_dphy_rx2 {
+    status = "okay";
+};
+
+&v4l2video2 {
+    status = "okay";
+};
+
+&v4l2vdma2 {
+    status = "okay";
+};

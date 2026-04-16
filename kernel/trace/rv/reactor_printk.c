@@ -12,9 +12,13 @@
 #include <linux/init.h>
 #include <linux/rv.h>
 
-static void rv_printk_reaction(char *msg)
+__printf(1, 2) static void rv_printk_reaction(const char *msg, ...)
 {
-	printk_deferred(msg);
+	va_list args;
+
+	va_start(args, msg);
+	vprintk_deferred(msg, args);
+	va_end(args);
 }
 
 static struct rv_reactor rv_printk = {
@@ -37,6 +41,5 @@ static void __exit unregister_react_printk(void)
 module_init(register_react_printk);
 module_exit(unregister_react_printk);
 
-MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Daniel Bristot de Oliveira");
 MODULE_DESCRIPTION("printk rv reactor: printk if an exception is hit.");

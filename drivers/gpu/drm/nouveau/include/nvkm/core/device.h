@@ -2,6 +2,7 @@
 #ifndef __NVKM_DEVICE_H__
 #define __NVKM_DEVICE_H__
 #include <core/oclass.h>
+#include <core/intr.h>
 enum nvkm_subdev_type;
 
 enum nvkm_device_type {
@@ -45,6 +46,10 @@ struct nvkm_device {
 		GV100    = 0x140,
 		TU100    = 0x160,
 		GA100    = 0x170,
+		GH100    = 0x180,
+		AD100    = 0x190,
+		GB10x    = 0x1a0,
+		GB20x    = 0x1b0,
 	} card_type;
 	u32 chipset;
 	u8  chiprev;
@@ -60,10 +65,27 @@ struct nvkm_device {
 #undef NVKM_LAYOUT_INST
 #undef NVKM_LAYOUT_ONCE
 	struct list_head subdev;
+
+	struct {
+		struct list_head intr;
+		struct list_head prio[NVKM_INTR_PRIO_NR];
+		spinlock_t lock;
+		int irq;
+		bool alloc;
+		bool armed;
+		bool legacy_done;
+	} intr;
 };
 
 struct nvkm_subdev *nvkm_device_subdev(struct nvkm_device *, int type, int inst);
 struct nvkm_engine *nvkm_device_engine(struct nvkm_device *, int type, int inst);
+
+enum nvkm_bar_id {
+	NVKM_BAR_INVALID = 0,
+	NVKM_BAR0_PRI,
+	NVKM_BAR1_FB,
+	NVKM_BAR2_INST,
+};
 
 struct nvkm_device_func {
 	struct nvkm_device_pci *(*pci)(struct nvkm_device *);
@@ -72,8 +94,9 @@ struct nvkm_device_func {
 	int (*preinit)(struct nvkm_device *);
 	int (*init)(struct nvkm_device *);
 	void (*fini)(struct nvkm_device *, bool suspend);
-	resource_size_t (*resource_addr)(struct nvkm_device *, unsigned bar);
-	resource_size_t (*resource_size)(struct nvkm_device *, unsigned bar);
+	int (*irq)(struct nvkm_device *);
+	resource_size_t (*resource_addr)(struct nvkm_device *, enum nvkm_bar_id);
+	resource_size_t (*resource_size)(struct nvkm_device *, enum nvkm_bar_id);
 	bool cpu_coherent;
 };
 
@@ -96,7 +119,6 @@ struct nvkm_device_chip {
 };
 
 struct nvkm_device *nvkm_device_find(u64 name);
-int nvkm_device_list(u64 *name, int size);
 
 /* privileged register interface accessor macros */
 #define nvkm_rd08(d,a) ioread8((d)->pri + (a))
@@ -111,6 +133,9 @@ int nvkm_device_list(u64 *name, int size);
 	nvkm_wr32(_device, _addr, (_temp & ~(m)) | (v));                       \
 	_temp;                                                                 \
 })
+
+#define NVKM_RD32_(p,o,dr) nvkm_rd32((p), (o) + (dr))
+#define NVKM_RD32(p,A...) DRF_RV(NVKM_RD32_, (p), 0, ##A)
 
 void nvkm_device_del(struct nvkm_device **);
 

@@ -30,7 +30,8 @@ static unsigned int i2c_mii_phy_addr(int phy_id)
 	return phy_id + 0x40;
 }
 
-static int i2c_mii_read_default(struct mii_bus *bus, int phy_id, int reg)
+static int i2c_mii_read_default_c45(struct mii_bus *bus, int phy_id, int devad,
+				    int reg)
 {
 	struct i2c_adapter *i2c = bus->priv;
 	struct i2c_msg msgs[2];
@@ -41,8 +42,8 @@ static int i2c_mii_read_default(struct mii_bus *bus, int phy_id, int reg)
 		return 0xffff;
 
 	p = addr;
-	if (reg & MII_ADDR_C45) {
-		*p++ = 0x20 | ((reg >> 16) & 31);
+	if (devad >= 0) {
+		*p++ = 0x20 | devad;
 		*p++ = reg >> 8;
 	}
 	*p++ = reg;
@@ -64,8 +65,8 @@ static int i2c_mii_read_default(struct mii_bus *bus, int phy_id, int reg)
 	return data[0] << 8 | data[1];
 }
 
-static int i2c_mii_write_default(struct mii_bus *bus, int phy_id, int reg,
-				 u16 val)
+static int i2c_mii_write_default_c45(struct mii_bus *bus, int phy_id,
+				     int devad, int reg, u16 val)
 {
 	struct i2c_adapter *i2c = bus->priv;
 	struct i2c_msg msg;
@@ -76,8 +77,8 @@ static int i2c_mii_write_default(struct mii_bus *bus, int phy_id, int reg,
 		return 0;
 
 	p = data;
-	if (reg & MII_ADDR_C45) {
-		*p++ = (reg >> 16) & 31;
+	if (devad >= 0) {
+		*p++ = devad;
 		*p++ = reg >> 8;
 	}
 	*p++ = reg;
@@ -90,6 +91,84 @@ static int i2c_mii_write_default(struct mii_bus *bus, int phy_id, int reg,
 	msg.buf = data;
 
 	ret = i2c_transfer(i2c, &msg, 1);
+
+	return ret < 0 ? ret : 0;
+}
+
+static int i2c_mii_read_default_c22(struct mii_bus *bus, int phy_id, int reg)
+{
+	return i2c_mii_read_default_c45(bus, phy_id, -1, reg);
+}
+
+static int i2c_mii_write_default_c22(struct mii_bus *bus, int phy_id, int reg,
+				     u16 val)
+{
+	return i2c_mii_write_default_c45(bus, phy_id, -1, reg, val);
+}
+
+static int smbus_byte_mii_read_default_c22(struct mii_bus *bus, int phy_id,
+					   int reg)
+{
+	struct i2c_adapter *i2c = bus->priv;
+	union i2c_smbus_data smbus_data;
+	int val = 0, ret;
+
+	if (!i2c_mii_valid_phy_id(phy_id))
+		return 0;
+
+	i2c_lock_bus(i2c, I2C_LOCK_SEGMENT);
+
+	ret = __i2c_smbus_xfer(i2c, i2c_mii_phy_addr(phy_id), 0,
+			       I2C_SMBUS_READ, reg,
+			       I2C_SMBUS_BYTE_DATA, &smbus_data);
+	if (ret < 0)
+		goto unlock;
+
+	val = (smbus_data.byte & 0xff) << 8;
+
+	ret = __i2c_smbus_xfer(i2c, i2c_mii_phy_addr(phy_id), 0,
+			       I2C_SMBUS_READ, reg,
+			       I2C_SMBUS_BYTE_DATA, &smbus_data);
+
+unlock:
+	i2c_unlock_bus(i2c, I2C_LOCK_SEGMENT);
+
+	if (ret < 0)
+		return ret;
+
+	val |= smbus_data.byte & 0xff;
+
+	return val;
+}
+
+static int smbus_byte_mii_write_default_c22(struct mii_bus *bus, int phy_id,
+					    int reg, u16 val)
+{
+	struct i2c_adapter *i2c = bus->priv;
+	union i2c_smbus_data smbus_data;
+	int ret;
+
+	if (!i2c_mii_valid_phy_id(phy_id))
+		return 0;
+
+	smbus_data.byte = (val & 0xff00) >> 8;
+
+	i2c_lock_bus(i2c, I2C_LOCK_SEGMENT);
+
+	ret = __i2c_smbus_xfer(i2c, i2c_mii_phy_addr(phy_id), 0,
+			       I2C_SMBUS_WRITE, reg,
+			       I2C_SMBUS_BYTE_DATA, &smbus_data);
+	if (ret < 0)
+		goto unlock;
+
+	smbus_data.byte = val & 0xff;
+
+	ret = __i2c_smbus_xfer(i2c, i2c_mii_phy_addr(phy_id), 0,
+			       I2C_SMBUS_WRITE, reg,
+			       I2C_SMBUS_BYTE_DATA, &smbus_data);
+
+unlock:
+	i2c_unlock_bus(i2c, I2C_LOCK_SEGMENT);
 
 	return ret < 0 ? ret : 0;
 }
@@ -279,21 +358,19 @@ static int i2c_rollball_mii_cmd(struct mii_bus *bus, int bus_addr, u8 cmd,
 	return i2c_transfer_rollball(i2c, msgs, ARRAY_SIZE(msgs));
 }
 
-static int i2c_mii_read_rollball(struct mii_bus *bus, int phy_id, int reg)
+static int i2c_mii_read_rollball(struct mii_bus *bus, int phy_id, int devad,
+				 int reg)
 {
 	u8 buf[4], res[6];
 	int bus_addr, ret;
 	u16 val;
-
-	if (!(reg & MII_ADDR_C45))
-		return -EOPNOTSUPP;
 
 	bus_addr = i2c_mii_phy_addr(phy_id);
 	if (bus_addr != ROLLBALL_PHY_I2C_ADDR)
 		return 0xffff;
 
 	buf[0] = ROLLBALL_DATA_ADDR;
-	buf[1] = (reg >> 16) & 0x1f;
+	buf[1] = devad;
 	buf[2] = (reg >> 8) & 0xff;
 	buf[3] = reg & 0xff;
 
@@ -313,21 +390,18 @@ static int i2c_mii_read_rollball(struct mii_bus *bus, int phy_id, int reg)
 	return val;
 }
 
-static int i2c_mii_write_rollball(struct mii_bus *bus, int phy_id, int reg,
-				  u16 val)
+static int i2c_mii_write_rollball(struct mii_bus *bus, int phy_id, int devad,
+				  int reg, u16 val)
 {
 	int bus_addr, ret;
 	u8 buf[6];
-
-	if (!(reg & MII_ADDR_C45))
-		return -EOPNOTSUPP;
 
 	bus_addr = i2c_mii_phy_addr(phy_id);
 	if (bus_addr != ROLLBALL_PHY_I2C_ADDR)
 		return 0;
 
 	buf[0] = ROLLBALL_DATA_ADDR;
-	buf[1] = (reg >> 16) & 0x1f;
+	buf[1] = devad;
 	buf[2] = (reg >> 8) & 0xff;
 	buf[3] = reg & 0xff;
 	buf[4] = val >> 8;
@@ -371,13 +445,26 @@ static int i2c_mii_init_rollball(struct i2c_adapter *i2c)
 		return 0;
 }
 
+static bool mdio_i2c_check_functionality(struct i2c_adapter *i2c,
+					 enum mdio_i2c_proto protocol)
+{
+	if (i2c_check_functionality(i2c, I2C_FUNC_I2C))
+		return true;
+
+	if (i2c_check_functionality(i2c, I2C_FUNC_SMBUS_BYTE_DATA) &&
+	    protocol == MDIO_I2C_MARVELL_C22)
+		return true;
+
+	return false;
+}
+
 struct mii_bus *mdio_i2c_alloc(struct device *parent, struct i2c_adapter *i2c,
 			       enum mdio_i2c_proto protocol)
 {
 	struct mii_bus *mii;
 	int ret;
 
-	if (!i2c_check_functionality(i2c, I2C_FUNC_I2C))
+	if (!mdio_i2c_check_functionality(i2c, protocol))
 		return ERR_PTR(-EINVAL);
 
 	mii = mdiobus_alloc();
@@ -387,6 +474,14 @@ struct mii_bus *mdio_i2c_alloc(struct device *parent, struct i2c_adapter *i2c,
 	snprintf(mii->id, MII_BUS_ID_SIZE, "i2c:%s", dev_name(parent));
 	mii->parent = parent;
 	mii->priv = i2c;
+
+	/* Only use SMBus if we have no other choice */
+	if (i2c_check_functionality(i2c, I2C_FUNC_SMBUS_BYTE_DATA) &&
+	    !i2c_check_functionality(i2c, I2C_FUNC_I2C)) {
+		mii->read = smbus_byte_mii_read_default_c22;
+		mii->write = smbus_byte_mii_write_default_c22;
+		return mii;
+	}
 
 	switch (protocol) {
 	case MDIO_I2C_ROLLBALL:
@@ -399,12 +494,14 @@ struct mii_bus *mdio_i2c_alloc(struct device *parent, struct i2c_adapter *i2c,
 			return ERR_PTR(ret);
 		}
 
-		mii->read = i2c_mii_read_rollball;
-		mii->write = i2c_mii_write_rollball;
+		mii->read_c45 = i2c_mii_read_rollball;
+		mii->write_c45 = i2c_mii_write_rollball;
 		break;
 	default:
-		mii->read = i2c_mii_read_default;
-		mii->write = i2c_mii_write_default;
+		mii->read = i2c_mii_read_default_c22;
+		mii->write = i2c_mii_write_default_c22;
+		mii->read_c45 = i2c_mii_read_default_c45;
+		mii->write_c45 = i2c_mii_write_default_c45;
 		break;
 	}
 

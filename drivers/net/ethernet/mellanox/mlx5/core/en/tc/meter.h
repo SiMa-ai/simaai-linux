@@ -20,6 +20,7 @@ struct mlx5e_flow_meter_params {
 	u32 index;
 	u64 rate;
 	u64 burst;
+	u32 mtu;
 };
 
 struct mlx5e_flow_meter_handle {
@@ -32,8 +33,8 @@ struct mlx5e_flow_meter_handle {
 	struct hlist_node hlist;
 	struct mlx5e_flow_meter_params params;
 
-	struct mlx5_fc *green_counter;
-	struct mlx5_fc *red_counter;
+	struct mlx5_fc *act_counter;
+	struct mlx5_fc *drop_counter;
 };
 
 struct mlx5e_meter_attr {
@@ -70,5 +71,18 @@ mlx5e_flow_meters_cleanup(struct mlx5e_flow_meters *flow_meters);
 void
 mlx5e_tc_meter_get_stats(struct mlx5e_flow_meter_handle *meter,
 			 u64 *bytes, u64 *packets, u64 *drops, u64 *lastuse);
+
+#if IS_ENABLED(CONFIG_MLX5_CLS_ACT)
+
+int mlx5e_flow_meter_get_base_id(struct mlx5e_flow_meter_handle *meter);
+
+#else /* CONFIG_MLX5_CLS_ACT */
+
+static inline int
+mlx5e_flow_meter_get_base_id(struct mlx5e_flow_meter_handle *meter)
+{
+	return 0;
+}
+#endif /* CONFIG_MLX5_CLS_ACT */
 
 #endif /* __MLX5_EN_FLOW_METER_H__ */

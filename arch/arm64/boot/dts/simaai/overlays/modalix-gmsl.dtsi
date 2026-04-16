@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+&i2c01 {
+    max_des0: gmsl-deserializer@28 {
+        compatible = "maxim,max96716a";
+        reg = <0x28>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+        i2c-alias-pool = <0x44 0x45 0x46 0x47>;
+        simaai,rm_dts = <0x37>;
+
+        max_des0_i2c_adapter: i2c-atr {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            max_des0_i2c0: i2c@0 {
+                reg = <0x0>;
+                #address-cells = <1>;
+                #size-cells = <0>;
+            };
+
+            max_des0_i2c1: i2c@1 {
+                reg = <0x1>;
+                #address-cells = <1>;
+                #size-cells = <0>;
+            };
+        };
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            /* GMSL Input ports 0-1 */
+            port@0 {
+                reg = <0>;
+                max_des0_gmsl_linkA_in: endpoint@0 {
+                    reg = <0>;
+                };
+            };
+            port@1 {
+                reg = <1>;
+                max_des0_gmsl_linkB_in: endpoint@0 {
+                    reg = <0>;
+                };
+            };
+
+            /* CSI-2 Output ports 2-3 */
+            /* Deserializer driver interprets as below,
+             * port@2 = CSI port A
+             * port@3 = CSI port B
+             * Note: In HHHv2, modalix CSI port
+             *       is connected to CSI port B
+                     of Deserializer.
+             */
+            port@3 {
+                reg = <3>;
+                max_des0_portB_out: endpoint@0 {
+                    reg = <0>;
+                };
+            };
+        };
+    };
+};

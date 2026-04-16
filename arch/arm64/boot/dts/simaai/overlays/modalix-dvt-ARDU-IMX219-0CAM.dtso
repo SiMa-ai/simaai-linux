@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+        xclk00: xclk00 {
+                status = "okay";
+                compatible = "fixed-clock";
+                #clock-cells = <0>;
+                clock-frequency = <24000000>;
+        };
+};
+
+&csi0 {
+    status = "okay";
+};
+
+&axi_vdma0 {
+    status = "okay";
+};
+
+&mipi_dphy_rx0 {
+    status = "okay";
+};
+
+&v4l2video0 {
+    status = "okay";
+};
+
+&v4l2vdma0 {
+    status = "okay";
+};
+
+&csi00in{
+    clock-lanes = <0>;
+    data-lanes = <1 2 3 4>;
+    link-frequencies = /bits/ 64 <364000000>;
+    remote-endpoint = <&cam00out>;
+    clock-noncontinuous;
+};
+
+&i2c00 {
+        status = "okay";
+        clock-frequency = <400000>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        imx219: imx219@10 {
+                compatible = "sony,imx219";
+                reg = <0x10>;
+
+                clocks = <&xclk00>;
+                clock-names = "xclk";
+
+                rotation = <180>;
+                orientation = <2>;
+
+                port@1 {
+                        cam00out: endpoint@0 {
+                                clock-lanes = <0>;
+                                data-lanes = <1 2 3 4>;
+                                link-frequencies = /bits/ 64 <364000000>;
+                                remote-endpoint = <&csi00in>;
+                                clock-noncontinuous;
+                        };
+                };
+        };
+};

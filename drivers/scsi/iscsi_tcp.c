@@ -17,7 +17,6 @@
  *	Zhenyu Wang
  */
 
-#include <crypto/hash.h>
 #include <linux/types.h>
 #include <linux/inet.h>
 #include <linux/slab.h>
@@ -36,6 +35,7 @@
 #include <scsi/scsi.h>
 #include <scsi/scsi_transport_iscsi.h>
 #include <trace/events/iscsi.h>
+#include <trace/events/sock.h>
 
 #include "iscsi_tcp.h"
 
@@ -46,7 +46,7 @@ MODULE_DESCRIPTION("iSCSI/TCP data-path");
 MODULE_LICENSE("GPL");
 
 static struct scsi_transport_template *iscsi_sw_tcp_scsi_transport;
-static struct scsi_host_template iscsi_sw_tcp_sht;
+static const struct scsi_host_template iscsi_sw_tcp_sht;
 static struct iscsi_transport iscsi_sw_tcp_transport;
 
 static unsigned int iscsi_max_lun = ~0;
@@ -169,6 +169,8 @@ static void iscsi_sw_tcp_data_ready(struct sock *sk)
 	struct iscsi_sw_tcp_conn *tcp_sw_conn;
 	struct iscsi_tcp_conn *tcp_conn;
 	struct iscsi_conn *conn;
+
+	trace_sk_data_ready(sk);
 
 	read_lock_bh(&sk->sk_callback_lock);
 	conn = sk->sk_user_data;
@@ -298,35 +300,32 @@ static int iscsi_sw_tcp_xmit_segment(struct iscsi_tcp_conn *tcp_conn,
 
 	while (!iscsi_tcp_segment_done(tcp_conn, segment, 0, r)) {
 		struct scatterlist *sg;
+		struct msghdr msg = {};
+		struct bio_vec bv;
 		unsigned int offset, copy;
-		int flags = 0;
 
 		r = 0;
 		offset = segment->copied;
 		copy = segment->size - offset;
 
 		if (segment->total_copied + segment->size < segment->total_size)
-			flags |= MSG_MORE | MSG_SENDPAGE_NOTLAST;
+			msg.msg_flags |= MSG_MORE;
 
 		if (tcp_sw_conn->queue_recv)
-			flags |= MSG_DONTWAIT;
+			msg.msg_flags |= MSG_DONTWAIT;
 
-		/* Use sendpage if we can; else fall back to sendmsg */
 		if (!segment->data) {
+			if (!tcp_conn->iscsi_conn->datadgst_en)
+				msg.msg_flags |= MSG_SPLICE_PAGES;
 			sg = segment->sg;
 			offset += segment->sg_offset + sg->offset;
-			r = tcp_sw_conn->sendpage(sk, sg_page(sg), offset,
-						  copy, flags);
+			bvec_set_page(&bv, sg_page(sg), copy, offset);
 		} else {
-			struct msghdr msg = { .msg_flags = flags };
-			struct kvec iov = {
-				.iov_base = segment->data + offset,
-				.iov_len = copy
-			};
-
-			r = kernel_sendmsg(sk, &msg, &iov, 1, copy);
+			bvec_set_virt(&bv, segment->data + offset, copy);
 		}
+		iov_iter_bvec(&msg.msg_iter, ITER_SOURCE, &bv, 1, copy);
 
+		r = sock_sendmsg(sk, &msg);
 		if (r < 0) {
 			iscsi_tcp_segment_unmap(segment);
 			return r;
@@ -468,8 +467,7 @@ static void iscsi_sw_tcp_send_hdr_prep(struct iscsi_conn *conn, void *hdr,
 	 * sufficient room.
 	 */
 	if (conn->hdrdgst_en) {
-		iscsi_tcp_dgst_header(tcp_sw_conn->tx_hash, hdr, hdrlen,
-				      hdr + hdrlen);
+		iscsi_tcp_dgst_header(hdr, hdrlen, hdr + hdrlen);
 		hdrlen += ISCSI_DIGEST_SIZE;
 	}
 
@@ -494,7 +492,7 @@ iscsi_sw_tcp_send_data_prep(struct iscsi_conn *conn, struct scatterlist *sg,
 {
 	struct iscsi_tcp_conn *tcp_conn = conn->dd_data;
 	struct iscsi_sw_tcp_conn *tcp_sw_conn = tcp_conn->dd_data;
-	struct ahash_request *tx_hash = NULL;
+	u32 *tx_crcp = NULL;
 	unsigned int hdr_spec_len;
 
 	ISCSI_SW_TCP_DBG(conn, "offset=%d, datalen=%d %s\n", offset, len,
@@ -507,11 +505,10 @@ iscsi_sw_tcp_send_data_prep(struct iscsi_conn *conn, struct scatterlist *sg,
 	WARN_ON(iscsi_padded(len) != iscsi_padded(hdr_spec_len));
 
 	if (conn->datadgst_en)
-		tx_hash = tcp_sw_conn->tx_hash;
+		tx_crcp = &tcp_sw_conn->tx_crc;
 
 	return iscsi_segment_seek_sg(&tcp_sw_conn->out.data_segment,
-				     sg, count, offset, len,
-				     NULL, tx_hash);
+				     sg, count, offset, len, NULL, tx_crcp);
 }
 
 static void
@@ -520,7 +517,7 @@ iscsi_sw_tcp_send_linear_data_prep(struct iscsi_conn *conn, void *data,
 {
 	struct iscsi_tcp_conn *tcp_conn = conn->dd_data;
 	struct iscsi_sw_tcp_conn *tcp_sw_conn = tcp_conn->dd_data;
-	struct ahash_request *tx_hash = NULL;
+	u32 *tx_crcp = NULL;
 	unsigned int hdr_spec_len;
 
 	ISCSI_SW_TCP_DBG(conn, "datalen=%zd %s\n", len, conn->datadgst_en ?
@@ -532,10 +529,10 @@ iscsi_sw_tcp_send_linear_data_prep(struct iscsi_conn *conn, void *data,
 	WARN_ON(iscsi_padded(len) != iscsi_padded(hdr_spec_len));
 
 	if (conn->datadgst_en)
-		tx_hash = tcp_sw_conn->tx_hash;
+		tx_crcp = &tcp_sw_conn->tx_crc;
 
 	iscsi_segment_init_linear(&tcp_sw_conn->out.data_segment,
-				data, len, NULL, tx_hash);
+				  data, len, NULL, tx_crcp);
 }
 
 static int iscsi_sw_tcp_pdu_init(struct iscsi_task *task,
@@ -583,7 +580,6 @@ iscsi_sw_tcp_conn_create(struct iscsi_cls_session *cls_session,
 	struct iscsi_cls_conn *cls_conn;
 	struct iscsi_tcp_conn *tcp_conn;
 	struct iscsi_sw_tcp_conn *tcp_sw_conn;
-	struct crypto_ahash *tfm;
 
 	cls_conn = iscsi_tcp_conn_setup(cls_session, sizeof(*tcp_sw_conn),
 					conn_idx);
@@ -596,37 +592,9 @@ iscsi_sw_tcp_conn_create(struct iscsi_cls_session *cls_session,
 	tcp_sw_conn->queue_recv = iscsi_recv_from_iscsi_q;
 
 	mutex_init(&tcp_sw_conn->sock_lock);
-
-	tfm = crypto_alloc_ahash("crc32c", 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(tfm))
-		goto free_conn;
-
-	tcp_sw_conn->tx_hash = ahash_request_alloc(tfm, GFP_KERNEL);
-	if (!tcp_sw_conn->tx_hash)
-		goto free_tfm;
-	ahash_request_set_callback(tcp_sw_conn->tx_hash, 0, NULL, NULL);
-
-	tcp_sw_conn->rx_hash = ahash_request_alloc(tfm, GFP_KERNEL);
-	if (!tcp_sw_conn->rx_hash)
-		goto free_tx_hash;
-	ahash_request_set_callback(tcp_sw_conn->rx_hash, 0, NULL, NULL);
-
-	tcp_conn->rx_hash = tcp_sw_conn->rx_hash;
+	tcp_conn->rx_crcp = &tcp_sw_conn->rx_crc;
 
 	return cls_conn;
-
-free_tx_hash:
-	ahash_request_free(tcp_sw_conn->tx_hash);
-free_tfm:
-	crypto_free_ahash(tfm);
-free_conn:
-	iscsi_conn_printk(KERN_ERR, conn,
-			  "Could not create connection due to crc32c "
-			  "loading error. Make sure the crc32c "
-			  "module is built as a module or into the "
-			  "kernel\n");
-	iscsi_tcp_conn_teardown(cls_conn);
-	return NULL;
 }
 
 static void iscsi_sw_tcp_release_conn(struct iscsi_conn *conn)
@@ -664,20 +632,8 @@ static void iscsi_sw_tcp_release_conn(struct iscsi_conn *conn)
 static void iscsi_sw_tcp_conn_destroy(struct iscsi_cls_conn *cls_conn)
 {
 	struct iscsi_conn *conn = cls_conn->dd_data;
-	struct iscsi_tcp_conn *tcp_conn = conn->dd_data;
-	struct iscsi_sw_tcp_conn *tcp_sw_conn = tcp_conn->dd_data;
 
 	iscsi_sw_tcp_release_conn(conn);
-
-	ahash_request_free(tcp_sw_conn->rx_hash);
-	if (tcp_sw_conn->tx_hash) {
-		struct crypto_ahash *tfm;
-
-		tfm = crypto_ahash_reqtfm(tcp_sw_conn->tx_hash);
-		ahash_request_free(tcp_sw_conn->tx_hash);
-		crypto_free_ahash(tfm);
-	}
-
 	iscsi_tcp_conn_teardown(cls_conn);
 }
 
@@ -724,6 +680,10 @@ iscsi_sw_tcp_conn_bind(struct iscsi_cls_session *cls_session,
 		return -EEXIST;
 	}
 
+	err = -EINVAL;
+	if (!sk_is_tcp(sock->sk))
+		goto free_socket;
+
 	err = iscsi_conn_bind(cls_session, cls_conn, is_leading);
 	if (err)
 		goto free_socket;
@@ -738,11 +698,11 @@ iscsi_sw_tcp_conn_bind(struct iscsi_cls_session *cls_session,
 	sk->sk_reuse = SK_CAN_REUSE;
 	sk->sk_sndtimeo = 15 * HZ; /* FIXME: make it configurable */
 	sk->sk_allocation = GFP_ATOMIC;
+	sk->sk_use_task_frag = false;
 	sk_set_memalloc(sk);
 	sock_no_linger(sk);
 
 	iscsi_sw_tcp_conn_set_callbacks(conn);
-	tcp_sw_conn->sendpage = tcp_sw_conn->sock->ops->sendpage;
 	/*
 	 * set receive state machine into initial state
 	 */
@@ -767,15 +727,12 @@ static int iscsi_sw_tcp_conn_set_param(struct iscsi_cls_conn *cls_conn,
 		iscsi_set_param(cls_conn, param, buf, buflen);
 		break;
 	case ISCSI_PARAM_DATADGST_EN:
-		iscsi_set_param(cls_conn, param, buf, buflen);
-
 		mutex_lock(&tcp_sw_conn->sock_lock);
 		if (!tcp_sw_conn->sock) {
 			mutex_unlock(&tcp_sw_conn->sock_lock);
 			return -ENOTCONN;
 		}
-		tcp_sw_conn->sendpage = conn->datadgst_en ?
-			sock_no_sendpage : tcp_sw_conn->sock->ops->sendpage;
+		iscsi_set_param(cls_conn, param, buf, buflen);
 		mutex_unlock(&tcp_sw_conn->sock_lock);
 		break;
 	case ISCSI_PARAM_MAX_R2T:
@@ -942,6 +899,7 @@ iscsi_sw_tcp_session_create(struct iscsi_endpoint *ep, uint16_t cmds_max,
 	shost->max_id = 0;
 	shost->max_channel = 0;
 	shost->max_cmd_len = SCSI_MAX_VARLEN_CDB_SIZE;
+	shost->dma_alignment = 0;
 
 	rc = iscsi_host_get_max_scsi_cmds(shost, cmds_max);
 	if (rc < 0)
@@ -1055,20 +1013,19 @@ static umode_t iscsi_sw_tcp_attr_is_visible(int param_type, int param)
 	return 0;
 }
 
-static int iscsi_sw_tcp_slave_configure(struct scsi_device *sdev)
+static int iscsi_sw_tcp_sdev_configure(struct scsi_device *sdev,
+				       struct queue_limits *lim)
 {
 	struct iscsi_sw_tcp_host *tcp_sw_host = iscsi_host_priv(sdev->host);
 	struct iscsi_session *session = tcp_sw_host->session;
 	struct iscsi_conn *conn = session->leadconn;
 
 	if (conn->datadgst_en)
-		blk_queue_flag_set(QUEUE_FLAG_STABLE_WRITES,
-				   sdev->request_queue);
-	blk_queue_dma_alignment(sdev->request_queue, 0);
+		lim->features |= BLK_FEAT_STABLE_WRITES;
 	return 0;
 }
 
-static struct scsi_host_template iscsi_sw_tcp_sht = {
+static const struct scsi_host_template iscsi_sw_tcp_sht = {
 	.module			= THIS_MODULE,
 	.name			= "iSCSI Initiator over TCP/IP",
 	.queuecommand           = iscsi_queuecommand,
@@ -1082,7 +1039,7 @@ static struct scsi_host_template iscsi_sw_tcp_sht = {
 	.eh_device_reset_handler= iscsi_eh_device_reset,
 	.eh_target_reset_handler = iscsi_eh_recover_target,
 	.dma_boundary		= PAGE_SIZE - 1,
-	.slave_configure        = iscsi_sw_tcp_slave_configure,
+	.sdev_configure		= iscsi_sw_tcp_sdev_configure,
 	.proc_name		= "iscsi_tcp",
 	.this_id		= -1,
 	.track_queue_depth	= 1,

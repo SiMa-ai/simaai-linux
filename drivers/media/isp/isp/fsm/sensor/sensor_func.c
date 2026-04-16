@@ -207,6 +207,7 @@ void sensor_config( sensor_fsm_ptr_t p_fsm )
     override_context_param( p_ictx, SENSOR_SUPPORTED_PRESETS_PARAM, p_fsm->s_param->modes_num );
     override_context_param( p_ictx, SENSOR_INTEGRATION_TIME_MIN_PARAM, p_fsm->s_param->integration_time_min );
     override_context_param( p_ictx, SENSOR_INTEGRATION_TIME_LIMIT_PARAM, p_fsm->s_param->integration_time_limit );
+    override_context_param( p_ictx, SENSOR_INFO_PIXEL_FORMAT_PARAM, p_fsm->s_param->modes_table[preset_mode].pixel_format );
 }
 
 void sensor_ready( sensor_fsm_ptr_t p_fsm )
@@ -408,7 +409,8 @@ int sensor_get_general_sensor_preset_info( sensor_fsm_ptr_t p_fsm, uint32_t sens
     p_sensor_preset_info->wdr_mode = p_fsm->s_param->modes_table[sensor_preset_id].wdr_mode;
     p_sensor_preset_info->exposures = p_fsm->s_param->modes_table[sensor_preset_id].exposures;
     p_sensor_preset_info->num_channels = p_fsm->s_param->modes_table[sensor_preset_id].num_channels;
-    p_sensor_preset_info->data_width = p_fsm->s_param->data_width;
+    p_sensor_preset_info->data_width = p_fsm->s_param->modes_table[sensor_preset_id].data_width;
+    p_sensor_preset_info->pixel_format = p_fsm->s_param->modes_table[sensor_preset_id].pixel_format;
 
     return 0;
 }

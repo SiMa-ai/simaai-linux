@@ -18,14 +18,12 @@ description: |
 properties:
   compatible:
     oneOf:
-      - enum:
-          - fsl,vf610-sai
-          - fsl,imx6sx-sai
-          - fsl,imx6ul-sai
-          - fsl,imx7ulp-sai
-          - fsl,imx8mq-sai
-          - fsl,imx8qm-sai
-          - fsl,imx8ulp-sai
+      - items:
+          - enum:
+              - fsl,imx6ul-sai
+              - fsl,imx7d-sai
+          - const: fsl,imx6sx-sai
+
       - items:
           - enum:
               - fsl,imx8mm-sai
@@ -33,18 +31,23 @@ properties:
               - fsl,imx8mp-sai
           - const: fsl,imx8mq-sai
 
+      - items:
+          - enum:
+              - fsl,imx6sx-sai
+              - fsl,imx7ulp-sai
+              - fsl,imx8mq-sai
+              - fsl,imx8qm-sai
+              - fsl,imx8ulp-sai
+              - fsl,imx93-sai
+              - fsl,imx95-sai
+              - fsl,vf610-sai
+      - items:
+          - enum:
+              - fsl,imx94-sai
+          - const: fsl,imx95-sai
+
   reg:
     maxItems: 1
-
-  interrupts:
-    items:
-      - description: receive and transmit interrupt
-
-  dmas:
-    maxItems: 2
-
-  dma-names:
-    maxItems: 2
 
   clocks:
     items:
@@ -67,7 +70,7 @@ properties:
           - const: mclk3
           - const: pll8k
           - const: pll11k
-        minItems: 4
+        minItems: 5
       - items:
           - const: bus
           - const: mclk1
@@ -77,17 +80,60 @@ properties:
           - const: pll11k
         minItems: 4
 
-  lsb-first:
-    description: |
-      Configures whether the LSB or the MSB is transmitted
-      first for the fifo data. If this property is absent,
-      the MSB is transmitted first as default, or the LSB
-      is transmitted first.
-    type: boolean
+  power-domains:
+    maxItems: 1
+
+  dmas:
+    minItems: 1
+    maxItems: 2
+
+  dma-names:
+    minItems: 1
+    items:
+      - enum: [ rx, tx ]
+      - const: tx
+
+  interrupts:
+    items:
+      - description: receive and transmit interrupt
+
+  ports:
+    $ref: /schemas/graph.yaml#/properties/ports
+    properties:
+      port@0:
+        $ref: audio-graph-port.yaml#
+        unevaluatedProperties: false
+        description: port for TX and RX
+
+      port@1:
+        $ref: audio-graph-port.yaml#
+        unevaluatedProperties: false
+        description: port for TX only
+
+      port@2:
+        $ref: audio-graph-port.yaml#
+        unevaluatedProperties: false
+        description: port for RX only
 
   big-endian:
     description: |
       required if all the SAI registers are big-endian rather than little-endian.
+    type: boolean
+
+  fsl,dataline:
+    $ref: /schemas/types.yaml#/definitions/uint32-matrix
+    description: |
+      Configure the dataline. It has 3 value for each configuration
+    maxItems: 16
+    items:
+      items:
+        - description: format Default(0), I2S(1) or PDM(2)
+          enum: [0, 1, 2]
+        - description: dataline mask for 'rx'
+        - description: dataline mask for 'tx'
+
+  fsl,sai-mclk-direction-output:
+    description: SAI will output the SAI MCLK clock.
     type: boolean
 
   fsl,sai-synchronous-rx:
@@ -108,24 +154,16 @@ properties:
       of transmitter.
     type: boolean
 
-  fsl,dataline:
-    $ref: /schemas/types.yaml#/definitions/uint32-matrix
-    description: |
-      Configure the dataline. It has 3 value for each configuration
-    maxItems: 16
-    items:
-      items:
-        - description: format Default(0), I2S(1) or PDM(2)
-          enum: [0, 1, 2]
-        - description: dataline mask for 'rx'
-        - description: dataline mask for 'tx'
-
-  fsl,sai-mclk-direction-output:
-    description: SAI will output the SAI MCLK clock.
-    type: boolean
-
   fsl,shared-interrupt:
     description: Interrupt is shared with other modules.
+    type: boolean
+
+  lsb-first:
+    description: |
+      Configures whether the LSB or the MSB is transmitted
+      first for the fifo data. If this property is absent,
+      the MSB is transmitted first as default, or the LSB
+      is transmitted first.
     type: boolean
 
   "#sound-dai-cells":
@@ -133,31 +171,7 @@ properties:
     description: optional, some dts node didn't add it.
 
 allOf:
-  - if:
-      properties:
-        compatible:
-          contains:
-            const: fsl,vf610-sai
-    then:
-      properties:
-        dmas:
-          items:
-            - description: DMA controller phandle and request line for TX
-            - description: DMA controller phandle and request line for RX
-        dma-names:
-          items:
-            - const: tx
-            - const: rx
-    else:
-      properties:
-        dmas:
-          items:
-            - description: DMA controller phandle and request line for RX
-            - description: DMA controller phandle and request line for TX
-        dma-names:
-          items:
-            - const: rx
-            - const: tx
+  - $ref: dai-common.yaml#
   - if:
       required:
         - fsl,sai-asynchronous
@@ -168,13 +182,13 @@ allOf:
 required:
   - compatible
   - reg
-  - interrupts
-  - dmas
-  - dma-names
   - clocks
   - clock-names
+  - dmas
+  - dma-names
+  - interrupts
 
-additionalProperties: false
+unevaluatedProperties: false
 
 examples:
   - |
@@ -190,9 +204,8 @@ examples:
                  <&clks VF610_CLK_SAI2>,
                  <&clks 0>, <&clks 0>;
         clock-names = "bus", "mclk1", "mclk2", "mclk3";
-        dma-names = "tx", "rx";
-        dmas = <&edma0 0 21>,
-               <&edma0 0 20>;
+        dma-names = "rx", "tx";
+        dmas = <&edma0 0 20>, <&edma0 0 21>;
         big-endian;
         lsb-first;
     };
@@ -213,4 +226,37 @@ examples:
         dma-names = "rx", "tx";
         fsl,dataline = <1 0xff 0xff 2 0xff 0x11>;
         #sound-dai-cells = <0>;
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            port@1 {
+                reg = <1>;
+                playback-only;
+
+                sai1_endpoint0: endpoint {
+                   dai-tdm-slot-num = <8>;
+                   dai-tdm-slot-width = <32>;
+                   dai-tdm-slot-width-map = <32 8 32>;
+                   dai-format = "dsp_a";
+                   bitclock-master;
+                   frame-master;
+                   remote-endpoint = <&mcodec01_ep>;
+                };
+            };
+
+            port@2 {
+                reg = <2>;
+                capture-only;
+
+                sai1_endpoint1: endpoint {
+                    dai-tdm-slot-num = <8>;
+                    dai-tdm-slot-width = <32>;
+                    dai-tdm-slot-width-map = <32 8 32>;
+                    dai-format = "dsp_a";
+                    remote-endpoint = <&fe02_ep>;
+                };
+            };
+        };
     };

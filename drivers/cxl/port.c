@@ -30,59 +30,82 @@ static void schedule_detach(void *cxlmd)
 	schedule_cxl_memdev_detach(cxlmd);
 }
 
-static int cxl_port_probe(struct device *dev)
+static int discover_region(struct device *dev, void *unused)
 {
-	struct cxl_port *port = to_cxl_port(dev);
-	struct cxl_hdm *cxlhdm;
+	struct cxl_endpoint_decoder *cxled;
 	int rc;
 
+	if (!is_endpoint_decoder(dev))
+		return 0;
 
-	if (!is_cxl_endpoint(port)) {
-		rc = devm_cxl_port_enumerate_dports(port);
-		if (rc < 0)
-			return rc;
-		if (rc == 1)
-			return devm_cxl_add_passthrough_decoder(port);
-	}
+	cxled = to_cxl_endpoint_decoder(dev);
+	if ((cxled->cxld.flags & CXL_DECODER_F_ENABLE) == 0)
+		return 0;
 
-	cxlhdm = devm_cxl_setup_hdm(port);
-	if (IS_ERR(cxlhdm))
-		return PTR_ERR(cxlhdm);
+	if (cxled->state != CXL_DECODER_STATE_AUTO)
+		return 0;
 
-	if (is_cxl_endpoint(port)) {
-		struct cxl_memdev *cxlmd = to_cxl_memdev(port->uport);
-		struct cxl_dev_state *cxlds = cxlmd->cxlds;
-
-		/* Cache the data early to ensure is_visible() works */
-		read_cdat_data(port);
-
-		get_device(&cxlmd->dev);
-		rc = devm_add_action_or_reset(dev, schedule_detach, cxlmd);
-		if (rc)
-			return rc;
-
-		rc = cxl_hdm_decode_init(cxlds, cxlhdm);
-		if (rc)
-			return rc;
-
-		rc = cxl_await_media_ready(cxlds);
-		if (rc) {
-			dev_err(dev, "Media not active (%d)\n", rc);
-			return rc;
-		}
-	}
-
-	rc = devm_cxl_enumerate_decoders(cxlhdm);
-	if (rc) {
-		dev_err(dev, "Couldn't enumerate decoders (%d)\n", rc);
-		return rc;
-	}
+	/*
+	 * Region enumeration is opportunistic, if this add-event fails,
+	 * continue to the next endpoint decoder.
+	 */
+	rc = cxl_add_to_region(cxled);
+	if (rc)
+		dev_dbg(dev, "failed to add to region: %#llx-%#llx\n",
+			cxled->cxld.hpa_range.start, cxled->cxld.hpa_range.end);
 
 	return 0;
 }
 
+static int cxl_switch_port_probe(struct cxl_port *port)
+{
+	/* Reset nr_dports for rebind of driver */
+	port->nr_dports = 0;
+
+	/* Cache the data early to ensure is_visible() works */
+	read_cdat_data(port);
+
+	return 0;
+}
+
+static int cxl_endpoint_port_probe(struct cxl_port *port)
+{
+	struct cxl_memdev *cxlmd = to_cxl_memdev(port->uport_dev);
+	int rc;
+
+	/* Cache the data early to ensure is_visible() works */
+	read_cdat_data(port);
+	cxl_endpoint_parse_cdat(port);
+
+	get_device(&cxlmd->dev);
+	rc = devm_add_action_or_reset(&port->dev, schedule_detach, cxlmd);
+	if (rc)
+		return rc;
+
+	rc = devm_cxl_endpoint_decoders_setup(port);
+	if (rc)
+		return rc;
+
+	/*
+	 * Now that all endpoint decoders are successfully enumerated, try to
+	 * assemble regions from committed decoders
+	 */
+	device_for_each_child(&port->dev, NULL, discover_region);
+
+	return 0;
+}
+
+static int cxl_port_probe(struct device *dev)
+{
+	struct cxl_port *port = to_cxl_port(dev);
+
+	if (is_cxl_endpoint(port))
+		return cxl_endpoint_port_probe(port);
+	return cxl_switch_port_probe(port);
+}
+
 static ssize_t CDAT_read(struct file *filp, struct kobject *kobj,
-			 struct bin_attribute *bin_attr, char *buf,
+			 const struct bin_attribute *bin_attr, char *buf,
 			 loff_t offset, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
@@ -99,10 +122,10 @@ static ssize_t CDAT_read(struct file *filp, struct kobject *kobj,
 				       port->cdat.length);
 }
 
-static BIN_ATTR_ADMIN_RO(CDAT, 0);
+static const BIN_ATTR_ADMIN_RO(CDAT, 0);
 
 static umode_t cxl_port_bin_attr_is_visible(struct kobject *kobj,
-					    struct bin_attribute *attr, int i)
+					    const struct bin_attribute *attr, int i)
 {
 	struct device *dev = kobj_to_dev(kobj);
 	struct cxl_port *port = to_cxl_port(dev);
@@ -113,12 +136,12 @@ static umode_t cxl_port_bin_attr_is_visible(struct kobject *kobj,
 	return 0;
 }
 
-static struct bin_attribute *cxl_cdat_bin_attributes[] = {
+static const struct bin_attribute *const cxl_cdat_bin_attributes[] = {
 	&bin_attr_CDAT,
 	NULL,
 };
 
-static struct attribute_group cxl_cdat_attribute_group = {
+static const struct attribute_group cxl_cdat_attribute_group = {
 	.bin_attrs = cxl_cdat_bin_attributes,
 	.is_bin_visible = cxl_port_bin_attr_is_visible,
 };
@@ -137,7 +160,23 @@ static struct cxl_driver cxl_port_driver = {
 	},
 };
 
-module_cxl_driver(cxl_port_driver);
+static int __init cxl_port_init(void)
+{
+	return cxl_driver_register(&cxl_port_driver);
+}
+/*
+ * Be ready to immediately enable ports emitted by the platform CXL root
+ * (e.g. cxl_acpi) when CONFIG_CXL_PORT=y.
+ */
+subsys_initcall(cxl_port_init);
+
+static void __exit cxl_port_exit(void)
+{
+	cxl_driver_unregister(&cxl_port_driver);
+}
+module_exit(cxl_port_exit);
+
+MODULE_DESCRIPTION("CXL: Port enumeration and services");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(CXL);
+MODULE_IMPORT_NS("CXL");
 MODULE_ALIAS_CXL(CXL_DEVICE_PORT);

@@ -12,6 +12,7 @@
  */
 
 #include <linux/clk.h>
+#include <linux/sort.h>
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
@@ -24,36 +25,14 @@
 #include "vc4_drv.h"
 #include "vc4_regs.h"
 
-#define HVS_NUM_CHANNELS 3
-
 struct vc4_ctm_state {
 	struct drm_private_state base;
 	struct drm_color_ctm *ctm;
 	int fifo;
 };
 
-static struct vc4_ctm_state *
-to_vc4_ctm_state(const struct drm_private_state *priv)
-{
-	return container_of(priv, struct vc4_ctm_state, base);
-}
-
-struct vc4_hvs_state {
-	struct drm_private_state base;
-	unsigned long core_clock_rate;
-
-	struct {
-		unsigned in_use: 1;
-		unsigned long fifo_load;
-		struct drm_crtc_commit *pending_commit;
-	} fifo_state[HVS_NUM_CHANNELS];
-};
-
-static struct vc4_hvs_state *
-to_vc4_hvs_state(const struct drm_private_state *priv)
-{
-	return container_of(priv, struct vc4_hvs_state, base);
-}
+#define to_vc4_ctm_state(_state)				\
+	container_of_const(_state, struct vc4_ctm_state, base)
 
 struct vc4_load_tracker_state {
 	struct drm_private_state base;
@@ -61,11 +40,8 @@ struct vc4_load_tracker_state {
 	u64 membus_load;
 };
 
-static struct vc4_load_tracker_state *
-to_vc4_load_tracker_state(const struct drm_private_state *priv)
-{
-	return container_of(priv, struct vc4_load_tracker_state, base);
-}
+#define to_vc4_load_tracker_state(_state)				\
+	container_of_const(_state, struct vc4_load_tracker_state, base)
 
 static struct vc4_ctm_state *vc4_get_ctm_state(struct drm_atomic_state *state,
 					       struct drm_private_obj *manager)
@@ -162,6 +138,8 @@ vc4_ctm_commit(struct vc4_dev *vc4, struct drm_atomic_state *state)
 	struct vc4_ctm_state *ctm_state = to_vc4_ctm_state(vc4->ctm_manager.state);
 	struct drm_color_ctm *ctm = ctm_state->ctm;
 
+	WARN_ON_ONCE(vc4->gen > VC4_GEN_5);
+
 	if (ctm_state->fifo) {
 		HVS_WRITE(SCALER_OLEDCOEF2,
 			  VC4_SET_FIELD(vc4_ctm_s31_32_to_s0_9(ctm->matrix[0]),
@@ -190,8 +168,8 @@ vc4_ctm_commit(struct vc4_dev *vc4, struct drm_atomic_state *state)
 		  VC4_SET_FIELD(ctm_state->fifo, SCALER_OLEDOFFS_DISPFIFO));
 }
 
-static struct vc4_hvs_state *
-vc4_hvs_get_new_global_state(struct drm_atomic_state *state)
+struct vc4_hvs_state *
+vc4_hvs_get_new_global_state(const struct drm_atomic_state *state)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(state->dev);
 	struct drm_private_state *priv_state;
@@ -203,8 +181,8 @@ vc4_hvs_get_new_global_state(struct drm_atomic_state *state)
 	return to_vc4_hvs_state(priv_state);
 }
 
-static struct vc4_hvs_state *
-vc4_hvs_get_old_global_state(struct drm_atomic_state *state)
+struct vc4_hvs_state *
+vc4_hvs_get_old_global_state(const struct drm_atomic_state *state)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(state->dev);
 	struct drm_private_state *priv_state;
@@ -216,7 +194,7 @@ vc4_hvs_get_old_global_state(struct drm_atomic_state *state)
 	return to_vc4_hvs_state(priv_state);
 }
 
-static struct vc4_hvs_state *
+struct vc4_hvs_state *
 vc4_hvs_get_global_state(struct drm_atomic_state *state)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(state->dev);
@@ -236,6 +214,8 @@ static void vc4_hvs_pv_muxing_commit(struct vc4_dev *vc4,
 	struct drm_crtc_state *crtc_state;
 	struct drm_crtc *crtc;
 	unsigned int i;
+
+	WARN_ON_ONCE(vc4->gen != VC4_GEN_4);
 
 	for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
 		struct vc4_crtc *vc4_crtc = to_vc4_crtc(crtc);
@@ -279,6 +259,8 @@ static void vc5_hvs_pv_muxing_commit(struct vc4_dev *vc4,
 	unsigned char mux;
 	unsigned int i;
 	u32 reg;
+
+	WARN_ON_ONCE(vc4->gen != VC4_GEN_5);
 
 	for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
 		struct vc4_crtc_state *vc4_state = to_vc4_crtc_state(crtc_state);
@@ -344,17 +326,62 @@ static void vc5_hvs_pv_muxing_commit(struct vc4_dev *vc4,
 	}
 }
 
+static void vc6_hvs_pv_muxing_commit(struct vc4_dev *vc4,
+				     struct drm_atomic_state *state)
+{
+	struct vc4_hvs *hvs = vc4->hvs;
+	struct drm_crtc_state *crtc_state;
+	struct drm_crtc *crtc;
+	unsigned int i;
+
+	WARN_ON_ONCE(vc4->gen != VC4_GEN_6_C && vc4->gen != VC4_GEN_6_D);
+
+	for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
+		struct vc4_crtc_state *vc4_state = to_vc4_crtc_state(crtc_state);
+		struct vc4_encoder *vc4_encoder;
+		struct drm_encoder *encoder;
+		unsigned char mux;
+		u32 reg;
+
+		if (!vc4_state->update_muxing)
+			continue;
+
+		if (vc4_state->assigned_channel != 1)
+			continue;
+
+		encoder = vc4_get_crtc_encoder(crtc, crtc_state);
+		vc4_encoder = to_vc4_encoder(encoder);
+		switch (vc4_encoder->type) {
+		case VC4_ENCODER_TYPE_HDMI1:
+			mux = 0;
+			break;
+
+		case VC4_ENCODER_TYPE_TXP1:
+			mux = 2;
+			break;
+
+		default:
+			drm_err(&vc4->base, "Unhandled encoder type for PV muxing %d",
+				vc4_encoder->type);
+			mux = 0;
+			break;
+		}
+
+		reg = HVS_READ(SCALER6_CONTROL);
+		HVS_WRITE(SCALER6_CONTROL,
+			  (reg & ~SCALER6_CONTROL_DSP1_TARGET_MASK) |
+			  VC4_SET_FIELD(mux, SCALER6_CONTROL_DSP1_TARGET));
+	}
+}
+
 static void vc4_atomic_commit_tail(struct drm_atomic_state *state)
 {
 	struct drm_device *dev = state->dev;
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	struct vc4_hvs *hvs = vc4->hvs;
-	struct drm_crtc_state *new_crtc_state;
 	struct vc4_hvs_state *new_hvs_state;
-	struct drm_crtc *crtc;
 	struct vc4_hvs_state *old_hvs_state;
 	unsigned int channel;
-	int i;
 
 	old_hvs_state = vc4_hvs_get_old_global_state(state);
 	if (WARN_ON(IS_ERR(old_hvs_state)))
@@ -364,14 +391,20 @@ static void vc4_atomic_commit_tail(struct drm_atomic_state *state)
 	if (WARN_ON(IS_ERR(new_hvs_state)))
 		return;
 
-	for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
-		struct vc4_crtc_state *vc4_crtc_state;
+	if (vc4->gen < VC4_GEN_6_C) {
+		struct drm_crtc_state *new_crtc_state;
+		struct drm_crtc *crtc;
+		int i;
 
-		if (!new_crtc_state->commit)
-			continue;
+		for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
+			struct vc4_crtc_state *vc4_crtc_state;
 
-		vc4_crtc_state = to_vc4_crtc_state(new_crtc_state);
-		vc4_hvs_mask_underrun(hvs, vc4_crtc_state->assigned_channel);
+			if (!new_crtc_state->commit)
+				continue;
+
+			vc4_crtc_state = to_vc4_crtc_state(new_crtc_state);
+			vc4_hvs_mask_underrun(hvs, vc4_crtc_state->assigned_channel);
+		}
 	}
 
 	for (channel = 0; channel < HVS_NUM_CHANNELS; channel++) {
@@ -393,11 +426,11 @@ static void vc4_atomic_commit_tail(struct drm_atomic_state *state)
 		old_hvs_state->fifo_state[channel].pending_commit = NULL;
 	}
 
-	if (vc4->is_vc5) {
+	if (vc4->gen == VC4_GEN_5) {
 		unsigned long state_rate = max(old_hvs_state->core_clock_rate,
 					       new_hvs_state->core_clock_rate);
-		unsigned long core_rate = max_t(unsigned long,
-						500000000, state_rate);
+		unsigned long core_rate = clamp_t(unsigned long, state_rate,
+						  500000000, hvs->max_core_rate);
 
 		drm_dbg(dev, "Raising the core clock at %lu Hz\n", core_rate);
 
@@ -406,16 +439,32 @@ static void vc4_atomic_commit_tail(struct drm_atomic_state *state)
 		 * modeset.
 		 */
 		WARN_ON(clk_set_min_rate(hvs->core_clk, core_rate));
+		WARN_ON(clk_set_min_rate(hvs->disp_clk, core_rate));
 	}
 
 	drm_atomic_helper_commit_modeset_disables(dev, state);
 
-	vc4_ctm_commit(vc4, state);
+	if (vc4->gen <= VC4_GEN_5)
+		vc4_ctm_commit(vc4, state);
 
-	if (vc4->is_vc5)
-		vc5_hvs_pv_muxing_commit(vc4, state);
-	else
+	switch (vc4->gen) {
+	case VC4_GEN_4:
 		vc4_hvs_pv_muxing_commit(vc4, state);
+		break;
+
+	case VC4_GEN_5:
+		vc5_hvs_pv_muxing_commit(vc4, state);
+		break;
+
+	case VC4_GEN_6_C:
+	case VC4_GEN_6_D:
+		vc6_hvs_pv_muxing_commit(vc4, state);
+		break;
+
+	default:
+		drm_err(dev, "Unknown VC4 generation: %d", vc4->gen);
+		break;
+	}
 
 	drm_atomic_helper_commit_planes(dev, state,
 					DRM_PLANE_COMMIT_ACTIVE_ONLY);
@@ -430,15 +479,19 @@ static void vc4_atomic_commit_tail(struct drm_atomic_state *state)
 
 	drm_atomic_helper_cleanup_planes(dev, state);
 
-	if (vc4->is_vc5) {
-		drm_dbg(dev, "Running the core clock at %lu Hz\n",
-			new_hvs_state->core_clock_rate);
+	if (vc4->gen == VC4_GEN_5) {
+		unsigned long core_rate = min_t(unsigned long,
+						hvs->max_core_rate,
+						new_hvs_state->core_clock_rate);
+
+		drm_dbg(dev, "Running the core clock at %lu Hz\n", core_rate);
 
 		/*
 		 * Request a clock rate based on the current HVS
 		 * requirements.
 		 */
-		WARN_ON(clk_set_min_rate(hvs->core_clk, new_hvs_state->core_clock_rate));
+		WARN_ON(clk_set_min_rate(hvs->core_clk, core_rate));
+		WARN_ON(clk_set_min_rate(hvs->disp_clk, core_rate));
 
 		drm_dbg(dev, "Core clock actual rate: %lu Hz\n",
 			clk_get_rate(hvs->core_clk));
@@ -477,12 +530,13 @@ static int vc4_atomic_commit_setup(struct drm_atomic_state *state)
 
 static struct drm_framebuffer *vc4_fb_create(struct drm_device *dev,
 					     struct drm_file *file_priv,
+					     const struct drm_format_info *info,
 					     const struct drm_mode_fb_cmd2 *mode_cmd)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	struct drm_mode_fb_cmd2 mode_cmd_local;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return ERR_PTR(-ENODEV);
 
 	/* If the user didn't specify a modifier, use the
@@ -515,7 +569,7 @@ static struct drm_framebuffer *vc4_fb_create(struct drm_device *dev,
 		mode_cmd = &mode_cmd_local;
 	}
 
-	return drm_gem_fb_create(dev, file_priv, mode_cmd);
+	return drm_gem_fb_create(dev, file_priv, info, mode_cmd);
 }
 
 /* Our CTM has some peculiar limitations: we can only enable it for one CRTC
@@ -732,7 +786,7 @@ static void vc4_hvs_channels_destroy_state(struct drm_private_obj *obj,
 static void vc4_hvs_channels_print_state(struct drm_printer *p,
 					 const struct drm_private_state *state)
 {
-	struct vc4_hvs_state *hvs_state = to_vc4_hvs_state(state);
+	const struct vc4_hvs_state *hvs_state = to_vc4_hvs_state(state);
 	unsigned int i;
 
 	drm_printf(p, "HVS State\n");
@@ -773,6 +827,20 @@ static int vc4_hvs_channels_obj_init(struct vc4_dev *vc4)
 	return drmm_add_action_or_reset(&vc4->base, vc4_hvs_channels_obj_fini, NULL);
 }
 
+static int cmp_vc4_crtc_hvs_output(const void *a, const void *b)
+{
+	const struct vc4_crtc *crtc_a =
+		to_vc4_crtc(*(const struct drm_crtc **)a);
+	const struct vc4_crtc_data *data_a =
+		vc4_crtc_to_vc4_crtc_data(crtc_a);
+	const struct vc4_crtc *crtc_b =
+		to_vc4_crtc(*(const struct drm_crtc **)b);
+	const struct vc4_crtc_data *data_b =
+		vc4_crtc_to_vc4_crtc_data(crtc_b);
+
+	return data_a->hvs_output - data_b->hvs_output;
+}
+
 /*
  * The BCM2711 HVS has up to 7 outputs connected to the pixelvalves and
  * the TXP (and therefore all the CRTCs found on that platform).
@@ -807,10 +875,11 @@ static int vc4_pv_muxing_atomic_check(struct drm_device *dev,
 				      struct drm_atomic_state *state)
 {
 	struct vc4_hvs_state *hvs_new_state;
-	struct drm_crtc_state *old_crtc_state, *new_crtc_state;
+	struct drm_crtc **sorted_crtcs;
 	struct drm_crtc *crtc;
 	unsigned int unassigned_channels = 0;
 	unsigned int i;
+	int ret;
 
 	hvs_new_state = vc4_hvs_get_global_state(state);
 	if (IS_ERR(hvs_new_state))
@@ -820,14 +889,58 @@ static int vc4_pv_muxing_atomic_check(struct drm_device *dev,
 		if (!hvs_new_state->fifo_state[i].in_use)
 			unassigned_channels |= BIT(i);
 
-	for_each_oldnew_crtc_in_state(state, crtc, old_crtc_state, new_crtc_state, i) {
-		struct vc4_crtc_state *old_vc4_crtc_state =
-			to_vc4_crtc_state(old_crtc_state);
-		struct vc4_crtc_state *new_vc4_crtc_state =
-			to_vc4_crtc_state(new_crtc_state);
-		struct vc4_crtc *vc4_crtc = to_vc4_crtc(crtc);
+	/*
+	 * The problem we have to solve here is that we have up to 7
+	 * encoders, connected to up to 6 CRTCs.
+	 *
+	 * Those CRTCs, depending on the instance, can be routed to 1, 2
+	 * or 3 HVS FIFOs, and we need to set the muxing between FIFOs and
+	 * outputs in the HVS accordingly.
+	 *
+	 * It would be pretty hard to come up with an algorithm that
+	 * would generically solve this. However, the current routing
+	 * trees we support allow us to simplify a bit the problem.
+	 *
+	 * Indeed, with the current supported layouts, if we try to
+	 * assign in the ascending crtc index order the FIFOs, we can't
+	 * fall into the situation where an earlier CRTC that had
+	 * multiple routes is assigned one that was the only option for
+	 * a later CRTC.
+	 *
+	 * If the layout changes and doesn't give us that in the future,
+	 * we will need to have something smarter, but it works so far.
+	 */
+	sorted_crtcs = kmalloc_array(dev->num_crtcs, sizeof(*sorted_crtcs), GFP_KERNEL);
+	if (!sorted_crtcs)
+		return -ENOMEM;
+
+	i = 0;
+	drm_for_each_crtc(crtc, dev)
+		sorted_crtcs[i++] = crtc;
+
+	sort(sorted_crtcs, i, sizeof(*sorted_crtcs), cmp_vc4_crtc_hvs_output, NULL);
+
+	for (i = 0; i < dev->num_crtcs; i++) {
+		struct vc4_crtc_state *old_vc4_crtc_state, *new_vc4_crtc_state;
+		struct drm_crtc_state *old_crtc_state, *new_crtc_state;
+		struct vc4_crtc *vc4_crtc;
 		unsigned int matching_channels;
 		unsigned int channel;
+
+		crtc = sorted_crtcs[i];
+		if (!crtc)
+			continue;
+		vc4_crtc = to_vc4_crtc(crtc);
+
+		old_crtc_state = drm_atomic_get_old_crtc_state(state, crtc);
+		if (!old_crtc_state)
+			continue;
+		old_vc4_crtc_state = to_vc4_crtc_state(old_crtc_state);
+
+		new_crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+		if (!new_crtc_state)
+			continue;
+		new_vc4_crtc_state = to_vc4_crtc_state(new_crtc_state);
 
 		drm_dbg(dev, "%s: Trying to find a channel.\n", crtc->name);
 
@@ -857,33 +970,11 @@ static int vc4_pv_muxing_atomic_check(struct drm_device *dev,
 			continue;
 		}
 
-		/*
-		 * The problem we have to solve here is that we have
-		 * up to 7 encoders, connected to up to 6 CRTCs.
-		 *
-		 * Those CRTCs, depending on the instance, can be
-		 * routed to 1, 2 or 3 HVS FIFOs, and we need to set
-		 * the change the muxing between FIFOs and outputs in
-		 * the HVS accordingly.
-		 *
-		 * It would be pretty hard to come up with an
-		 * algorithm that would generically solve
-		 * this. However, the current routing trees we support
-		 * allow us to simplify a bit the problem.
-		 *
-		 * Indeed, with the current supported layouts, if we
-		 * try to assign in the ascending crtc index order the
-		 * FIFOs, we can't fall into the situation where an
-		 * earlier CRTC that had multiple routes is assigned
-		 * one that was the only option for a later CRTC.
-		 *
-		 * If the layout changes and doesn't give us that in
-		 * the future, we will need to have something smarter,
-		 * but it works so far.
-		 */
 		matching_channels = unassigned_channels & vc4_crtc->data->hvs_available_channels;
-		if (!matching_channels)
-			return -EINVAL;
+		if (!matching_channels) {
+			ret = -EINVAL;
+			goto err_free_crtc_array;
+		}
 
 		channel = ffs(matching_channels) - 1;
 
@@ -893,7 +984,12 @@ static int vc4_pv_muxing_atomic_check(struct drm_device *dev,
 		hvs_new_state->fifo_state[channel].in_use = true;
 	}
 
+	kfree(sorted_crtcs);
 	return 0;
+
+err_free_crtc_array:
+	kfree(sorted_crtcs);
+	return ret;
 }
 
 static int
@@ -1019,7 +1115,7 @@ int vc4_kms_load(struct drm_device *dev)
 	 * the BCM2711, but the load tracker computations are used for
 	 * the core clock rate calculation.
 	 */
-	if (!vc4->is_vc5) {
+	if (vc4->gen == VC4_GEN_4) {
 		/* Start with the load tracker enabled. Can be
 		 * disabled through the debugfs load_tracker file.
 		 */
@@ -1035,7 +1131,10 @@ int vc4_kms_load(struct drm_device *dev)
 		return ret;
 	}
 
-	if (vc4->is_vc5) {
+	if (vc4->gen >= VC4_GEN_6_C) {
+		dev->mode_config.max_width = 8192;
+		dev->mode_config.max_height = 8192;
+	} else if (vc4->gen >= VC4_GEN_5) {
 		dev->mode_config.max_width = 7680;
 		dev->mode_config.max_height = 7680;
 	} else {
@@ -1043,10 +1142,11 @@ int vc4_kms_load(struct drm_device *dev)
 		dev->mode_config.max_height = 2048;
 	}
 
-	dev->mode_config.funcs = vc4->is_vc5 ? &vc5_mode_funcs : &vc4_mode_funcs;
+	dev->mode_config.funcs = (vc4->gen > VC4_GEN_4) ? &vc5_mode_funcs : &vc4_mode_funcs;
 	dev->mode_config.helper_private = &vc4_mode_config_helpers;
 	dev->mode_config.preferred_depth = 24;
 	dev->mode_config.async_page_flip = true;
+	dev->mode_config.normalize_zpos = true;
 
 	ret = vc4_ctm_obj_init(vc4);
 	if (ret)

@@ -43,7 +43,9 @@
 int al5r_codec_major;
 int al5r_codec_nr_devs = AL5R_NR_DEVS;
 module_param(al5r_codec_nr_devs, int, S_IRUGO);
-static struct class *module_class;
+static struct class module_class = {
+	.name = "al5r_class",
+};
 
 
 int channel_is_ready(struct al5r_codec_chan *chan)
@@ -157,7 +159,7 @@ static int al5r_dma_mmap(struct file *filp, struct vm_area_struct *vma)
 		return ret;
 	}
 
-	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
+	vm_flags_set(vma, vma->vm_flags | VM_DONTEXPAND | VM_DONTDUMP);
 
 	return 0;
 }
@@ -338,7 +340,7 @@ int al5r_setup_codec_cdev(struct al5r_codec_desc *codec, int minor,
 	}
 
 	if (device_name != NULL) {
-		device = device_create(module_class, NULL, devno, NULL,
+		device = device_create(&module_class, NULL, devno, NULL,
 				       device_name);
 		if (IS_ERR(device)) {
 			pr_err("device not created\n");
@@ -591,17 +593,15 @@ out_no_resource:
 
 }
 
-int al5r_codec_remove(struct platform_device *pdev)
+void al5r_codec_remove(struct platform_device *pdev)
 {
 	struct al5r_codec_desc *codec = platform_get_drvdata(pdev);
 	dev_t dev = MKDEV(al5r_codec_major, codec->minor);
 
 	of_reserved_mem_device_release(codec->device);
-	device_destroy(module_class, dev);
+	device_destroy(&module_class, dev);
 	clean_up_al5r_codec_cdev(codec);
 	deinit_codec_desc(codec);
-
-	return 0;
 }
 
 static int al5r_codec_pci_probe(struct pci_dev *pdev,
@@ -723,16 +723,18 @@ static struct platform_driver al5r_platform_driver = {
 
 static int create_module_class(void)
 {
-	module_class = class_create(THIS_MODULE, "al5r_class");
-	if (IS_ERR(module_class))
-		return PTR_ERR(module_class);
+	int rc;
+
+	rc = class_register(&module_class);
+	if (rc)
+		return rc;
 
 	return 0;
 }
 
 static void destroy_module_class(void)
 {
-	class_destroy(module_class);
+	class_unregister(&module_class);
 }
 
 int al5r_module_init(void)

@@ -13,11 +13,15 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/regmap.h>
 #include <linux/interrupt.h>
+#include <linux/mfd/syscon.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/mailbox_controller.h>
 #include <soc/microchip/mpfs.h>
 
+#define MESSAGE_INT_OFFSET		0x18cu
 #define SERVICES_CR_OFFSET		0x50u
 #define SERVICES_SR_OFFSET		0x54u
 #define MAILBOX_REG_OFFSET		0x800u
@@ -39,7 +43,7 @@
 #define SCB_CTRL_NOTIFY_MASK BIT(SCB_CTRL_NOTIFY)
 
 #define SCB_CTRL_POS (16)
-#define SCB_CTRL_MASK GENMASK_ULL(SCB_CTRL_POS + SCB_MASK_WIDTH, SCB_CTRL_POS)
+#define SCB_CTRL_MASK GENMASK(SCB_CTRL_POS + SCB_MASK_WIDTH - 1, SCB_CTRL_POS)
 
 /* SCBCTRL service status register */
 
@@ -67,6 +71,7 @@ struct mpfs_mbox {
 	void __iomem *int_reg;
 	struct mbox_chan chans[1];
 	struct mpfs_mss_response *response;
+	struct regmap *sysreg_scb, *control_scb;
 	u16 resp_offset;
 };
 
@@ -74,9 +79,37 @@ static bool mpfs_mbox_busy(struct mpfs_mbox *mbox)
 {
 	u32 status;
 
-	status = readl_relaxed(mbox->ctrl_base + SERVICES_SR_OFFSET);
+	if (mbox->control_scb)
+		regmap_read(mbox->control_scb, SERVICES_SR_OFFSET, &status);
+	else
+		status = readl_relaxed(mbox->ctrl_base + SERVICES_SR_OFFSET);
 
 	return status & SCB_STATUS_BUSY_MASK;
+}
+
+static bool mpfs_mbox_last_tx_done(struct mbox_chan *chan)
+{
+	struct mpfs_mbox *mbox = (struct mpfs_mbox *)chan->con_priv;
+	struct mpfs_mss_response *response = mbox->response;
+	u32 val;
+
+	if (mpfs_mbox_busy(mbox))
+		return false;
+
+	/*
+	 * The service status is stored in bits 31:16 of the SERVICES_SR
+	 * register & is only valid when the system controller is not busy.
+	 * Failed services are intended to generated interrupts, but in reality
+	 * this does not happen, so the status must be checked here.
+	 */
+	if (mbox->control_scb)
+		regmap_read(mbox->control_scb, SERVICES_SR_OFFSET, &val);
+	else
+		val = readl_relaxed(mbox->ctrl_base + SERVICES_SR_OFFSET);
+
+	response->resp_status = (val & SCB_STATUS_MASK) >> SCB_STATUS_POS;
+
+	return true;
 }
 
 static int mpfs_mbox_send_data(struct mbox_chan *chan, void *data)
@@ -118,9 +151,15 @@ static int mpfs_mbox_send_data(struct mbox_chan *chan, void *data)
 	}
 
 	opt_sel = ((msg->mbox_offset << 7u) | (msg->cmd_opcode & 0x7fu));
+
 	tx_trigger = (opt_sel << SCB_CTRL_POS) & SCB_CTRL_MASK;
 	tx_trigger |= SCB_CTRL_REQ_MASK | SCB_STATUS_NOTIFY_MASK;
-	writel_relaxed(tx_trigger, mbox->ctrl_base + SERVICES_CR_OFFSET);
+
+	if (mbox->control_scb)
+		regmap_write(mbox->control_scb, SERVICES_CR_OFFSET, tx_trigger);
+	else
+		writel_relaxed(tx_trigger, mbox->ctrl_base + SERVICES_CR_OFFSET);
+
 
 	return 0;
 }
@@ -130,7 +169,7 @@ static void mpfs_mbox_rx_data(struct mbox_chan *chan)
 	struct mpfs_mbox *mbox = (struct mpfs_mbox *)chan->con_priv;
 	struct mpfs_mss_response *response = mbox->response;
 	u16 num_words = ALIGN((response->resp_size), (4)) / 4U;
-	u32 i, status;
+	u32 i;
 
 	if (!response->resp_msg) {
 		dev_err(mbox->dev, "failed to assign memory for response %d\n", -ENOMEM);
@@ -138,8 +177,6 @@ static void mpfs_mbox_rx_data(struct mbox_chan *chan)
 	}
 
 	/*
-	 * The status is stored in bits 31:16 of the SERVICES_SR register.
-	 * It is only valid when BUSY == 0.
 	 * We should *never* get an interrupt while the controller is
 	 * still in the busy state. If we do, something has gone badly
 	 * wrong & the content of the mailbox would not be valid.
@@ -150,24 +187,10 @@ static void mpfs_mbox_rx_data(struct mbox_chan *chan)
 		return;
 	}
 
-	status = readl_relaxed(mbox->ctrl_base + SERVICES_SR_OFFSET);
-
-	/*
-	 * If the status of the individual servers is non-zero, the service has
-	 * failed. The contents of the mailbox at this point are not be valid,
-	 * so don't bother reading them. Set the status so that the driver
-	 * implementing the service can handle the result.
-	 */
-	response->resp_status = (status & SCB_STATUS_MASK) >> SCB_STATUS_POS;
-	if (response->resp_status)
-		return;
-
-	if (!mpfs_mbox_busy(mbox)) {
-		for (i = 0; i < num_words; i++) {
-			response->resp_msg[i] =
-				readl_relaxed(mbox->mbox_base
-					      + mbox->resp_offset + i * 0x4);
-		}
+	for (i = 0; i < num_words; i++) {
+		response->resp_msg[i] =
+			readl_relaxed(mbox->mbox_base
+				      + mbox->resp_offset + i * 0x4);
 	}
 
 	mbox_chan_received_data(chan, response);
@@ -178,11 +201,13 @@ static irqreturn_t mpfs_mbox_inbox_isr(int irq, void *data)
 	struct mbox_chan *chan = data;
 	struct mpfs_mbox *mbox = (struct mpfs_mbox *)chan->con_priv;
 
-	writel_relaxed(0, mbox->int_reg);
+	if (mbox->control_scb)
+		regmap_write(mbox->sysreg_scb, MESSAGE_INT_OFFSET, 0);
+	else
+		writel_relaxed(0, mbox->int_reg);
 
 	mpfs_mbox_rx_data(chan);
 
-	mbox_chan_txdone(chan, 0);
 	return IRQ_HANDLED;
 }
 
@@ -212,30 +237,65 @@ static const struct mbox_chan_ops mpfs_mbox_ops = {
 	.send_data = mpfs_mbox_send_data,
 	.startup = mpfs_mbox_startup,
 	.shutdown = mpfs_mbox_shutdown,
+	.last_tx_done = mpfs_mbox_last_tx_done,
 };
+
+static inline int mpfs_mbox_syscon_probe(struct mpfs_mbox *mbox, struct platform_device *pdev)
+{
+	mbox->control_scb = syscon_regmap_lookup_by_compatible("microchip,mpfs-control-scb");
+	if (IS_ERR(mbox->control_scb))
+		return PTR_ERR(mbox->control_scb);
+
+	mbox->sysreg_scb = syscon_regmap_lookup_by_compatible("microchip,mpfs-sysreg-scb");
+	if (IS_ERR(mbox->sysreg_scb))
+		return PTR_ERR(mbox->sysreg_scb);
+
+	mbox->mbox_base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(mbox->mbox_base))
+		return PTR_ERR(mbox->mbox_base);
+
+	return 0;
+}
+
+static inline int mpfs_mbox_old_format_probe(struct mpfs_mbox *mbox, struct platform_device *pdev)
+{
+	dev_warn(&pdev->dev, "falling back to old devicetree format");
+
+	mbox->ctrl_base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(mbox->ctrl_base))
+		return PTR_ERR(mbox->ctrl_base);
+
+	mbox->int_reg = devm_platform_ioremap_resource(pdev, 1);
+	if (IS_ERR(mbox->int_reg))
+		return PTR_ERR(mbox->int_reg);
+
+	mbox->mbox_base = devm_platform_ioremap_resource(pdev, 2);
+	if (IS_ERR(mbox->mbox_base)) // account for the old dt-binding w/ 2 regs
+		mbox->mbox_base = mbox->ctrl_base + MAILBOX_REG_OFFSET;
+
+	return 0;
+}
 
 static int mpfs_mbox_probe(struct platform_device *pdev)
 {
 	struct mpfs_mbox *mbox;
-	struct resource *regs;
 	int ret;
 
 	mbox = devm_kzalloc(&pdev->dev, sizeof(*mbox), GFP_KERNEL);
 	if (!mbox)
 		return -ENOMEM;
 
-	mbox->ctrl_base = devm_platform_get_and_ioremap_resource(pdev, 0, &regs);
-	if (IS_ERR(mbox->ctrl_base))
-		return PTR_ERR(mbox->ctrl_base);
-
-	mbox->int_reg = devm_platform_get_and_ioremap_resource(pdev, 1, &regs);
-	if (IS_ERR(mbox->int_reg))
-		return PTR_ERR(mbox->int_reg);
-
-	mbox->mbox_base = devm_platform_get_and_ioremap_resource(pdev, 2, &regs);
-	if (IS_ERR(mbox->mbox_base)) // account for the old dt-binding w/ 2 regs
-		mbox->mbox_base = mbox->ctrl_base + MAILBOX_REG_OFFSET;
-
+	ret = mpfs_mbox_syscon_probe(mbox, pdev);
+	if (ret) {
+		/*
+		 * set this to null, so it can be used as the decision for to
+		 * regmap or not to regmap
+		 */
+		mbox->control_scb = NULL;
+		ret = mpfs_mbox_old_format_probe(mbox, pdev);
+		if (ret)
+			return ret;
+	}
 	mbox->irq = platform_get_irq(pdev, 0);
 	if (mbox->irq < 0)
 		return mbox->irq;
@@ -247,7 +307,8 @@ static int mpfs_mbox_probe(struct platform_device *pdev)
 	mbox->controller.num_chans = 1;
 	mbox->controller.chans = mbox->chans;
 	mbox->controller.ops = &mpfs_mbox_ops;
-	mbox->controller.txdone_irq = true;
+	mbox->controller.txdone_poll = true;
+	mbox->controller.txpoll_period = 10u;
 
 	ret = devm_mbox_controller_register(&pdev->dev, &mbox->controller);
 	if (ret) {

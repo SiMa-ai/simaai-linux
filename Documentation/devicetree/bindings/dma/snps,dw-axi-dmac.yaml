@@ -8,19 +8,20 @@ title: Synopsys DesignWare AXI DMA Controller
 
 maintainers:
   - Eugeniy Paltsev <Eugeniy.Paltsev@synopsys.com>
-  - Jee Heng Sia <jee.heng.sia@intel.com>
 
 description:
   Synopsys DesignWare AXI DMA Controller DT Binding
 
 allOf:
-  - $ref: "dma-controller.yaml#"
+  - $ref: dma-controller.yaml#
 
 properties:
   compatible:
     enum:
       - snps,axi-dma-1.01a
       - intel,kmb-axi-dma
+      - starfive,jh7110-axi-dma
+      - starfive,jh8100-axi-dma
 
   reg:
     minItems: 1
@@ -58,8 +59,11 @@ properties:
     minimum: 1
     maximum: 8
 
+  dma-noncoherent: true
+
   resets:
-    maxItems: 1
+    minItems: 1
+    maxItems: 2
 
   snps,dma-masters:
     description: |
@@ -96,6 +100,7 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32
     minimum: 1
     maximum: 256
+
   simaai,hardcoded-handshake:
     description:
       Indicates that the DMA handshake number is harcoded per channel. As a
@@ -103,15 +108,25 @@ properties:
       channel based on handshake number provided in the cell of the DMAC
       client.
     $ref: /schemas/types.yaml#/definitions/flag
+
+  simaai,abort-on-cancel:
+    description:
+      Indicates that the DMA should call complete callback with DMA_TRANS_ABORTED
+      result instead of just deleting all transactions when DMA termination is
+      requested by DMA user.
+    $ref: /schemas/types.yaml#/definitions/flag
+
   simaai,device-addr-mask:
     description:
       Indicates the mask that will be applied to a device address.
     $ref: /schemas/types.yaml#/definitions/uint64
-  snps,perch_irq:
-	type: boolean
-    description:
-      Indicates separate interrupt for each supported channel.
 
+  simaai,irq-affinity-mask:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: |
+      A bitmask of logical CPU indices. Bit 0 corresponds to CPU 0,
+      bit 1 to CPU 1, and so on. At least one bit must be set.
+      For example, 0x5 pins the IRQ to CPUs 0 and 2.
 required:
   - compatible
   - reg
@@ -125,25 +140,44 @@ required:
   - snps,priority
   - snps,block-size
 
+if:
+  properties:
+    compatible:
+      contains:
+        enum:
+          - starfive,jh7110-axi-dma
+then:
+  properties:
+    resets:
+      minItems: 2
+      items:
+        - description: AXI reset line
+        - description: AHB reset line
+        - description: module reset
+else:
+  properties:
+    resets:
+      maxItems: 1
+
 additionalProperties: false
 
 examples:
   - |
-     #include <dt-bindings/interrupt-controller/arm-gic.h>
-     #include <dt-bindings/interrupt-controller/irq.h>
-     /* example with snps,dw-axi-dmac */
-     dmac: dma-controller@80000 {
-         compatible = "snps,axi-dma-1.01a";
-         reg = <0x80000 0x400>;
-         clocks = <&core_clk>, <&cfgr_clk>;
-         clock-names = "core-clk", "cfgr-clk";
-         interrupt-parent = <&intc>;
-         interrupts = <27>;
-         #dma-cells = <1>;
-         dma-channels = <4>;
-         snps,dma-masters = <2>;
-         snps,data-width = <3>;
-         snps,block-size = <4096 4096 4096 4096>;
-         snps,priority = <0 1 2 3>;
-         snps,axi-max-burst-len = <16>;
-     };
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+    /* example with snps,dw-axi-dmac */
+    dma-controller@80000 {
+        compatible = "snps,axi-dma-1.01a";
+        reg = <0x80000 0x400>;
+        clocks = <&core_clk>, <&cfgr_clk>;
+        clock-names = "core-clk", "cfgr-clk";
+        interrupt-parent = <&intc>;
+        interrupts = <27>;
+        #dma-cells = <1>;
+        dma-channels = <4>;
+        snps,dma-masters = <2>;
+        snps,data-width = <3>;
+        snps,block-size = <4096 4096 4096 4096>;
+        snps,priority = <0 1 2 3>;
+        snps,axi-max-burst-len = <16>;
+    };

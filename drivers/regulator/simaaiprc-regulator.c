@@ -221,7 +221,7 @@ static const struct of_device_id regulator_simaai_prc_of_match[] = {
 	{ .compatible = "simaai-prc-regulator", },
 	{},
 };
-MODULE_DEVICE_TABLE(of, regulator_gsimaai_prc_of_match);
+MODULE_DEVICE_TABLE(of, regulator_simaai_prc_of_match);
 #endif
 
 static struct platform_driver simaai_prc_regulator_driver = {

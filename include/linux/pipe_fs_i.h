@@ -31,6 +31,33 @@ struct pipe_buffer {
 	unsigned long private;
 };
 
+/*
+ * Really only alpha needs 32-bit fields, but
+ * might as well do it for 64-bit architectures
+ * since that's what we've historically done,
+ * and it makes 'head_tail' always be a simple
+ * 'unsigned long'.
+ */
+#ifdef CONFIG_64BIT
+typedef unsigned int pipe_index_t;
+#else
+typedef unsigned short pipe_index_t;
+#endif
+
+/*
+ * We have to declare this outside 'struct pipe_inode_info',
+ * but then we can't use 'union pipe_index' for an anonymous
+ * union, so we end up having to duplicate this declaration
+ * below. Annoying.
+ */
+union pipe_index {
+	unsigned long head_tail;
+	struct {
+		pipe_index_t head;
+		pipe_index_t tail;
+	};
+};
+
 /**
  *	struct pipe_inode_info - a linux kernel pipe
  *	@mutex: mutex protecting the whole thing
@@ -38,6 +65,7 @@ struct pipe_buffer {
  *	@wr_wait: writer wait point in case of full pipe
  *	@head: The point of buffer production
  *	@tail: The point of buffer consumption
+ *	@head_tail: unsigned long union of @head and @tail
  *	@note_loss: The next read() should insert a data-lost message
  *	@max_usage: The maximum number of slots that may be used in the ring
  *	@ring_size: total number of buffers (should be a power of 2)
@@ -58,13 +86,18 @@ struct pipe_buffer {
 struct pipe_inode_info {
 	struct mutex mutex;
 	wait_queue_head_t rd_wait, wr_wait;
-	unsigned int head;
-	unsigned int tail;
+
+	/* This has to match the 'union pipe_index' above */
+	union {
+		unsigned long head_tail;
+		struct {
+			pipe_index_t head;
+			pipe_index_t tail;
+		};
+	};
+
 	unsigned int max_usage;
 	unsigned int ring_size;
-#ifdef CONFIG_WATCH_QUEUE
-	bool note_loss;
-#endif
 	unsigned int nr_accounted;
 	unsigned int readers;
 	unsigned int writers;
@@ -72,7 +105,10 @@ struct pipe_inode_info {
 	unsigned int r_counter;
 	unsigned int w_counter;
 	bool poll_usage;
-	struct page *tmp_page;
+#ifdef CONFIG_WATCH_QUEUE
+	bool note_loss;
+#endif
+	struct page *tmp_page[2];
 	struct fasync_struct *fasync_readers;
 	struct fasync_struct *fasync_writers;
 	struct pipe_buffer *bufs;
@@ -125,13 +161,19 @@ struct pipe_buf_operations {
 };
 
 /**
- * pipe_empty - Return true if the pipe is empty
- * @head: The pipe ring head pointer
- * @tail: The pipe ring tail pointer
+ * pipe_has_watch_queue - Check whether the pipe is a watch_queue,
+ * i.e. it was created with O_NOTIFICATION_PIPE
+ * @pipe: The pipe to check
+ *
+ * Return: true if pipe is a watch queue, false otherwise.
  */
-static inline bool pipe_empty(unsigned int head, unsigned int tail)
+static inline bool pipe_has_watch_queue(const struct pipe_inode_info *pipe)
 {
-	return head == tail;
+#ifdef CONFIG_WATCH_QUEUE
+	return pipe->watch_queue != NULL;
+#else
+	return false;
+#endif
 }
 
 /**
@@ -141,7 +183,17 @@ static inline bool pipe_empty(unsigned int head, unsigned int tail)
  */
 static inline unsigned int pipe_occupancy(unsigned int head, unsigned int tail)
 {
-	return head - tail;
+	return (pipe_index_t)(head - tail);
+}
+
+/**
+ * pipe_empty - Return true if the pipe is empty
+ * @head: The pipe ring head pointer
+ * @tail: The pipe ring tail pointer
+ */
+static inline bool pipe_empty(unsigned int head, unsigned int tail)
+{
+	return !pipe_occupancy(head, tail);
 }
 
 /**
@@ -154,6 +206,53 @@ static inline bool pipe_full(unsigned int head, unsigned int tail,
 			     unsigned int limit)
 {
 	return pipe_occupancy(head, tail) >= limit;
+}
+
+/**
+ * pipe_is_full - Return true if the pipe is full
+ * @pipe: the pipe
+ */
+static inline bool pipe_is_full(const struct pipe_inode_info *pipe)
+{
+	return pipe_full(pipe->head, pipe->tail, pipe->max_usage);
+}
+
+/**
+ * pipe_is_empty - Return true if the pipe is empty
+ * @pipe: the pipe
+ */
+static inline bool pipe_is_empty(const struct pipe_inode_info *pipe)
+{
+	return pipe_empty(pipe->head, pipe->tail);
+}
+
+/**
+ * pipe_buf_usage - Return how many pipe buffers are in use
+ * @pipe: the pipe
+ */
+static inline unsigned int pipe_buf_usage(const struct pipe_inode_info *pipe)
+{
+	return pipe_occupancy(pipe->head, pipe->tail);
+}
+
+/**
+ * pipe_buf - Return the pipe buffer for the specified slot in the pipe ring
+ * @pipe: The pipe to access
+ * @slot: The slot of interest
+ */
+static inline struct pipe_buffer *pipe_buf(const struct pipe_inode_info *pipe,
+					   unsigned int slot)
+{
+	return &pipe->bufs[slot & (pipe->ring_size - 1)];
+}
+
+/**
+ * pipe_head_buf - Return the pipe buffer at the head of the pipe ring
+ * @pipe: The pipe to access
+ */
+static inline struct pipe_buffer *pipe_head_buf(const struct pipe_inode_info *pipe)
+{
+	return pipe_buf(pipe, pipe->head);
 }
 
 /**
@@ -209,15 +308,6 @@ static inline bool pipe_buf_try_steal(struct pipe_inode_info *pipe,
 	return buf->ops->try_steal(pipe, buf);
 }
 
-static inline void pipe_discard_from(struct pipe_inode_info *pipe,
-		unsigned int old_head)
-{
-	unsigned int mask = pipe->ring_size - 1;
-
-	while (pipe->head > old_head)
-		pipe_buf_release(pipe, &pipe->bufs[--pipe->head & mask]);
-}
-
 /* Differs from PIPE_BUF in that PIPE_SIZE is the length of the actual
    memory allocation, whereas PIPE_BUF makes atomicity guarantees.  */
 #define PIPE_SIZE		PAGE_SIZE
@@ -241,22 +331,18 @@ void generic_pipe_buf_release(struct pipe_inode_info *, struct pipe_buffer *);
 
 extern const struct pipe_buf_operations nosteal_pipe_buf_ops;
 
-#ifdef CONFIG_WATCH_QUEUE
 unsigned long account_pipe_buffers(struct user_struct *user,
 				   unsigned long old, unsigned long new);
 bool too_many_pipe_buffers_soft(unsigned long user_bufs);
 bool too_many_pipe_buffers_hard(unsigned long user_bufs);
 bool pipe_is_unprivileged_user(void);
-#endif
 
 /* for F_SETPIPE_SZ and F_GETPIPE_SZ */
-#ifdef CONFIG_WATCH_QUEUE
 int pipe_resize_ring(struct pipe_inode_info *pipe, unsigned int nr_slots);
-#endif
-long pipe_fcntl(struct file *, unsigned int, unsigned long arg);
+long pipe_fcntl(struct file *, unsigned int, unsigned int arg);
 struct pipe_inode_info *get_pipe_info(struct file *file, bool for_splice);
 
 int create_pipe_files(struct file **, int);
-unsigned int round_pipe_size(unsigned long size);
+unsigned int round_pipe_size(unsigned int size);
 
 #endif

@@ -46,7 +46,7 @@ int fw_intf_m2m_process_request( uint32_t ctx_id );
 
 /* fw-interface per-stream config interface */
 int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_info,
-                                   isp_v4l2_stream_type_t stream_type, uint32_t *width, uint32_t *height );
+                                   isp_v4l2_stream_type_t stream_type, uint32_t *width, uint32_t *height, uint32_t pixel_format);
 int fw_intf_stream_set_output_format( uint32_t ctx_id, isp_v4l2_stream_type_t stream_type, isp_v4l2_stream_direction_t stream_direction, uint32_t format );
 
 /* fw-interface isp config interface */

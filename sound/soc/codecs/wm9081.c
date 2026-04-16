@@ -907,18 +907,18 @@ static int wm9081_set_dai_fmt(struct snd_soc_dai *dai,
 		  WM9081_BCLK_DIR | WM9081_LRCLK_DIR | WM9081_AIF_FMT_MASK);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		wm9081->master = 0;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFM:
+	case SND_SOC_DAIFMT_CBC_CFP:
 		aif2 |= WM9081_LRCLK_DIR;
 		wm9081->master = 1;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFS:
+	case SND_SOC_DAIFMT_CBP_CFC:
 		aif2 |= WM9081_BCLK_DIR;
 		wm9081->master = 1;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		aif2 |= WM9081_LRCLK_DIR | WM9081_BCLK_DIR;
 		wm9081->master = 1;
 		break;
@@ -1295,7 +1295,7 @@ static const struct regmap_config wm9081_regmap = {
 	.num_reg_defaults = ARRAY_SIZE(wm9081_reg),
 	.volatile_reg = wm9081_volatile_register,
 	.readable_reg = wm9081_readable_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 };
 
 static int wm9081_i2c_probe(struct i2c_client *i2c)
@@ -1360,7 +1360,7 @@ static void wm9081_i2c_remove(struct i2c_client *client)
 {}
 
 static const struct i2c_device_id wm9081_i2c_id[] = {
-	{ "wm9081", 0 },
+	{ "wm9081" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm9081_i2c_id);
@@ -1369,7 +1369,7 @@ static struct i2c_driver wm9081_i2c_driver = {
 	.driver = {
 		.name = "wm9081",
 	},
-	.probe_new = wm9081_i2c_probe,
+	.probe =    wm9081_i2c_probe,
 	.remove =   wm9081_i2c_remove,
 	.id_table = wm9081_i2c_id,
 };

@@ -7,9 +7,10 @@
  * Copyright (C) 2009 Bernie Thompson <bernie@plugable.com>
  */
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "udl_drv.h"
+#include "udl_proto.h"
 
 #define MAX_CMD_PIXELS		255
 
@@ -89,8 +90,8 @@ static void udl_compress_hline16(
 		const u8 *cmd_pixel_start, *cmd_pixel_end = NULL;
 		uint16_t pixel_val16;
 
-		*cmd++ = 0xaf;
-		*cmd++ = 0x6b;
+		*cmd++ = UDL_MSG_BULK;
+		*cmd++ = UDL_CMD_WRITERLX16;
 		*cmd++ = (uint8_t) ((dev_addr >> 16) & 0xFF);
 		*cmd++ = (uint8_t) ((dev_addr >> 8) & 0xFF);
 		*cmd++ = (uint8_t) ((dev_addr) & 0xFF);
@@ -152,7 +153,7 @@ static void udl_compress_hline16(
 	if (cmd_buffer_end <= MIN_RLX_CMD_BYTES + cmd) {
 		/* Fill leftover bytes with no-ops */
 		if (cmd_buffer_end > cmd)
-			memset(cmd, 0xAF, cmd_buffer_end - cmd);
+			memset(cmd, UDL_MSG_BULK, cmd_buffer_end - cmd);
 		cmd = (uint8_t *) cmd_buffer_end;
 	}
 
@@ -169,7 +170,7 @@ static void udl_compress_hline16(
  * (that we can only write to, slowly, and can never read), and (optionally)
  * our shadow copy that tracks what's been sent to that hardware buffer.
  */
-int udl_render_hline(struct drm_device *dev, int log_bpp, struct urb **urb_ptr,
+int udl_render_hline(struct udl_device *udl, int log_bpp, struct urb **urb_ptr,
 		     const char *front, char **urb_buf_ptr,
 		     u32 byte_offset, u32 device_byte_offset,
 		     u32 byte_width)
@@ -198,10 +199,10 @@ int udl_render_hline(struct drm_device *dev, int log_bpp, struct urb **urb_ptr,
 
 		if (cmd >= cmd_end) {
 			int len = cmd - (u8 *) urb->transfer_buffer;
-			int ret = udl_submit_urb(dev, urb, len);
+			int ret = udl_submit_urb(udl, urb, len);
 			if (ret)
 				return ret;
-			urb = udl_get_urb(dev);
+			urb = udl_get_urb(udl);
 			if (!urb)
 				return -EAGAIN;
 			*urb_ptr = urb;

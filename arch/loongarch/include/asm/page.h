@@ -8,27 +8,14 @@
 #include <linux/const.h>
 #include <asm/addrspace.h>
 
-/*
- * PAGE_SHIFT determines the page size
- */
-#ifdef CONFIG_PAGE_SIZE_4KB
-#define PAGE_SHIFT	12
-#endif
-#ifdef CONFIG_PAGE_SIZE_16KB
-#define PAGE_SHIFT	14
-#endif
-#ifdef CONFIG_PAGE_SIZE_64KB
-#define PAGE_SHIFT	16
-#endif
-#define PAGE_SIZE	(_AC(1, UL) << PAGE_SHIFT)
-#define PAGE_MASK	(~(PAGE_SIZE - 1))
+#include <vdso/page.h>
 
 #define HPAGE_SHIFT	(PAGE_SHIFT + PAGE_SHIFT - 3)
 #define HPAGE_SIZE	(_AC(1, UL) << HPAGE_SHIFT)
 #define HPAGE_MASK	(~(HPAGE_SIZE - 1))
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/kernel.h>
 #include <linux/pfn.h>
@@ -81,34 +68,48 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 #define __va(x)		((void *)((unsigned long)(x) + PAGE_OFFSET - PHYS_OFFSET))
 
 #define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
+#define sym_to_pfn(x)		__phys_to_pfn(__pa_symbol(x))
 
-#ifdef CONFIG_FLATMEM
+struct page *dmw_virt_to_page(unsigned long kaddr);
+struct page *tlb_virt_to_page(unsigned long kaddr);
 
-static inline int pfn_valid(unsigned long pfn)
-{
-	/* avoid <linux/mm.h> include hell */
-	extern unsigned long max_mapnr;
-	unsigned long pfn_offset = ARCH_PFN_OFFSET;
+#define pfn_to_phys(pfn)	__pfn_to_phys(pfn)
+#define phys_to_pfn(paddr)	__phys_to_pfn(paddr)
 
-	return pfn >= pfn_offset && pfn < max_mapnr;
-}
+#ifndef CONFIG_KFENCE
+
+#define page_to_virt(page)	__va(page_to_phys(page))
+#define virt_to_page(kaddr)	phys_to_page(__pa(kaddr))
+
+#else
+
+#define WANT_PAGE_VIRTUAL
+
+#define page_to_virt(page)								\
+({											\
+	extern char *__kfence_pool;							\
+	(__kfence_pool == NULL) ? __va(page_to_phys(page)) : page_address(page);	\
+})
+
+#define virt_to_page(kaddr)								\
+({											\
+	(likely((unsigned long)kaddr < vm_map_base)) ?					\
+	dmw_virt_to_page((unsigned long)kaddr) : tlb_virt_to_page((unsigned long)kaddr);\
+})
 
 #endif
 
-#define virt_to_pfn(kaddr)	PFN_DOWN(PHYSADDR(kaddr))
-#define virt_to_page(kaddr)	pfn_to_page(virt_to_pfn(kaddr))
+#define pfn_to_virt(pfn)	page_to_virt(pfn_to_page(pfn))
+#define virt_to_pfn(kaddr)	page_to_pfn(virt_to_page(kaddr))
 
 extern int __virt_addr_valid(volatile void *kaddr);
 #define virt_addr_valid(kaddr)	__virt_addr_valid((volatile void *)(kaddr))
 
-#define VM_DATA_DEFAULT_FLAGS \
-	(VM_READ | VM_WRITE | \
-	 ((current->personality & READ_IMPLIES_EXEC) ? VM_EXEC : 0) | \
-	 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+#define VM_DATA_DEFAULT_FLAGS	VM_DATA_FLAGS_TSK_EXEC
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 #endif /* _ASM_PAGE_H */

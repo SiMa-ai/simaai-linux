@@ -54,8 +54,8 @@ examples:
   - |
     #include <dt-bindings/gpio/gpio.h>
     spi {
-      #address-cells = <1>;
-      #size-cells = <0>;
+        #address-cells = <1>;
+        #size-cells = <0>;
 
         adc@0 {
             compatible = "maxim,max1241";
@@ -63,6 +63,6 @@ examples:
             vdd-supply = <&adc_vdd>;
             vref-supply = <&adc_vref>;
             spi-max-frequency = <1000000>;
-            shutdown-gpios = <&gpio 26 1>;
+            shutdown-gpios = <&gpio 26 GPIO_ACTIVE_LOW>;
         };
     };

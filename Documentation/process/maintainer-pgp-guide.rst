@@ -49,7 +49,7 @@ hosting infrastructure, regardless of how good the security practices
 for the latter may be.
 
 The above guiding principle is the reason why this guide is needed. We
-want to make sure that by placing trust into developers we do not simply
+want to make sure that by placing trust into developers we do not merely
 shift the blame for potential future security incidents to someone else.
 The goal is to provide a set of guidelines developers can use to create
 a secure working environment and safeguard the PGP keys used to
@@ -60,36 +60,18 @@ establish the integrity of the Linux kernel itself.
 PGP tools
 =========
 
-Use GnuPG v2
-------------
+Use GnuPG 2.4 or later
+----------------------
 
 Your distro should already have GnuPG installed by default, you just
-need to verify that you are using version 2.x and not the legacy 1.4
-release -- many distributions still package both, with the default
-``gpg`` command invoking GnuPG v.1. To check, run::
+need to verify that you are using a reasonably recent version of it.
+To check, run::
 
     $ gpg --version | head -n1
 
-If you see ``gpg (GnuPG) 1.4.x``, then you are using GnuPG v.1. Try the
-``gpg2`` command (if you don't have it, you may need to install the
-gnupg2 package)::
-
-    $ gpg2 --version | head -n1
-
-If you see ``gpg (GnuPG) 2.x.x``, then you are good to go. This guide
-will assume you have the version 2.2 of GnuPG (or later). If you are
-using version 2.0 of GnuPG, then some of the commands in this guide will
-not work, and you should consider installing the latest 2.2 version of
-GnuPG. Versions of gnupg-2.1.11 and later should be compatible for the
-purposes of this guide as well.
-
-If you have both ``gpg`` and ``gpg2`` commands, you should make sure you
-are always using GnuPG v2, not the legacy version. You can enforce this
-by setting the appropriate alias::
-
-    $ alias gpg=gpg2
-
-You can put that in your ``.bashrc`` to make sure it's always the case.
+If you have version 2.4 or above, then you are good to go. If you have
+an earlier version, then you are using a release of GnuPG that is no
+longer maintained and some commands from this guide may not work.
 
 Configure gpg-agent options
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -150,9 +132,9 @@ PGP defines four capabilities that a key can have:
 The key with the **[C]** capability is often called the "master" key,
 but this terminology is misleading because it implies that the Certify
 key can be used in place of any of other subkey on the same chain (like
-a physical "master key" can be used to open the locks made for other
-keys). Since this is not the case, this guide will refer to it as "the
-Certify key" to avoid any ambiguity.
+a physical "master key" can be used to open locks made for other keys).
+Since this is not the case, this guide will refer to it as "the Certify
+key" to avoid any ambiguity.
 
 It is critical to fully understand the following:
 
@@ -186,10 +168,10 @@ If you used the default parameters when generating your key, then that
 is what you will have. You can verify by running ``gpg --list-secret-keys``,
 for example::
 
-    sec   rsa2048 2018-01-23 [SC] [expires: 2020-01-23]
+    sec   ed25519 2022-12-20 [SC] [expires: 2024-12-19]
           000000000000000000000000AAAABBBBCCCCDDDD
     uid           [ultimate] Alice Dev <adev@kernel.org>
-    ssb   rsa2048 2018-01-23 [E] [expires: 2020-01-23]
+    ssb   cv25519 2022-12-20 [E] [expires: 2024-12-19]
 
 The long line under the ``sec`` entry is your key fingerprint --
 whenever you see ``[fpr]`` in the examples below, that 40-character
@@ -217,22 +199,6 @@ separate signing subkey::
 
     $ gpg --quick-addkey [fpr] ed25519 sign
 
-.. note:: ECC support in GnuPG
-
-    GnuPG 2.1 and later has full support for Elliptic Curve
-    Cryptography, with ability to combine ECC subkeys with traditional
-    RSA keys. The main upside of ECC cryptography is that it is much
-    faster computationally and creates much smaller signatures when
-    compared byte for byte with 2048+ bit RSA keys. Unless you plan on
-    using a smartcard device that does not support ECC operations, we
-    recommend that you create an ECC signing subkey for your kernel
-    work.
-
-    Note, that if you plan to use a hardware device that does not
-    support ED25519 ECC keys, you should choose "nistp256" instead or
-    "ed25519."
-
-
 Back up your Certify key for disaster recovery
 ----------------------------------------------
 
@@ -240,7 +206,7 @@ The more signatures you have on your PGP key from other developers, the
 more reasons you have to create a backup version that lives on something
 other than digital media, for disaster recovery reasons.
 
-The best way to create a printable hardcopy of your private key is by
+A good way to create a printable hardcopy of your private key is by
 using the ``paperkey`` software written for this very purpose. See ``man
 paperkey`` for more details on the output format and its benefits over
 other solutions. Paperkey should already be packaged for most
@@ -251,11 +217,11 @@ key::
 
     $ gpg --export-secret-key [fpr] | paperkey -o /tmp/key-backup.txt
 
-Print out that file (or pipe the output straight to lpr), then take a
-pen and write your passphrase on the margin of the paper. **This is
-strongly recommended** because the key printout is still encrypted with
-that passphrase, and if you ever change it you will not remember what it
-used to be when you had created the backup -- *guaranteed*.
+Print out that file, then take a pen and write your passphrase on the
+margin of the paper. **This is strongly recommended** because the key
+printout is still encrypted with that passphrase, and if you ever change
+it you will not remember what it used to be when you had created the
+backup -- *guaranteed*.
 
 Put the resulting printout and the hand-written passphrase into an envelope
 and store in a secure and well-protected place, preferably away from your
@@ -263,10 +229,9 @@ home, such as your bank vault.
 
 .. note::
 
-    Your printer is probably no longer a simple dumb device connected to
-    your parallel port, but since the output is still encrypted with
-    your passphrase, printing out even to "cloud-integrated" modern
-    printers should remain a relatively safe operation.
+    The key is still encrypted with your passphrase, so printing out
+    even to "cloud-integrated" modern printers should remain a
+    relatively safe operation.
 
 Back up your whole GnuPG directory
 ----------------------------------
@@ -282,16 +247,17 @@ on these external copies whenever you need to use your Certify key --
 such as when making changes to your own key or signing other people's
 keys after conferences and summits.
 
-Start by getting a small USB "thumb" drive (preferably two!) that you
-will use for backup purposes. You will need to encrypt them using LUKS
--- refer to your distro's documentation on how to accomplish this.
+Start by getting an external media card (preferably two!) that you will
+use for backup purposes. You will need to create an encrypted partition
+on this device using LUKS -- refer to your distro's documentation on how
+to accomplish this.
 
 For the encryption passphrase, you can use the same one as on your
 PGP key.
 
-Once the encryption process is over, re-insert the USB drive and make
-sure it gets properly mounted. Copy your entire ``.gnupg`` directory
-over to the encrypted storage::
+Once the encryption process is over, re-insert your device and make sure
+it gets properly mounted. Copy your entire ``.gnupg`` directory over to
+the encrypted storage::
 
     $ cp -a ~/.gnupg /media/disk/foo/gnupg-backup
 
@@ -300,11 +266,10 @@ You should now test to make sure everything still works::
     $ gpg --homedir=/media/disk/foo/gnupg-backup --list-key [fpr]
 
 If you don't get any errors, then you should be good to go. Unmount the
-USB drive, distinctly label it so you don't blow it away next time you
-need to use a random USB drive, and put in a safe place -- but not too
-far away, because you'll need to use it every now and again for things
-like editing identities, adding or revoking subkeys, or signing other
-people's keys.
+device, distinctly label it so you don't overwrite it by accident, and
+put in a safe place -- but not too far away, because you'll need to use
+it every now and again for things like editing identities, adding or
+revoking subkeys, or signing other people's keys.
 
 Remove the Certify key from your homedir
 ----------------------------------------
@@ -330,19 +295,19 @@ and store it on offline storage.
     your GnuPG directory in its entirety. What we are about to do will
     render your key useless if you do not have a usable backup!
 
-First, identify the keygrip of your Certify key::
+First, identify the "keygrip" of your Certify key::
 
     $ gpg --with-keygrip --list-key [fpr]
 
 The output will be something like this::
 
-    pub   rsa2048 2018-01-24 [SC] [expires: 2020-01-24]
+    pub   ed25519 2022-12-20 [SC] [expires: 2022-12-19]
           000000000000000000000000AAAABBBBCCCCDDDD
           Keygrip = 1111000000000000000000000000000000000000
     uid           [ultimate] Alice Dev <adev@kernel.org>
-    sub   rsa2048 2018-01-24 [E] [expires: 2020-01-24]
+    sub   cv25519 2022-12-20 [E] [expires: 2022-12-19]
           Keygrip = 2222000000000000000000000000000000000000
-    sub   ed25519 2018-01-24 [S]
+    sub   ed25519 2022-12-20 [S]
           Keygrip = 3333000000000000000000000000000000000000
 
 Find the keygrip entry that is beneath the ``pub`` line (right under the
@@ -355,8 +320,8 @@ Certify key fingerprint). This will correspond directly to a file in your
     2222000000000000000000000000000000000000.key
     3333000000000000000000000000000000000000.key
 
-All you have to do is simply remove the .key file that corresponds to
-the Certify key keygrip::
+It is sufficient to remove the .key file that corresponds to the Certify
+key keygrip::
 
     $ cd ~/.gnupg/private-keys-v1.d
     $ rm 1111000000000000000000000000000000000000.key
@@ -365,14 +330,14 @@ Now, if you issue the ``--list-secret-keys`` command, it will show that
 the Certify key is missing (the ``#`` indicates it is not available)::
 
     $ gpg --list-secret-keys
-    sec#  rsa2048 2018-01-24 [SC] [expires: 2020-01-24]
+    sec#  ed25519 2022-12-20 [SC] [expires: 2024-12-19]
           000000000000000000000000AAAABBBBCCCCDDDD
     uid           [ultimate] Alice Dev <adev@kernel.org>
-    ssb   rsa2048 2018-01-24 [E] [expires: 2020-01-24]
-    ssb   ed25519 2018-01-24 [S]
+    ssb   cv25519 2022-12-20 [E] [expires: 2024-12-19]
+    ssb   ed25519 2022-12-20 [S]
 
 You should also remove any ``secring.gpg`` files in the ``~/.gnupg``
-directory, which are left over from earlier versions of GnuPG.
+directory, which may be left over from previous versions of GnuPG.
 
 If you don't have the "private-keys-v1.d" directory
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -399,7 +364,7 @@ GnuPG operation is performed, the keys are loaded into system memory and
 can be stolen from there by sufficiently advanced malware (think
 Meltdown and Spectre).
 
-The best way to completely protect your keys is to move them to a
+A good way to completely protect your keys is to move them to a
 specialized hardware device that is capable of smartcard operations.
 
 The benefits of smartcards
@@ -410,11 +375,11 @@ private keys and performing crypto operations directly on the card
 itself. Because the key contents never leave the smartcard, the
 operating system of the computer into which you plug in the hardware
 device is not able to retrieve the private keys themselves. This is very
-different from the encrypted USB storage device we used earlier for
-backup purposes -- while that USB device is plugged in and mounted, the
+different from the encrypted media storage device we used earlier for
+backup purposes -- while that device is plugged in and mounted, the
 operating system is able to access the private key contents.
 
-Using external encrypted USB media is not a substitute to having a
+Using external encrypted media is not a substitute to having a
 smartcard-capable device.
 
 Available smartcard devices
@@ -425,20 +390,17 @@ easiest is to get a specialized USB device that implements smartcard
 functionality. There are several options available:
 
 - `Nitrokey Start`_: Open hardware and Free Software, based on FSI
-  Japan's `Gnuk`_. One of the few available commercial devices that
-  support ED25519 ECC keys, but offer fewest security features (such as
-  resistance to tampering or some side-channel attacks).
-- `Nitrokey Pro 2`_: Similar to the Nitrokey Start, but more
-  tamper-resistant and offers more security features. Pro 2 supports ECC
-  cryptography (NISTP).
+  Japan's `Gnuk`_. One of the cheapest options, but offers fewest
+  security features (such as resistance to tampering or some
+  side-channel attacks).
+- `Nitrokey 3`_: Similar to the Nitrokey Start, but more
+  tamper-resistant and offers more security features and USB
+  form-factors. Supports ECC cryptography (ED25519 and NISTP).
 - `Yubikey 5`_: proprietary hardware and software, but cheaper than
-  Nitrokey Pro and comes available in the USB-C form that is more useful
-  with newer laptops. Offers additional security features such as FIDO
-  U2F, among others, and now finally supports NISTP and ED25519 ECC
-  keys.
+  Nitrokey with a similar set of features. Supports ECC cryptography
+  (ED25519 and NISTP).
 
-`LWN has a good review`_ of some of the above models, as well as several
-others. Your choice will depend on cost, shipping availability in your
+Your choice will depend on cost, shipping availability in your
 geographical region, and open/proprietary hardware considerations.
 
 .. note::
@@ -447,11 +409,10 @@ geographical region, and open/proprietary hardware considerations.
     you `qualify for a free Nitrokey Start`_ courtesy of The Linux
     Foundation.
 
-.. _`Nitrokey Start`: https://shop.nitrokey.com/shop/product/nitrokey-start-6
-.. _`Nitrokey Pro 2`: https://shop.nitrokey.com/shop/product/nkpr2-nitrokey-pro-2-3
+.. _`Nitrokey Start`: https://www.nitrokey.com/products/nitrokeys
+.. _`Nitrokey 3`: https://www.nitrokey.com/products/nitrokeys
 .. _`Yubikey 5`: https://www.yubico.com/products/yubikey-5-overview/
 .. _Gnuk: https://www.fsij.org/doc-gnuk/
-.. _`LWN has a good review`: https://lwn.net/Articles/736231/
 .. _`qualify for a free Nitrokey Start`: https://www.kernel.org/nitrokey-digital-tokens-for-kernel-developers.html
 
 Configure your smartcard device
@@ -484,7 +445,7 @@ the smartcard). You so rarely need to use the Admin PIN, that you will
 inevitably forget what it is if you do not record it.
 
 Getting back to the main card menu, you can also set other values (such
-as name, sex, login data, etc), but it's not necessary and will
+as name, gender, login data, etc), but it's not necessary and will
 additionally leak information about your smartcard should you lose it.
 
 .. note::
@@ -509,11 +470,11 @@ passphrase and the admin PIN of the card for most operations::
 
     Secret subkeys are available.
 
-    pub  rsa2048/AAAABBBBCCCCDDDD
-         created: 2018-01-23  expires: 2020-01-23  usage: SC
+    pub  ed25519/AAAABBBBCCCCDDDD
+         created: 2022-12-20  expires: 2024-12-19  usage: SC
          trust: ultimate      validity: ultimate
-    ssb  rsa2048/1111222233334444
-         created: 2018-01-23  expires: never       usage: E
+    ssb  cv25519/1111222233334444
+         created: 2022-12-20  expires: never       usage: E
     ssb  ed25519/5555666677778888
          created: 2017-12-07  expires: never       usage: S
     [ultimate] (1). Alice Dev <adev@kernel.org>
@@ -577,11 +538,11 @@ If you perform ``--list-secret-keys`` now, you will see a subtle
 difference in the output::
 
     $ gpg --list-secret-keys
-    sec#  rsa2048 2018-01-24 [SC] [expires: 2020-01-24]
+    sec#  ed25519 2022-12-20 [SC] [expires: 2024-12-19]
           000000000000000000000000AAAABBBBCCCCDDDD
     uid           [ultimate] Alice Dev <adev@kernel.org>
-    ssb>  rsa2048 2018-01-24 [E] [expires: 2020-01-24]
-    ssb>  ed25519 2018-01-24 [S]
+    ssb>  cv25519 2022-12-20 [E] [expires: 2024-12-19]
+    ssb>  ed25519 2022-12-20 [S]
 
 The ``>`` in the ``ssb>`` output indicates that the subkey is only
 available on the smartcard. If you go back into your secret keys
@@ -644,7 +605,7 @@ run::
 You can also use a specific date if that is easier to remember (e.g.
 your birthday, January 1st, or Canada Day)::
 
-    $ gpg --quick-set-expire [fpr] 2020-07-01
+    $ gpg --quick-set-expire [fpr] 2038-07-01
 
 Remember to send the updated key back to keyservers::
 
@@ -685,9 +646,9 @@ hundreds of cloned repositories floating around, how does anyone verify
 that their copy of linux.git has not been tampered with by a malicious
 third party?
 
-Or what happens if a backdoor is discovered in the code and the "Author"
-line in the commit says it was done by you, while you're pretty sure you
-had `nothing to do with it`_?
+Or what happens if malicious code is discovered in the kernel and the
+"Author" line in the commit says it was done by you, while you're pretty
+sure you had `nothing to do with it`_?
 
 To address both of these issues, Git introduced PGP integration. Signed
 tags prove the repository integrity by assuring that its contents are
@@ -707,17 +668,10 @@ should be used (``[fpr]`` is the fingerprint of your key)::
 
     $ git config --global user.signingKey [fpr]
 
-**IMPORTANT**: If you have a distinct ``gpg2`` command, then you should
-tell git to always use it instead of the legacy ``gpg`` from version 1::
-
-    $ git config --global gpg.program gpg2
-    $ git config --global gpgv.program gpgv2
-
 How to work with signed tags
 ----------------------------
 
-To create a signed tag, simply pass the ``-s`` switch to the tag
-command::
+To create a signed tag, pass the ``-s`` switch to the tag command::
 
     $ git tag -s [tagname]
 
@@ -728,7 +682,7 @@ not been maliciously altered.
 How to verify signed tags
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To verify a signed tag, simply use the ``verify-tag`` command::
+To verify a signed tag, use the ``verify-tag`` command::
 
     $ git verify-tag [tagname]
 
@@ -747,16 +701,9 @@ The merge message will contain something like this::
     # gpg: Signature made [...]
     # gpg: Good signature from [...]
 
-If you are verifying someone else's git tag, then you will need to
-import their PGP key. Please refer to the
-":ref:`verify_identities`" section below.
-
-.. note::
-
-    If you get "``gpg: Can't check signature: unknown pubkey
-    algorithm``" error, you need to tell git to use gpgv2 for
-    verification, so it properly processes signatures made by ECC keys.
-    See instructions at the start of this section.
+If you are verifying someone else's git tag, you will first need to
+import their PGP key. Please refer to the ":ref:`verify_identities`"
+section below.
 
 Configure git to always sign annotated tags
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -770,16 +717,16 @@ configuration option::
 How to work with signed commits
 -------------------------------
 
-It is easy to create signed commits, but it is much more difficult to
-use them in Linux kernel development, since it relies on patches sent to
-the mailing list, and this workflow does not preserve PGP commit
-signatures. Furthermore, when rebasing your repository to match
-upstream, even your own PGP commit signatures will end up discarded. For
-this reason, most kernel developers don't bother signing their commits
-and will ignore signed commits in any external repositories that they
-rely upon in their work.
+It is also possible to create signed commits, but they have limited
+usefulness in Linux kernel development. The kernel contribution workflow
+relies on sending in patches, and converting commits to patches does not
+preserve git commit signatures. Furthermore, when rebasing your own
+repository on a newer upstream, PGP commit signatures will end up
+discarded. For this reason, most kernel developers don't bother signing
+their commits and will ignore signed commits in any external
+repositories that they rely upon in their work.
 
-However, if you have your working git tree publicly available at some
+That said, if you have your working git tree publicly available at some
 git hosting service (kernel.org, infradead.org, ozlabs.org, or others),
 then the recommendation is that you sign all your git commits even if
 upstream developers do not directly benefit from this practice.
@@ -790,7 +737,7 @@ We recommend this for the following reasons:
    provenance, even externally maintained trees carrying PGP commit
    signatures will be valuable for such purposes.
 2. If you ever need to re-clone your local repository (for example,
-   after a disk failure), this lets you easily verify the repository
+   after reinstalling your system), this lets you verify the repository
    integrity before resuming your work.
 3. If someone needs to cherry-pick your commits, this allows them to
    quickly verify their integrity before applying them.
@@ -798,9 +745,8 @@ We recommend this for the following reasons:
 Creating signed commits
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-To create a signed commit, you just need to pass the ``-S`` flag to the
-``git commit`` command (it's capital ``-S`` due to collision with
-another flag)::
+To create a signed commit, pass the ``-S`` flag to the ``git commit``
+command (it's capital ``-S`` due to collision with another flag)::
 
     $ git commit -S
 
@@ -816,7 +762,6 @@ You can tell git to always sign commits::
     Make sure you configure ``gpg-agent`` before you turn this on.
 
 .. _verify_identities:
-
 
 How to work with signed patches
 -------------------------------
@@ -834,6 +779,11 @@ headers (a-la DKIM):
 
 Installing and configuring patatt
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+
+    If you use B4 to send in your patches, patatt is already installed
+    and integrated into your workflow.
 
 Patatt is packaged for many distributions already, so please check there
 first. You can also install it from pypi using "``pip install patatt``".
@@ -877,9 +827,9 @@ encounters, for example::
 How to verify kernel developer identities
 =========================================
 
-Signing tags and commits is easy, but how does one go about verifying
-that the key used to sign something belongs to the actual kernel
-developer and not to a malicious imposter?
+Signing tags and commits is straightforward, but how does one go about
+verifying that the key used to sign something belongs to the actual
+kernel developer and not to a malicious imposter?
 
 Configure auto-key-retrieval using WKD and DANE
 -----------------------------------------------
@@ -926,7 +876,7 @@ various software makers dictating who should be your trusted certifying
 entity, PGP leaves this responsibility to each user.
 
 Unfortunately, very few people understand how the Web of Trust works.
-While it remains an important aspect of the OpenPGP specification,
+While it is still an important part of the OpenPGP specification,
 recent versions of GnuPG (2.2 and above) have implemented an alternative
 mechanism called "Trust on First Use" (TOFU). You can think of TOFU as
 "the SSH-like approach to trust." With SSH, the first time you connect
@@ -936,8 +886,8 @@ to connect, forcing you to make a decision on whether you choose to
 trust the changed key or not. Similarly, the first time you import
 someone's PGP key, it is assumed to be valid. If at any point in the
 future GnuPG comes across another key with the same identity, both the
-previously imported key and the new key will be marked as invalid and
-you will need to manually figure out which one to keep.
+previously imported key and the new key will be marked for verification
+and you will need to manually figure out which one to keep.
 
 We recommend that you use the combined TOFU+PGP trust model (which is
 the new default in GnuPG v2). To set it, add (or modify) the

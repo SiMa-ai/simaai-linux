@@ -20,13 +20,21 @@
 #include <linux/fs.h>
 #include <linux/kfifo.h>
 #include <linux/miscdevice.h>
+#include <uapi/linux/isp/isp_ioctl.h>
 #include "system_stdlib.h"
 #include "acamera_command_api.h"
 #include "acamera_ctrl_channel.h"
 #include "acamera_logger.h"
+#include "acamera_calib_mgr.h"
 
 #define CTRL_CHANNEL_FIFO_INPUT_SIZE ( 4 * 1024 )
 #define CTRL_CHANNEL_FIFO_OUTPUT_SIZE ( 8 * 1024 )
+
+struct user_calibration_data {
+    ACameraCalibrations *calibrations;
+    int32_t ( *new_cb )( uint32_t wdr_mode, void *param );
+    int32_t ( *old_cb )( uint32_t wdr_mode, void *param );
+};
 
 struct ctrl_channel_dev_context {
     uint8_t dev_inited;
@@ -41,10 +49,42 @@ struct ctrl_channel_dev_context {
     struct kfifo ctrl_kfifo_out;
 
     struct ctrl_cmd_item cmd_item;
+
+    struct user_calibration_data user_calibrations[FIRMWARE_CONTEXT_NUMBER];
+    uint8_t num_of_contexts;
 };
+
 
 static struct ctrl_channel_dev_context ctrl_channel_ctx;
 
+#define REPEAT_16(x) x(0) x(1) x(2) x(3) x(4) x(5) x(6) x(7) x(8) x(9) x(10) x(11) x(12) x(13) x(14) x(15)
+#define ASSIGN_CALIB_CALLBACK(CTX) custom_get_calib_ctx##CTX,
+#define DEFINE_CALIB_CALLBACK(CTX) \
+static int32_t custom_get_calib_ctx##CTX(uint32_t wdr_mode, void *param) { \
+	if (param != NULL) { \
+		if (ctrl_channel_ctx.user_calibrations[CTX].calibrations != NULL) { \
+			ACameraCalibrations *c = (ACameraCalibrations *)param; \
+			ACameraCalibrations *user_c = ctrl_channel_ctx.user_calibrations[CTX].calibrations; \
+			int i; \
+			for (i = 0; i < CALIBRATION_TOTAL_SIZE; i++) { \
+				if (user_c->calibrations[i] != NULL && user_c->calibrations[i]->ptr != NULL) { \
+					c->calibrations[i] = user_c->calibrations[i]; \
+				} \
+			} \
+			LOG(LOG_INFO, "Wrote user calibrations for CTX %d (WDR Mode: %u)\n", CTX, wdr_mode); \
+			return 0; \
+		} else if (ctrl_channel_ctx.user_calibrations[CTX].old_cb) { \
+		return ctrl_channel_ctx.user_calibrations[CTX].old_cb(wdr_mode, param); \
+		} \
+	} \
+	return -1; \
+}
+
+REPEAT_16(DEFINE_CALIB_CALLBACK)
+
+int32_t (*cbs[])( uint32_t wdr_mode, void *param ) = {
+    REPEAT_16(ASSIGN_CALIB_CALLBACK)
+};
 
 static int ctrl_channel_fops_open( struct inode *inode, struct file *f )
 {
@@ -166,6 +206,65 @@ static ssize_t ctrl_channel_fops_read( struct file *file, char __user *buf, size
     return rc ? rc : copied;
 }
 
+static long ctrl_channel_fops_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct ctrl_channel_dev_context *p_ctx = (struct ctrl_channel_dev_context *)file->private_data;
+	struct isp_calibration_data calib;
+	ACameraCalibrations *kcalibs;
+	int i;
+
+	LOG(LOG_ERR, "Entered IOCTL");
+	if (p_ctx != &ctrl_channel_ctx)
+		return -EINVAL;
+
+	if (cmd == ISP_IOC_SET_CALIBRATION) {
+		if (copy_from_user(&calib, (void __user *)arg,
+			sizeof(calib))) return -EFAULT;
+
+		if (calib.ctx_id >= p_ctx->num_of_contexts || calib.size == 0)
+			return -EINVAL;
+
+		mutex_lock(&p_ctx->fops_lock);
+
+		if (p_ctx->user_calibrations[calib.ctx_id].calibrations != NULL)
+			kfree(p_ctx->user_calibrations[calib.ctx_id].calibrations);
+
+		kcalibs = kmalloc(calib.size, GFP_KERNEL);
+		if (!kcalibs) {
+			mutex_unlock(&p_ctx->fops_lock);
+			return -ENOMEM;
+		}
+
+		if (copy_from_user(kcalibs, calib.data, calib.size)) {
+			kfree(kcalibs);
+			p_ctx->user_calibrations[calib.ctx_id].calibrations = NULL;
+			mutex_unlock(&p_ctx->fops_lock);
+			return -EFAULT;
+		}
+
+		for (i = 0; i < CALIBRATION_TOTAL_SIZE; i++) {
+			if (kcalibs->calibrations[i]) {
+				uintptr_t table_offset = (uintptr_t)kcalibs->calibrations[i];
+				LookupTable *table = (LookupTable *)((uint8_t *)kcalibs + table_offset);
+				kcalibs->calibrations[i] = table;
+
+				if (table->ptr) {
+					uintptr_t data_offset = (uintptr_t)table->ptr;
+					table->ptr = (const void *)((uint8_t *)kcalibs + data_offset);
+				}
+			}
+		}
+
+		p_ctx->user_calibrations[calib.ctx_id].calibrations = kcalibs;
+		LOG(LOG_ERR, "Patched calibration data for CTX %u", calib.ctx_id);
+
+		mutex_unlock(&p_ctx->fops_lock);
+		return 0;
+	}
+
+	return -ENOTTY;
+}
+
 static struct file_operations isp_fops = {
     .owner = THIS_MODULE,
     .open = ctrl_channel_fops_open,
@@ -173,6 +272,7 @@ static struct file_operations isp_fops = {
     .read = ctrl_channel_fops_read,
     .write = ctrl_channel_fops_write,
     .llseek = noop_llseek,
+    .unlocked_ioctl = ctrl_channel_fops_ioctl,
 };
 
 
@@ -195,15 +295,23 @@ static int32_t ctrl_channel_write( const struct ctrl_cmd_item *p_cmd, const void
 }
 
 
-int32_t ctrl_channel_init( void )
+int32_t ctrl_channel_init( acamera_settings *settings, uint8_t num_of_contexts )
 {
     int32_t rc;
+    int i;
 
     system_memset( &ctrl_channel_ctx, 0, sizeof( ctrl_channel_ctx ) );
     ctrl_channel_ctx.ctrl_dev.name = CTRL_CHANNEL_DEV_NAME;
     ctrl_channel_ctx.dev_name = CTRL_CHANNEL_DEV_NAME;
     ctrl_channel_ctx.ctrl_dev.minor = MISC_DYNAMIC_MINOR;
     ctrl_channel_ctx.ctrl_dev.fops = &isp_fops;
+    ctrl_channel_ctx.num_of_contexts = num_of_contexts;
+
+    for(i = 0; i < num_of_contexts; i++) {
+        ctrl_channel_ctx.user_calibrations[i].calibrations = NULL;
+	ctrl_channel_ctx.user_calibrations[i].old_cb = settings[i].get_calibrations;
+	settings[i].get_calibrations = cbs[i];
+    }
 
     rc = misc_register( &ctrl_channel_ctx.ctrl_dev );
     if ( rc ) {
@@ -247,12 +355,20 @@ void ctrl_channel_process( void )
 
 void ctrl_channel_deinit( void )
 {
+	int i;
     if ( ctrl_channel_ctx.dev_inited ) {
         kfifo_free( &ctrl_channel_ctx.ctrl_kfifo_in );
 
         kfifo_free( &ctrl_channel_ctx.ctrl_kfifo_out );
 
         misc_deregister( &ctrl_channel_ctx.ctrl_dev );
+
+	for(i = 0; i < ctrl_channel_ctx.num_of_contexts; i++) {
+		if (ctrl_channel_ctx.user_calibrations[i].calibrations) {
+			kfree(ctrl_channel_ctx.user_calibrations[i].calibrations);
+			ctrl_channel_ctx.user_calibrations[i].calibrations = NULL;
+		}
+	}
 
         LOG( LOG_INFO, "misc_deregister dev: %s.", ctrl_channel_ctx.ctrl_dev.name );
     } else {

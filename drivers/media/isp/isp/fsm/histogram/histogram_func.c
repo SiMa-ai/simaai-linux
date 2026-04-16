@@ -90,7 +90,7 @@ static uint8_t histogram_is_crc_valid( histogram_fsm_const_ptr_t p_fsm, const ui
     const uint32_t crc_hw = histogram_read( p_fsm, HISTOGRAM_BUFFER_SIZE - 1, histmem_offset );
 
     if ( crc16 != crc_hw ) {
-        LOG( LOG_ERR, "CTX[%d] histogram CRC mismatch 0x%x expected, 0x%x calculated",
+        LOG( LOG_DEBUG, "CTX[%d] histogram CRC mismatch 0x%x expected, 0x%x calculated",
              (int)ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id,
              crc_hw,
              crc16 );

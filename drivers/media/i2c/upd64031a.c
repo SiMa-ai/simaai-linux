@@ -4,7 +4,7 @@
  *
  * 2003 by T.Adachi <tadachi@tadachi-net.com>
  * 2003 by Takeru KOMORIYA <komoriya@paken.org>
- * 2006 by Hans Verkuil <hverkuil@xs4all.nl>
+ * 2006 by Hans Verkuil <hverkuil@kernel.org>
  */
 
 
@@ -183,8 +183,7 @@ static const struct v4l2_subdev_ops upd64031a_ops = {
 
 /* i2c implementation */
 
-static int upd64031a_probe(struct i2c_client *client,
-			   const struct i2c_device_id *id)
+static int upd64031a_probe(struct i2c_client *client)
 {
 	struct upd64031a_state *state;
 	struct v4l2_subdev *sd;
@@ -220,7 +219,7 @@ static void upd64031a_remove(struct i2c_client *client)
 /* ----------------------------------------------------------------------- */
 
 static const struct i2c_device_id upd64031a_id[] = {
-	{ "upd64031a", 0 },
+	{ "upd64031a" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, upd64031a_id);

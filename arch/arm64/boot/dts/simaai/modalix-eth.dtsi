@@ -12,25 +12,62 @@
 		snps,blen = <0 0 0 32 16 8 4>;
 	};
 
+	xpcs0: xpcs@a000000 {
+		compatible = "simaai,dw-xpcs", "snps,dw-xpcs";
+		reg = <0x0 0xa000000 0x0 0x800000>;
+		reg-names = "direct";
+
+		reg-io-width = <4>;
+		snps,skip-reset;
+		interrupts = <GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	xpcs1: xpcs@b000000 {
+		compatible = "simaai,dw-xpcs", "snps,dw-xpcs";
+		reg = <0x0 0xb000000 0x0 0x800000>;
+		reg-names = "direct";
+
+		reg-io-width = <4>;
+		snps,skip-reset;
+		interrupts = <GIC_SPI 137 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	xpcs2: xpcs@c000000 {
+		compatible = "simaai,dw-xpcs", "snps,dw-xpcs";
+		reg = <0x0 0xc000000 0x0 0x800000>;
+		reg-names = "direct";
+
+		reg-io-width = <4>;
+		snps,skip-reset;
+		interrupts = <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	xpcs3: xpcs@d000000 {
+		compatible = "simaai,dw-xpcs", "snps,dw-xpcs";
+		reg = <0x0 0xd000000 0x0 0x800000>;
+		reg-names = "direct";
+
+		reg-io-width = <4>;
+		snps,skip-reset;
+		interrupts = <GIC_SPI 149 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
 	xgmac0: ethernet@a800000 {
 		compatible = "snps,dwxgmac-2.10", "snps,dwxgmac";
-		reg = <0x0 0xa800000 0x0 0x3180>,
-		      <0x0 0xa040000 0x0 0x7c0000>;
-		reg-names = "gmac", "xpcs";
-		interrupts = <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "macirq", "xpcs_irq";
+		reg = <0x0 0xa800000 0x0 0x3180>;
+		reg-names = "gmac";
+		interrupts = <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq";
+		snps,multicast-filter-bins = <0>;
 		snps,perfect-filter-entries = <128>;
 		rx-fifo-depth = <16384>;
 		tx-fifo-depth = <16384>;
 		snps,pbl = <32>;
-		//max-frame-size = <3800>;
 		snps,axi-config = <&stmmac_axi_config>;
 		clocks = <&eth_clk>;
 		clock-names = "stmmaceth";
 		phy-mode = "xgmii";
-		snps,apbxpcs;
-		snps,xpcs_skip_reset;
+		pcs-handle = <&xpcs0>;
 		/* mac-address is to be updated by the bootloader */
 		local-mac-address = [00 00 00 00 00 00];
 		status = "disabled";
@@ -38,22 +75,20 @@
 
 	xgmac1: ethernet@b800000 {
 		compatible = "snps,dwxgmac-2.10", "snps,dwxgmac";
-		reg = <0x0 0xb800000 0x0 0x3180>,
-		      <0x0 0xb040000 0x0 0x7c0000>;
-		reg-names = "gmac", "xpcs";
+		reg = <0x0 0xb800000 0x0 0x3180>;
+		reg-names = "gmac";
 		interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "macirq";
+		snps,multicast-filter-bins = <0>;
 		snps,perfect-filter-entries = <128>;
 		rx-fifo-depth = <16384>;
 		tx-fifo-depth = <16384>;
 		snps,pbl = <32>;
-		//max-frame-size = <3800>;
 		snps,axi-config = <&stmmac_axi_config>;
 		clocks = <&eth_clk>;
 		clock-names = "stmmaceth";
 		phy-mode = "xgmii";
-		snps,apbxpcs;
-		snps,xpcs_skip_reset;
+		pcs-handle = <&xpcs1>;
 		/* mac-address is to be updated by the bootloader */
 		local-mac-address = [00 00 00 00 00 00];
 		status = "disabled";
@@ -61,23 +96,20 @@
 
 	xgmac2: ethernet@c800000 {
 		compatible = "snps,dwxgmac-2.10", "snps,dwxgmac";
-		reg = <0x0 0xc800000 0x0 0x3180>,
-		      <0x0 0xc040000 0x0 0x7c0000>;
-		reg-names = "gmac", "xpcs";
-		interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "macirq", "xpcs_irq";
+		reg = <0x0 0xc800000 0x0 0x3180>;
+		reg-names = "gmac";
+		interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq";
+		snps,multicast-filter-bins = <0>;
 		snps,perfect-filter-entries = <128>;
 		rx-fifo-depth = <16384>;
 		tx-fifo-depth = <16384>;
 		snps,pbl = <32>;
-		//max-frame-size = <3800>;
 		snps,axi-config = <&stmmac_axi_config>;
 		clocks = <&eth_clk>;
 		clock-names = "stmmaceth";
 		phy-mode = "xgmii";
-		snps,apbxpcs;
-		snps,xpcs_skip_reset;
+		pcs-handle = <&xpcs2>;
 		/* mac-address is to be updated by the bootloader */
 		local-mac-address = [00 00 00 00 00 00];
 		status = "disabled";
@@ -85,24 +117,20 @@
 
 	xgmac3: ethernet@d800000 {
 		compatible = "snps,dwxgmac-2.10", "snps,dwxgmac";
-		reg = <0x0 0xd800000 0x0 0x3180>,
-		      <0x0 0xd040000 0x0 0x7c0000>;
-		reg-names = "gmac", "xpcs";
-		interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 149 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "macirq", "xpcs_irq";
+		reg = <0x0 0xd800000 0x0 0x3180>;
+		reg-names = "gmac";
+		interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq";
+		snps,multicast-filter-bins = <0>;
 		snps,perfect-filter-entries = <128>;
 		rx-fifo-depth = <16384>;
 		tx-fifo-depth = <16384>;
 		snps,pbl = <32>;
-		//max-frame-size = <3800>;
 		snps,axi-config = <&stmmac_axi_config>;
 		clocks = <&eth_clk>;
 		clock-names = "stmmaceth";
 		phy-mode = "xgmii";
-		//managed = "in-band-status";
-		snps,apbxpcs;
-		snps,xpcs_skip_reset;
+		pcs-handle = <&xpcs3>;
 		/* mac-address is to be updated by the bootloader */
 		local-mac-address = [00 00 00 00 00 00];
 		status = "disabled";

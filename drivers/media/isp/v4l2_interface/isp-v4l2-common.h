@@ -24,8 +24,8 @@
 #include "acamera_frame_stream_api.h"
 
 /* Sensor data types */
-#define V4L2_SENSOR_INFO_MODES_MAX ( 10U )     // Maximum number of sensor modes (unique resolutions)
-#define V4L2_SENSOR_INFO_SUB_MODES_MAX ( 10U ) // Maximum number of sensor sub modes (unique sensor modes with the same resolution)
+#define V4L2_SENSOR_INFO_MODES_MAX ( 32U )     // Maximum number of sensor modes (unique resolutions)
+#define V4L2_SENSOR_INFO_SUB_MODES_MAX ( 32U ) // Maximum number of sensor sub modes (unique sensor modes with the same resolution)
 
 /**
  * @brief Struct describes sensor sub mode.
@@ -38,7 +38,6 @@ typedef struct _isp_v4l2_sensor_sub_mode {
     uint32_t sensor_preset; ///< Sensor preset index which matches to this sub mode
     uint8_t exposures;      ///< Sensor exposure number
     uint8_t num_channels;   ///< Sensor channels number (used to configure raw buffer planes number)
-    uint8_t data_width;     ///< Sensor data width (used to configure raw buffers)
 } isp_v4l2_sensor_sub_mode;
 
 /**
@@ -48,6 +47,8 @@ typedef struct _isp_v4l2_sensor_sub_mode {
 typedef struct _isp_v4l2_sensor_mode {
     uint32_t width;                                                    ///< Sensor image width
     uint32_t height;                                                   ///< Sensor image height
+    uint8_t data_width;     ///< Sensor data width (used to configure raw buffers)
+    uint32_t pixel_format;  ///< Sensor pixel format (V4L2_PIX_FMT_XXX)
     isp_v4l2_sensor_sub_mode sub_mode[V4L2_SENSOR_INFO_SUB_MODES_MAX]; ///< Sensor sub modes
     uint8_t num_sub_modes;                                             ///< Number of sub modes
     uint8_t cur_sub_mode;                                              ///< Current sub mode

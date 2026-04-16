@@ -105,7 +105,7 @@ static int host1x_pushbuffer_init(struct push_buffer *pb)
 
 		pb->dma = iova_dma_addr(&host1x->iova, alloc);
 		err = iommu_map(host1x->domain, pb->dma, pb->phys, size,
-				IOMMU_READ);
+				IOMMU_READ, GFP_KERNEL);
 		if (err)
 			goto iommu_free_iova;
 	} else {
@@ -246,8 +246,6 @@ static int host1x_cdma_wait_pushbuffer_space(struct host1x *host1x,
 
 		trace_host1x_wait_cdma(dev_name(cdma_to_channel(cdma)->dev),
 				       CDMA_EVENT_PUSH_BUFFER_SPACE);
-
-		host1x_hw_cdma_flush(host1x, cdma);
 
 		/* If somebody has managed to already start waiting, yield */
 		if (cdma->event != CDMA_EVENT_NONE) {
@@ -490,6 +488,15 @@ resume:
 	host1x_hw_cdma_resume(host1x, cdma, restart_addr);
 }
 
+static void cdma_update_work(struct work_struct *work)
+{
+	struct host1x_cdma *cdma = container_of(work, struct host1x_cdma, update_work);
+
+	mutex_lock(&cdma->lock);
+	update_cdma_locked(cdma);
+	mutex_unlock(&cdma->lock);
+}
+
 /*
  * Create a cdma
  */
@@ -499,6 +506,7 @@ int host1x_cdma_init(struct host1x_cdma *cdma)
 
 	mutex_init(&cdma->lock);
 	init_completion(&cdma->complete);
+	INIT_WORK(&cdma->update_work, cdma_update_work);
 
 	INIT_LIST_HEAD(&cdma->sync_queue);
 
@@ -581,7 +589,6 @@ int host1x_cdma_begin(struct host1x_cdma *cdma, struct host1x_job *job)
  */
 void host1x_cdma_push(struct host1x_cdma *cdma, u32 op1, u32 op2)
 {
-	struct host1x *host1x = cdma_to_host1x(cdma);
 	struct push_buffer *pb = &cdma->push_buffer;
 	u32 slots_free = cdma->slots_free;
 
@@ -589,11 +596,9 @@ void host1x_cdma_push(struct host1x_cdma *cdma, u32 op1, u32 op2)
 		trace_host1x_cdma_push(dev_name(cdma_to_channel(cdma)->dev),
 				       op1, op2);
 
-	if (slots_free == 0) {
-		host1x_hw_cdma_flush(host1x, cdma);
+	if (slots_free == 0)
 		slots_free = host1x_cdma_wait_locked(cdma,
 						CDMA_EVENT_PUSH_BUFFER_SPACE);
-	}
 
 	cdma->slots_free = slots_free - 1;
 	cdma->slots_used++;
@@ -615,8 +620,7 @@ void host1x_cdma_push_wide(struct host1x_cdma *cdma, u32 op1, u32 op2,
 	struct host1x_channel *channel = cdma_to_channel(cdma);
 	struct host1x *host1x = cdma_to_host1x(cdma);
 	struct push_buffer *pb = &cdma->push_buffer;
-	unsigned int space = cdma->slots_free;
-	unsigned int needed = 2, extra = 0;
+	unsigned int space, needed = 2, extra = 0;
 
 	if (host1x_debug_trace_cmdbuf)
 		trace_host1x_cdma_push_wide(dev_name(channel->dev), op1, op2,
@@ -679,7 +683,5 @@ void host1x_cdma_end(struct host1x_cdma *cdma,
  */
 void host1x_cdma_update(struct host1x_cdma *cdma)
 {
-	mutex_lock(&cdma->lock);
-	update_cdma_locked(cdma);
-	mutex_unlock(&cdma->lock);
+	schedule_work(&cdma->update_work);
 }

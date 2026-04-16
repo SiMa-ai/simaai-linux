@@ -68,7 +68,7 @@ void system_set_global_flag( void )
     m_global_flag = 1;
 }
 
-#define ISP_CPU_CORE_NUMBER		(8)
+#define ISP_CPU_CORE_NUMBER		(6)
 
 /**
  * @brief      Bottom half handler.

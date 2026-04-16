@@ -34,4 +34,9 @@ struct simaai_reg_info {
  */
 #define SIMAAI_IOC_GET_REV		_IOR('M', 2, struct simaai_reg_info)
 
+/*
+ * Reset MLA
+ */
+#define SIMAAI_IOC_RESET_MLA	_IOR('M', 3, struct simaai_reg_info)
+
 #endif /* _SIMAAI_MLAMEM_IOCTL_UAPI_H */

@@ -11,14 +11,15 @@
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/init.h>
+#include <linux/irqchip/chained_irq.h>
+#include <linux/irqdomain.h>
 #include <linux/mbus.h>
 #include <linux/slab.h>
 #include <linux/platform_device.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <linux/of_gpio.h>
 #include <linux/of_pci.h>
 #include <linux/of_platform.h>
 
@@ -86,7 +87,6 @@ struct mvebu_pcie {
 	struct resource io;
 	struct resource realio;
 	struct resource mem;
-	struct resource busn;
 	int nports;
 };
 
@@ -264,7 +264,7 @@ static void mvebu_pcie_setup_hw(struct mvebu_pcie_port *port)
 	 */
 	lnkcap = mvebu_readl(port, PCIE_CAP_PCIEXP + PCI_EXP_LNKCAP);
 	lnkcap &= ~PCI_EXP_LNKCAP_MLW;
-	lnkcap |= (port->is_x4 ? 4 : 1) << 4;
+	lnkcap |= FIELD_PREP(PCI_EXP_LNKCAP_MLW, port->is_x4 ? 4 : 1);
 	mvebu_writel(port, lnkcap, PCIE_CAP_PCIEXP + PCI_EXP_LNKCAP);
 
 	/* Disable Root Bridge I/O space, memory space and bus mastering. */
@@ -1078,9 +1078,9 @@ static int mvebu_pcie_init_irq_domain(struct mvebu_pcie_port *port)
 		return -ENODEV;
 	}
 
-	port->intx_irq_domain = irq_domain_add_linear(pcie_intc_node, PCI_NUM_INTX,
-						      &mvebu_pcie_intx_irq_domain_ops,
-						      port);
+	port->intx_irq_domain = irq_domain_create_linear(of_fwnode_handle(pcie_intc_node),
+							 PCI_NUM_INTX,
+							 &mvebu_pcie_intx_irq_domain_ops, port);
 	of_node_put(pcie_intc_node);
 	if (!port->intx_irq_domain) {
 		dev_err(dev, "Failed to get INTx IRQ domain for %s\n", port->name);
@@ -1168,48 +1168,27 @@ static void __iomem *mvebu_pcie_map_registers(struct platform_device *pdev,
 	return devm_ioremap_resource(&pdev->dev, &port->regs);
 }
 
-#define DT_FLAGS_TO_TYPE(flags)       (((flags) >> 24) & 0x03)
-#define    DT_TYPE_IO                 0x1
-#define    DT_TYPE_MEM32              0x2
-#define DT_CPUADDR_TO_TARGET(cpuaddr) (((cpuaddr) >> 56) & 0xFF)
-#define DT_CPUADDR_TO_ATTR(cpuaddr)   (((cpuaddr) >> 48) & 0xFF)
-
 static int mvebu_get_tgt_attr(struct device_node *np, int devfn,
 			      unsigned long type,
 			      unsigned int *tgt,
 			      unsigned int *attr)
 {
-	const int na = 3, ns = 2;
-	const __be32 *range;
-	int rlen, nranges, rangesz, pna, i;
+	struct of_range range;
+	struct of_range_parser parser;
 
 	*tgt = -1;
 	*attr = -1;
 
-	range = of_get_property(np, "ranges", &rlen);
-	if (!range)
+	if (of_pci_range_parser_init(&parser, np))
 		return -EINVAL;
 
-	pna = of_n_addr_cells(np);
-	rangesz = pna + na + ns;
-	nranges = rlen / sizeof(__be32) / rangesz;
+	for_each_of_range(&parser, &range) {
+		u32 slot = upper_32_bits(range.bus_addr);
 
-	for (i = 0; i < nranges; i++, range += rangesz) {
-		u32 flags = of_read_number(range, 1);
-		u32 slot = of_read_number(range + 1, 1);
-		u64 cpuaddr = of_read_number(range + na, pna);
-		unsigned long rtype;
-
-		if (DT_FLAGS_TO_TYPE(flags) == DT_TYPE_IO)
-			rtype = IORESOURCE_IO;
-		else if (DT_FLAGS_TO_TYPE(flags) == DT_TYPE_MEM32)
-			rtype = IORESOURCE_MEM;
-		else
-			continue;
-
-		if (slot == PCI_SLOT(devfn) && type == rtype) {
-			*tgt = DT_CPUADDR_TO_TARGET(cpuaddr);
-			*attr = DT_CPUADDR_TO_ATTR(cpuaddr);
+		if (slot == PCI_SLOT(devfn) &&
+		    type == (range.flags & IORESOURCE_TYPE_BITS)) {
+			*tgt = (range.parent_bus_addr >> 56) & 0xFF;
+			*attr = (range.parent_bus_addr >> 48) & 0xFF;
 			return 0;
 		}
 	}
@@ -1261,9 +1240,8 @@ static int mvebu_pcie_parse_port(struct mvebu_pcie *pcie,
 	struct mvebu_pcie_port *port, struct device_node *child)
 {
 	struct device *dev = &pcie->pdev->dev;
-	enum of_gpio_flags flags;
 	u32 slot_power_limit;
-	int reset_gpio, ret;
+	int ret;
 	u32 num_lanes;
 
 	port->pcie = pcie;
@@ -1327,40 +1305,24 @@ static int mvebu_pcie_parse_port(struct mvebu_pcie *pcie,
 			 port->name, child);
 	}
 
-	reset_gpio = of_get_named_gpio_flags(child, "reset-gpios", 0, &flags);
-	if (reset_gpio == -EPROBE_DEFER) {
-		ret = reset_gpio;
+	port->reset_name = devm_kasprintf(dev, GFP_KERNEL, "%s-reset",
+					  port->name);
+	if (!port->reset_name) {
+		ret = -ENOMEM;
 		goto err;
 	}
 
-	if (gpio_is_valid(reset_gpio)) {
-		unsigned long gpio_flags;
-
-		port->reset_name = devm_kasprintf(dev, GFP_KERNEL, "%s-reset",
-						  port->name);
-		if (!port->reset_name) {
-			ret = -ENOMEM;
+	port->reset_gpio = devm_fwnode_gpiod_get(dev, of_fwnode_handle(child),
+						 "reset", GPIOD_OUT_HIGH,
+						 port->name);
+	ret = PTR_ERR_OR_ZERO(port->reset_gpio);
+	if (ret) {
+		if (ret != -ENOENT)
 			goto err;
-		}
-
-		if (flags & OF_GPIO_ACTIVE_LOW) {
-			dev_info(dev, "%pOF: reset gpio is active low\n",
-				 child);
-			gpio_flags = GPIOF_ACTIVE_LOW |
-				     GPIOF_OUT_INIT_LOW;
-		} else {
-			gpio_flags = GPIOF_OUT_INIT_HIGH;
-		}
-
-		ret = devm_gpio_request_one(dev, reset_gpio, gpio_flags,
-					    port->reset_name);
-		if (ret) {
-			if (ret == -EPROBE_DEFER)
-				goto err;
-			goto skip;
-		}
-
-		port->reset_gpio = gpio_to_desc(reset_gpio);
+		/* reset gpio is optional */
+		port->reset_gpio = NULL;
+		devm_kfree(dev, port->reset_name);
+		port->reset_name = NULL;
 	}
 
 	slot_power_limit = of_pci_get_slot_power_limit(child,
@@ -1378,11 +1340,9 @@ static int mvebu_pcie_parse_port(struct mvebu_pcie *pcie,
 		goto skip;
 	}
 
-	ret = devm_add_action(dev, mvebu_pcie_port_clk_put, port);
-	if (ret < 0) {
-		clk_put(port->clk);
+	ret = devm_add_action_or_reset(dev, mvebu_pcie_port_clk_put, port);
+	if (ret < 0)
 		goto err;
-	}
 
 	return 1;
 
@@ -1439,7 +1399,7 @@ static void mvebu_pcie_powerdown(struct mvebu_pcie_port *port)
 }
 
 /*
- * devm_of_pci_get_host_bridge_resources() only sets up translateable resources,
+ * devm_of_pci_get_host_bridge_resources() only sets up translatable resources,
  * so we need extra resource setup parsing our special DT properties encoding
  * the MEM and IO apertures.
  */
@@ -1665,7 +1625,7 @@ static int mvebu_pcie_probe(struct platform_device *pdev)
 	return pci_host_probe(bridge);
 }
 
-static int mvebu_pcie_remove(struct platform_device *pdev)
+static void mvebu_pcie_remove(struct platform_device *pdev)
 {
 	struct mvebu_pcie *pcie = platform_get_drvdata(pdev);
 	struct pci_host_bridge *bridge = pci_host_bridge_from_priv(pcie);
@@ -1723,8 +1683,6 @@ static int mvebu_pcie_remove(struct platform_device *pdev)
 		/* Power down card and disable clocks. Must be the last step. */
 		mvebu_pcie_powerdown(port);
 	}
-
-	return 0;
 }
 
 static const struct of_device_id mvebu_pcie_of_match_table[] = {
@@ -1734,6 +1692,7 @@ static const struct of_device_id mvebu_pcie_of_match_table[] = {
 	{ .compatible = "marvell,kirkwood-pcie", },
 	{},
 };
+MODULE_DEVICE_TABLE(of, mvebu_pcie_of_match_table);
 
 static const struct dev_pm_ops mvebu_pcie_pm_ops = {
 	NOIRQ_SYSTEM_SLEEP_PM_OPS(mvebu_pcie_suspend, mvebu_pcie_resume)

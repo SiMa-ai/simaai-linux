@@ -22,16 +22,12 @@
 #include <sound/soc-dapm.h>
 #include <sound/initval.h>
 #include <sound/tlv.h>
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <sound/cs35l33.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <linux/regulator/machine.h>
-#include <linux/of_gpio.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
-#include <linux/of_irq.h>
 
 #include "cs35l33.h"
 #include "cirrus_legacy.h"
@@ -442,12 +438,12 @@ static int cs35l33_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	struct cs35l33_private *priv = snd_soc_component_get_drvdata(component);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		regmap_update_bits(priv->regmap, CS35L33_ADSP_CTL,
 			CS35L33_MS_MASK, CS35L33_MS_MASK);
 		dev_dbg(component->dev, "Audio port in master mode\n");
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		regmap_update_bits(priv->regmap, CS35L33_ADSP_CTL,
 			CS35L33_MS_MASK, 0);
 		dev_dbg(component->dev, "Audio port in slave mode\n");
@@ -852,12 +848,12 @@ static const struct regmap_config cs35l33_regmap = {
 	.volatile_reg = cs35l33_volatile_register,
 	.readable_reg = cs35l33_readable_register,
 	.writeable_reg = cs35l33_writeable_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.use_single_read = true,
 	.use_single_write = true,
 };
 
-static int __maybe_unused cs35l33_runtime_resume(struct device *dev)
+static int cs35l33_runtime_resume(struct device *dev)
 {
 	struct cs35l33_private *cs35l33 = dev_get_drvdata(dev);
 	int ret;
@@ -895,7 +891,7 @@ err:
 	return ret;
 }
 
-static int __maybe_unused cs35l33_runtime_suspend(struct device *dev)
+static int cs35l33_runtime_suspend(struct device *dev)
 {
 	struct cs35l33_private *cs35l33 = dev_get_drvdata(dev);
 
@@ -913,9 +909,7 @@ static int __maybe_unused cs35l33_runtime_suspend(struct device *dev)
 }
 
 static const struct dev_pm_ops cs35l33_pm_ops = {
-	SET_RUNTIME_PM_OPS(cs35l33_runtime_suspend,
-			   cs35l33_runtime_resume,
-			   NULL)
+	RUNTIME_PM_OPS(cs35l33_runtime_suspend, cs35l33_runtime_resume, NULL)
 };
 
 static int cs35l33_get_hg_data(const struct device_node *np,
@@ -1167,7 +1161,7 @@ static int cs35l33_i2c_probe(struct i2c_client *i2c_client)
 
 	/* We could issue !RST or skip it based on AMP topology */
 	cs35l33->reset_gpio = devm_gpiod_get_optional(&i2c_client->dev,
-			"reset-gpios", GPIOD_OUT_HIGH);
+			"reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(cs35l33->reset_gpio)) {
 		dev_err(&i2c_client->dev, "%s ERROR: Can't get reset GPIO\n",
 			__func__);
@@ -1268,7 +1262,7 @@ static const struct of_device_id cs35l33_of_match[] = {
 MODULE_DEVICE_TABLE(of, cs35l33_of_match);
 
 static const struct i2c_device_id cs35l33_id[] = {
-	{"cs35l33", 0},
+	{"cs35l33"},
 	{}
 };
 
@@ -1277,12 +1271,12 @@ MODULE_DEVICE_TABLE(i2c, cs35l33_id);
 static struct i2c_driver cs35l33_i2c_driver = {
 	.driver = {
 		.name = "cs35l33",
-		.pm = &cs35l33_pm_ops,
+		.pm = pm_ptr(&cs35l33_pm_ops),
 		.of_match_table = cs35l33_of_match,
 
 		},
 	.id_table = cs35l33_id,
-	.probe_new = cs35l33_i2c_probe,
+	.probe = cs35l33_i2c_probe,
 	.remove = cs35l33_i2c_remove,
 
 };

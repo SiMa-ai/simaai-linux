@@ -76,7 +76,7 @@ static bool ms5611_prom_is_valid(u16 *prom, size_t len)
 
 	crc = (crc >> 12) & 0x000F;
 
-	return crc_orig != 0x0000 && crc == crc_orig;
+	return crc == crc_orig;
 }
 
 static int ms5611_read_prom(struct iio_dev *indio_dev)
@@ -213,7 +213,7 @@ static irqreturn_t ms5611_trigger_handler(int irq, void *p)
 	/* Ensure buffer elements are naturally aligned */
 	struct {
 		s32 channels[2];
-		s64 ts __aligned(8);
+		aligned_s64 ts;
 	} scan;
 	int ret;
 
@@ -308,7 +308,6 @@ static int ms5611_write_raw(struct iio_dev *indio_dev,
 {
 	struct ms5611_state *st = iio_priv(indio_dev);
 	const struct ms5611_osr *osr = NULL;
-	int ret;
 
 	if (mask != IIO_CHAN_INFO_OVERSAMPLING_RATIO)
 		return -EINVAL;
@@ -322,9 +321,8 @@ static int ms5611_write_raw(struct iio_dev *indio_dev,
 	if (!osr)
 		return -EINVAL;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
+	if (!iio_device_claim_direct(indio_dev))
+		return -EBUSY;
 
 	mutex_lock(&st->lock);
 
@@ -334,7 +332,7 @@ static int ms5611_write_raw(struct iio_dev *indio_dev,
 		st->pressure_osr = osr;
 
 	mutex_unlock(&st->lock);
-	iio_device_release_direct_mode(indio_dev);
+	iio_device_release_direct(indio_dev);
 
 	return 0;
 }
@@ -380,40 +378,21 @@ static const struct iio_info ms5611_info = {
 static int ms5611_init(struct iio_dev *indio_dev)
 {
 	int ret;
-	struct ms5611_state *st = iio_priv(indio_dev);
 
 	/* Enable attached regulator if any. */
-	st->vdd = devm_regulator_get(indio_dev->dev.parent, "vdd");
-	if (IS_ERR(st->vdd))
-		return PTR_ERR(st->vdd);
-
-	ret = regulator_enable(st->vdd);
-	if (ret) {
-		dev_err(indio_dev->dev.parent,
-			"failed to enable Vdd supply: %d\n", ret);
+	ret = devm_regulator_get_enable(indio_dev->dev.parent, "vdd");
+	if (ret)
 		return ret;
-	}
 
 	ret = ms5611_reset(indio_dev);
 	if (ret < 0)
-		goto err_regulator_disable;
+		return ret;
 
 	ret = ms5611_read_prom(indio_dev);
 	if (ret < 0)
-		goto err_regulator_disable;
+		return ret;
 
 	return 0;
-
-err_regulator_disable:
-	regulator_disable(st->vdd);
-	return ret;
-}
-
-static void ms5611_fini(const struct iio_dev *indio_dev)
-{
-	const struct ms5611_state *st = iio_priv(indio_dev);
-
-	regulator_disable(st->vdd);
 }
 
 int ms5611_probe(struct iio_dev *indio_dev, struct device *dev,
@@ -453,36 +432,22 @@ int ms5611_probe(struct iio_dev *indio_dev, struct device *dev,
 	if (ret < 0)
 		return ret;
 
-	ret = iio_triggered_buffer_setup(indio_dev, NULL,
+	ret = devm_iio_triggered_buffer_setup(dev, indio_dev, NULL,
 					 ms5611_trigger_handler, NULL);
 	if (ret < 0) {
 		dev_err(dev, "iio triggered buffer setup failed\n");
-		goto err_fini;
+		return ret;
 	}
 
-	ret = iio_device_register(indio_dev);
+	ret = devm_iio_device_register(dev, indio_dev);
 	if (ret < 0) {
 		dev_err(dev, "unable to register iio device\n");
-		goto err_buffer_cleanup;
+		return ret;
 	}
 
 	return 0;
-
-err_buffer_cleanup:
-	iio_triggered_buffer_cleanup(indio_dev);
-err_fini:
-	ms5611_fini(indio_dev);
-	return ret;
 }
-EXPORT_SYMBOL_NS(ms5611_probe, IIO_MS5611);
-
-void ms5611_remove(struct iio_dev *indio_dev)
-{
-	iio_device_unregister(indio_dev);
-	iio_triggered_buffer_cleanup(indio_dev);
-	ms5611_fini(indio_dev);
-}
-EXPORT_SYMBOL_NS(ms5611_remove, IIO_MS5611);
+EXPORT_SYMBOL_NS(ms5611_probe, "IIO_MS5611");
 
 MODULE_AUTHOR("Tomasz Duszynski <tduszyns@gmail.com>");
 MODULE_DESCRIPTION("MS5611 core driver");

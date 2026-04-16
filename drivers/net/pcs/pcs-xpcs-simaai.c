@@ -1,37 +1,42 @@
 //SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * Copyright (c) 2024 Sima ai
+ * Copyright (c) 2026 Sima ai
  */
 
 #include <linux/pcs/pcs-xpcs.h>
 #include "pcs-xpcs.h"
 
-#ifdef CONFIG_PCS_SIMAAI_MODALIX
-/* currently using SIMAAI specific literals.
- * Need to change them to DW ones later
- */
+#define DW_VR_XS_PCS_DBG_CTRL		0x0005
+#define DW_SUPRESS_LOS_DET		BIT(4)
+#define DW_RX_DT_EN_CTL			BIT(6)
+#define DW_SR_XS_PCS_CTRL2		0x0007
+#define DW_VR_XS_PCS_KR_CTRL		0x0007
 
-#define SIMAAI_VR_XS_PMA_MP_32G_LN_LINK_CTRL	0x2025c
-#define SIMAAI_SR_XS_PCS_CTRL1			0x80000
-#define SIMAAI_SR_XS_PCS_CTRL2			0x8001c
+#define DW_VR_XS_PMA_MP_32G_TX_CM_CNTX_SEL0	0x803C
+#define DW_VR_XS_PMA_MP_32G_TX_CNTX_CTRL0	0x803E
+#define DW_VR_XS_PMA_MP_25G_TX_WIDTH_CTRL	0x8046
+#define DW_VR_XS_PMA_MP_32G_RX_CNTX_CTRL0	0x8092
+#define DW_VR_XS_PMA_MP_32G_LN_LINK_CTRL	0x8097
+#define DW_VR_XS_PMA_MP_25G_RX_WIDTH_CTRL	0x80B0
+
 #define LPM					BIT(11)
-#define SIMAAI_VR_XS_PMA_MP_32G_RX_CNTX_CTRL0	0x20248
 #define RX_CNTX_SEL_0_10GBASER			0x05
 #define RX_CNTX_SEL_0_SGMII			0x06
 #define RX_CNTX_SEL_0_USXGMII_10G		0x0a
-#define SIMAAI_VR_XS_PMA_MP_32G_TX_CNTX_CTRL0	0x200f8
 #define TX_CNTX_SEL_0_10GBASER			0x05
 #define TX_CNTX_SEL_0_SGMII			0x06
 #define TX_CNTX_SEL_0_USXGMII_10G		0x0a
-#define SIMAAI_VR_XS_PMA_MP_32G_TX_CM_CNTX_SEL0	0x200f0
 #define CMN_CNTX_0_10GBASER			0x05
 #define CMN_CNTX_0_SGMII			0x06
 #define CMN_CNTX_0_USXGMII_10G			0x0a
-#define SIMAAI_VR_XS_PMA_MP_25G_RX_WIDTH_CTRL	0x202c0
 #define WIDTH_10BIT				0x1
 #define WIDTH_32BIT				0x4
-#define SIMAAI_VR_XS_PMA_MP_25G_TX_WIDTH_CTRL	0x20118
 #define WAIT_US					1000
+#define DW_EN_2_5G_MODE			BIT(2)
+#define DW_USXG_MODE                    GENMASK(12, 10)
+#define DW_USXG_MODE_10G                FIELD_PREP(GENMASK(12, 10), 0x0)
+#define DW_USXG_MODE_5G                 FIELD_PREP(GENMASK(12, 10), 0x1)
+#define DW_PSEQ_ST_DOWN                 FIELD_PREP(GENMASK(4, 2), 0x6)
 
 static int simaai_xpcs_poll_power_up(struct dw_xpcs *xpcs)
 {
@@ -98,7 +103,7 @@ static int simaai_select_pcs_type(struct dw_xpcs *xpcs, phy_interface_t type)
 		return -ENOTSUPP;
 	}
 
-	writel(val, xpcs->addr + SIMAAI_SR_XS_PCS_CTRL2);
+	xpcs_write(xpcs, MDIO_MMD_PCS, DW_SR_XS_PCS_CTRL2, val);
 
 	return 0;
 }
@@ -146,29 +151,26 @@ static int simaai_xpcs_config_32g_phy(struct dw_xpcs *xpcs,
 		return -ENOTSUPP;
 	}
 
-	writel(val1, xpcs->addr + SIMAAI_VR_XS_PMA_MP_32G_RX_CNTX_CTRL0);
-	writel(val2, xpcs->addr + SIMAAI_VR_XS_PMA_MP_32G_TX_CNTX_CTRL0);
-	writel(val3, xpcs->addr + SIMAAI_VR_XS_PMA_MP_32G_TX_CM_CNTX_SEL0);
-	writel(val4, xpcs->addr + SIMAAI_VR_XS_PMA_MP_25G_RX_WIDTH_CTRL);
-	writel(val5, xpcs->addr + SIMAAI_VR_XS_PMA_MP_25G_TX_WIDTH_CTRL);
+	xpcs_write(xpcs, MDIO_MMD_PMAPMD, DW_VR_XS_PMA_MP_32G_RX_CNTX_CTRL0, val1);
+	xpcs_write(xpcs, MDIO_MMD_PMAPMD, DW_VR_XS_PMA_MP_32G_TX_CNTX_CTRL0, val2);
+	xpcs_write(xpcs, MDIO_MMD_PMAPMD, DW_VR_XS_PMA_MP_32G_TX_CM_CNTX_SEL0, val3);
+	xpcs_write(xpcs, MDIO_MMD_PMAPMD, DW_VR_XS_PMA_MP_25G_RX_WIDTH_CTRL, val4);
+	xpcs_write(xpcs, MDIO_MMD_PMAPMD, DW_VR_XS_PMA_MP_25G_TX_WIDTH_CTRL, val5);
 
-	if (!xpcs->link_num)
-		xpcs->link_num = simaai_alloc_index();
+	if (!xpcs->info.scratch)
+		xpcs->info.scratch = simaai_alloc_index();
 
-	writel(xpcs->link_num,
-	       xpcs->addr + SIMAAI_VR_XS_PMA_MP_32G_LN_LINK_CTRL);
+	xpcs_write(xpcs, MDIO_MMD_PMAPMD, DW_VR_XS_PMA_MP_32G_LN_LINK_CTRL, xpcs->info.scratch);
 
 	return 0;
 }
 
-int simaai_xpcs_power_cycle(struct dw_xpcs *xpcs)
+int simaai_xpcs_lane_reset(struct dw_xpcs *xpcs)
 {
 	int ret;
-	u32 val;
+	u32 val = 0x440;
 
-	val = readl(xpcs->addr + SIMAAI_SR_XS_PCS_CTRL1);
-	val |= LPM;
-	writel(val, xpcs->addr + SIMAAI_SR_XS_PCS_CTRL1);
+	xpcs_write(xpcs, MDIO_MMD_PCS, MDIO_CTRL1, val | LPM);
 
 	udelay(WAIT_US);
 
@@ -178,7 +180,7 @@ int simaai_xpcs_power_cycle(struct dw_xpcs *xpcs)
 
 	udelay(WAIT_US);
 
-	writel(0x440, xpcs->addr + SIMAAI_SR_XS_PCS_CTRL1);
+	xpcs_write(xpcs, MDIO_MMD_PCS, MDIO_CTRL1, val);
 
 	udelay(WAIT_US);
 
@@ -217,7 +219,7 @@ static int simaai_xpcs_switch_sgmii(struct dw_xpcs *xpcs)
 	if (ret < 0)
 		goto out;
 
-	ret = simaai_xpcs_power_cycle(xpcs);
+	ret = simaai_xpcs_lane_reset(xpcs);
 	if (ret < 0)
 		goto out;
 
@@ -271,7 +273,7 @@ static int simaai_xpcs_switch_usxgmii(struct dw_xpcs *xpcs)
 	if (ret < 0)
 		goto out;
 
-	ret = simaai_xpcs_power_cycle(xpcs);
+	ret = simaai_xpcs_lane_reset(xpcs);
 	if (ret < 0)
 		goto out;
 
@@ -314,7 +316,7 @@ static int simaai_xpcs_switch_10g_base_r(struct dw_xpcs *xpcs)
 	if (ret < 0)
 		goto out;
 
-	ret = simaai_xpcs_power_cycle(xpcs);
+	ret = simaai_xpcs_lane_reset(xpcs);
 	if (ret < 0)
 		goto out;
 
@@ -355,16 +357,3 @@ int simaai_xpcs_switch_mode(struct dw_xpcs *xpcs, phy_interface_t iface)
 
 	return ret;
 }
-
-#else
-int simaai_xpcs_switch_mode(struct dw_xpcs *xpcs, phy_interface_t iface)
-{
-	return 0;
-}
-
-int simaai_xpcs_power_cycle(struct dw_xpcs *xpcs)
-{
-	return 0;
-}
-
-#endif

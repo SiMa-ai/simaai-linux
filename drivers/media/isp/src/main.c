@@ -268,18 +268,19 @@ static int isp_fw_init_kthread_func( void *pdev )
     }
 
     static atomic_t drv_instance = ATOMIC_INIT( 0 );
+
     v4l2_device_set_name( &v4l2_dev, ISP_V4L2_MODULE_NAME, &drv_instance );
-    int rc = v4l2_device_register( &( ( (struct platform_device *)pdev )->dev ), &v4l2_dev );
-    if ( rc == 0 ) {
+    result = v4l2_device_register( &( ( (struct platform_device *)pdev )->dev ), &v4l2_dev );
+    if ( result == 0 ) {
         LOG( LOG_INFO, "V4L2 device successfully registered." );
     } else {
-        LOG( LOG_ERR, "Failed to register V4L2 device (%d).", rc );
+        LOG( LOG_ERR, "Failed to register V4L2 device (%d).", result );
         return -1;
     }
 
-    rc = isp_v4l2_create_instance( &v4l2_dev );
-    if ( rc < 0 ) {
-        LOG( LOG_ERR, "Failed to register ISP V4L2 driver (%d).", rc );
+    result = isp_v4l2_create_instance( &v4l2_dev );
+    if ( result < 0 ) {
+        LOG( LOG_ERR, "Failed to register ISP V4L2 driver (%d).", result );
         return -1;
     }
 #endif
@@ -414,7 +415,6 @@ static void __exit fw_module_exit( void )
 #if V4L2_INTERFACE_BUILD
     // Destroy V4L2 instances and unregister device
     isp_v4l2_destroy_instance();
-    v4l2_device_unregister( &v4l2_dev );
 #endif
 
     system_cma_print_tracking_info();

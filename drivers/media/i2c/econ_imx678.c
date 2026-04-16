@@ -6,7 +6,7 @@
  * Based on Sony imx219 camera driver
  * Copyright (C) 2019-2020 Raspberry Pi (Trading) Ltd
  */
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
@@ -23,6 +23,7 @@
 
 #include <linux/of_gpio.h>
 #include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/firmware.h>
 #include "econ_imx678.h"
 
@@ -230,7 +231,7 @@ static inline struct imx678 *to_imx678(struct v4l2_subdev *_sd)
 
 static void imx678_set_default_format(struct imx678 *imx678)
 {
-	imx678->fmt_code = MEDIA_BUS_FMT_SRGGB12_1X12;
+	imx678->fmt_code = codes[0];
 }
 
 static int imx678_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
@@ -238,14 +239,218 @@ static int imx678_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	return 0;
 }
 
+// Setting Gain
+static int32_t cam_set_gain(struct imx678 *imx678, uint64_t gain)
+{
+	unsigned char mc_data[100];
+	uint32_t payload_len = 0;
+	uint16_t cmd_status = 0;
+	uint8_t retcode = 0, cmd_id = 0;
+	int ret = 0, err = 0, retry = 5;
+	int loop = 0;
+	uint16_t ctrl_val_len = 0, index = 0;
+
+	payload_len = 20;
+	ctrl_val_len = 8;
+
+	index = 0x00; // GAIN Control Index
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
+
+	ret = cam_write(imx678->i2c_client, mc_data, 5);
+    if (ret != 0) {
+		dev_err(&imx678->i2c_client->dev," %s(%d) MCU Get CMD CAM Init Error - "
+				"%d \n", __func__, __LINE__, ret);
+
+		return -1;
+    }
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	/* Index */
+	mc_data[2] = index >> 8;
+	mc_data[3] = index & 0xFF;
+	/* Control ID */
+	mc_data[4] = GAIN_CTRL_ID >> 24;
+	mc_data[5] = GAIN_CTRL_ID >> 16;
+	mc_data[6] = GAIN_CTRL_ID >> 8;
+	mc_data[7] = GAIN_CTRL_ID & 0xFF;
+	/* Ctrl Type */
+	mc_data[8] = CTRL_EXTENDED;
+	mc_data[9]  = V4L2_CTRL_TYPE_INTEGER64;
+	mc_data[10] = ctrl_val_len >> 24;
+	mc_data[11] = ctrl_val_len >> 16;
+	mc_data[12] = ctrl_val_len >> 8;
+	mc_data[13] = ctrl_val_len & 0xFF;
+	for (loop = 0;loop < ctrl_val_len; loop++)
+		mc_data[21-loop] = (gain >> (8 * loop));
+	/* CRC */
+	mc_data[22] = errorcheck(&mc_data[2], payload_len);
+
+	ret = cam_write(imx678->i2c_client, mc_data, payload_len + 3);
+    if (ret != 0) {
+		dev_err(&imx678->i2c_client->dev," %s(%d) MCU Get CMD CAM Init Error - "
+				"%d \n", __func__, __LINE__, ret);
+
+		return -1;
+    }
+
+	return ret;
+}
+
+// Setting exposure
+static int32_t cam_set_exposure(struct imx678 *imx678, uint64_t exp)
+{
+	unsigned char mc_data[100];
+	uint32_t payload_len = 0;
+	uint16_t cmd_status = 0;
+	uint8_t retcode = 0, cmd_id = 0;
+	int ret = 0, err = 0, retry = 5;
+	int loop = 0;
+	uint16_t ctrl_val_len = 0, index = 0;
+
+
+	payload_len = 20;
+	ctrl_val_len = 8;
+
+	index = 0x01; // Exposure Control Index
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
+
+	ret = cam_write(imx678->i2c_client, mc_data, 5);
+    if (ret != 0) {
+		dev_err(&imx678->i2c_client->dev," %s(%d) MCU Get CMD CAM Init Error - "
+				"%d \n", __func__, __LINE__, ret);
+
+		return -1;
+    }
+
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
+	/* Index */
+	mc_data[2] = index >> 8;
+	mc_data[3] = index & 0xFF;
+	/* Control ID */
+	mc_data[4] = EXPOSURE_CTRL_ID >> 24;
+	mc_data[5] = EXPOSURE_CTRL_ID >> 16;
+	mc_data[6] = EXPOSURE_CTRL_ID >> 8;
+	mc_data[7] = EXPOSURE_CTRL_ID & 0xFF;
+	/* Ctrl Type */
+	mc_data[8] = CTRL_EXTENDED;
+	mc_data[9]  = V4L2_CTRL_TYPE_INTEGER64;
+	mc_data[10] = ctrl_val_len >> 24;
+	mc_data[11] = ctrl_val_len >> 16;
+	mc_data[12] = ctrl_val_len >> 8;
+	mc_data[13] = ctrl_val_len & 0xFF;
+	for (loop = 0;loop < ctrl_val_len; loop++)
+		mc_data[21-loop] = (exp >> (8 * loop));
+	/* CRC */
+	mc_data[22] = errorcheck(&mc_data[2], payload_len);
+
+	ret = cam_write(imx678->i2c_client, mc_data, payload_len + 3);
+    if (ret != 0) {
+		dev_err(&imx678->i2c_client->dev," %s(%d) MCU Get CMD CAM Init Error - "
+				"%d \n", __func__, __LINE__, ret);
+
+		return -1;
+    }
+
+	return ret;
+}
+
+#define AGAIN_PRECISION 12
+#define LOG10_2_AGAIN_PREC ( 1233 ) // log10(2) << AGAIN_PRECISION
+#define LOG_TO_DB ( 20 )
+#define SENSOR_AGAIN_STEP_UP ( 10 )
+#define SENSOR_AGAIN_STEP_DOWN ( 3 )
+#define NORMALISE_FACTOR (LOG2_GAIN_SHIFT - AGAIN_PRECISION)
+#define CONVERSION_FACTOR (((LOG10_2_AGAIN_PREC * LOG_TO_DB * SENSOR_AGAIN_STEP_UP) / SENSOR_AGAIN_STEP_DOWN) >> NORMALISE_FACTOR)
+#define NORMALISE_REG_FACTOR ( 2 * AGAIN_PRECISION )
+
+static int32_t sensor_set_analogue_gain( struct imx678 *imx678, int32_t gain )
+{
+    uint32_t a_gain;
+	int32_t ret = 0;
+
+	if (imx678->again != gain) {
+		// Conversion of log2_gain value to corresponded sensor gain value in dB
+		a_gain = (gain * CONVERSION_FACTOR) >> NORMALISE_REG_FACTOR;
+		// Conversion of dB to Gain Values to parse to the MCU to configure sensor
+		a_gain = (a_gain * 3)/10;
+		a_gain = a_gain * GAIN_FACTOR;
+		ret = cam_set_gain (imx678, (uint64_t)a_gain);
+		if (ret == 0) {
+			imx678->again = gain;
+		}
+	}
+
+    return ret;
+}
+
+static int32_t sensor_set_digital_gain( struct imx678 *imx678, int32_t gain )
+{
+    uint32_t d_gain;
+    int32_t ret = 0;
+	
+	if (imx678->dgain != gain) {
+		// Conversion of log2_gain value to corresponded sensor gain value in dB
+		d_gain = (gain * CONVERSION_FACTOR) >> NORMALISE_REG_FACTOR;
+		// Conversion of dB to Gain Values to parse to the MCU to configure sensor
+		d_gain = ((d_gain * 3)/10) + 30; // 30 - Adding Sensor Analog Gain maximum: 30dB
+		d_gain = (d_gain * GAIN_FACTOR);
+		ret = cam_set_gain (imx678, (uint64_t)d_gain);
+		if (ret == 0){
+			imx678->dgain = gain;
+		}
+	}
+
+	return ret;
+}
+
+static int32_t sensor_set_exposure( struct imx678 *imx678, uint32_t integration_time)
+{
+    uint64_t exp = 0;
+    int32_t ret = 0;
+
+    if (imx678->integration_time != integration_time) {
+		// Conversion of lines to exposure time (us)
+		exp = (uint64_t)(integration_time) * (imx678->cam_frmfmt[imx678->frmfmt_mode].hmax);
+		exp = (exp * EXPOSURE_FACTOR)/ SENSOR_PIXEL_CLOCK;
+		ret = cam_set_exposure (imx678, exp);
+		if (ret == 0) {
+			imx678->integration_time = integration_time;
+		}
+    }
+
+    return ret;
+}
+
 static int imx678_set_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct imx678 *imx678 =
-		container_of(ctrl->handler, struct imx678, ctrl_handler);
+	struct imx678 *imx678 = container_of(ctrl->handler, struct imx678, ctrl_handler);
 	struct i2c_client *client = v4l2_get_subdevdata(&imx678->sd);
 	int ret = 0;
 
-	// Not Implemented
+	switch (ctrl->id) {
+		case V4L2_CID_ANALOGUE_GAIN:
+			ret = sensor_set_analogue_gain(imx678, ctrl->val);
+			break;
+    	case V4L2_CID_EXPOSURE:
+			ret = sensor_set_exposure(imx678, ctrl->val);
+			break;
+    	case V4L2_CID_DIGITAL_GAIN:
+			ret = sensor_set_digital_gain(imx678, ctrl->val);
+			break;
+	}
+
 	return ret;
 }
 
@@ -263,7 +468,10 @@ static int imx678_enum_mbus_code(struct v4l2_subdev *sd,
 		return -EINVAL;
 
 	if (code->pad == IMAGE_PAD) {
-		code->code = MEDIA_BUS_FMT_SRGGB12_1X12;
+		if (code->index > 0)
+			return -EINVAL;
+
+		code->code = codes[code->index];
 	} else {
 		if (code->index > 0)
 			return -EINVAL;
@@ -284,6 +492,9 @@ static int imx678_enum_frame_size(struct v4l2_subdev *sd,
 		return -EINVAL;
 
 	if (fse->pad == IMAGE_PAD) {
+		if (fse->index >= imx678->nr_supported_formats)
+			return -EINVAL;
+
 		fse->min_width = imx678->cam_frmfmt[fse->index].size.width;
 		fse->max_width = fse->min_width;
 		fse->min_height = imx678->cam_frmfmt[fse->index].size.height;
@@ -340,8 +551,7 @@ static int imx678_get_pad_format(struct v4l2_subdev *sd,
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		struct v4l2_mbus_framefmt *try_fmt =
-			v4l2_subdev_get_try_format(&imx678->sd, sd_state,
-						   fmt->pad);
+			v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		/* update the code which could change due to vflip or hflip: */
 		try_fmt->code = MEDIA_BUS_FMT_SRGGB12_1X12;
 		fmt->format = *try_fmt;
@@ -349,6 +559,8 @@ static int imx678_get_pad_format(struct v4l2_subdev *sd,
 		if (fmt->pad == IMAGE_PAD) {
 			imx678_update_image_pad_format(imx678, fmt);
 			fmt->format.code = MEDIA_BUS_FMT_SRGGB12_1X12;
+			fmt->format.width = imx678->cam_frmfmt[imx678->frmfmt_mode].size.width;
+			fmt->format.height = imx678->cam_frmfmt[imx678->frmfmt_mode].size.height;
 		} else {
 			imx678_update_metadata_pad_format(fmt);
 		}
@@ -484,15 +696,13 @@ static int imx678_set_pad_format(struct v4l2_subdev *sd,
 		imx678_update_image_pad_format(imx678, fmt);
 
 		if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-			framefmt = v4l2_subdev_get_try_format(sd, sd_state,
-							      fmt->pad);
+			framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 			*framefmt = fmt->format;
 		}
 	} else {
 		// Not Implemented
 		if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-			framefmt = v4l2_subdev_get_try_format(sd, sd_state,
-							      fmt->pad);
+			framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 			*framefmt = fmt->format;
 		} else {
 			/* Only one embedded data mode is supported */
@@ -659,16 +869,14 @@ static int imx678_start_streaming(struct imx678 *imx678)
 	struct i2c_client *client = v4l2_get_subdevdata(&imx678->sd);
 	int ret;
 
-	/* Apply customized values from user */
-	ret =  __v4l2_ctrl_handler_setup(imx678->sd.ctrl_handler);
-	if (ret)
-		return ret;
-
 	ret = cam_stream_on(client, imx678);
 	if(ret != 0){
 		dev_err(&client->dev,"%s (%d) Stream_On - Failed\n", __func__, __LINE__);
+		return ret;
 	}
 
+	/* Apply customized values from user */
+	ret =  __v4l2_ctrl_handler_setup(imx678->sd.ctrl_handler);
 	return ret;
 }
 
@@ -737,14 +945,6 @@ static int imx678_power_on(struct device *dev)
 	struct imx678 *imx678 = to_imx678(sd);
 	int ret;
 
-	ret = regulator_bulk_enable(IMX678_NUM_SUPPLIES,
-				    imx678->supplies);
-	if (ret) {
-		dev_err(&client->dev, "%s: failed to enable regulators\n",
-			__func__);
-		return ret;
-	}
-
 	ret = clk_prepare_enable(imx678->xclk);
 	if (ret) {
 		dev_err(&client->dev, "%s: failed to enable clock\n",
@@ -754,7 +954,6 @@ static int imx678_power_on(struct device *dev)
 	return 0;
 
 reg_off:
-	regulator_bulk_disable(IMX678_NUM_SUPPLIES, imx678->supplies);
 	return ret;
 }
 
@@ -764,7 +963,6 @@ static int imx678_power_off(struct device *dev)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx678 *imx678 = to_imx678(sd);
 
-	regulator_bulk_disable(IMX678_NUM_SUPPLIES, imx678->supplies);
 	clk_disable_unprepare(imx678->xclk);
 
 	/* Force reprogramming of the common registers when powered up again. */
@@ -819,6 +1017,16 @@ static int imx678_get_regulators(struct imx678 *imx678)
 				       imx678->supplies);
 }
 
+static int imx678_get_mbus_config(struct v4l2_subdev *sd,
+				    unsigned int pad,
+				    struct v4l2_mbus_config *cfg)
+{
+	struct imx678 *imx678 = to_imx678(sd);
+
+	cfg->link_freq =  imx678->link_freq_value;
+	return 0;
+}
+
 static const struct v4l2_subdev_core_ops imx678_core_ops = {
 	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
 	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
@@ -833,6 +1041,7 @@ static const struct v4l2_subdev_pad_ops imx678_pad_ops = {
 	.get_fmt = imx678_get_pad_format,
 	.set_fmt = imx678_set_pad_format,
 	.enum_frame_size = imx678_enum_frame_size,
+	.get_mbus_config = imx678_get_mbus_config,
 };
 
 static const struct v4l2_subdev_ops imx678_subdev_ops = {
@@ -855,11 +1064,51 @@ static int imx678_init_controls(struct imx678 *imx678)
 	int ret;
 
 	ctrl_hdlr = &imx678->ctrl_handler;
-	ret = v4l2_ctrl_handler_init(ctrl_hdlr, imx678->num_ctrls);
+	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 10);
 	if (ret)
 		return ret;
 
 	ctrl_hdlr->lock = &imx678->mutex;
+
+	/* By default, PIXEL_RATE is read only */
+	imx678->pixel_rate = v4l2_ctrl_new_std(ctrl_hdlr, &imx678_ctrl_ops     ,
+                       V4L2_CID_PIXEL_RATE,
+                       SENSOR_PIXEL_CLOCK,
+                       SENSOR_PIXEL_CLOCK, 1,
+                       SENSOR_PIXEL_CLOCK);
+	if (imx678->pixel_rate)
+		imx678->pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+	/* LINK_FREQ is also read only */
+	imx678->link_freq =
+		v4l2_ctrl_new_int_menu(ctrl_hdlr, &imx678_ctrl_ops,
+				V4L2_CID_LINK_FREQ, 0, 0,
+				&imx678->link_freq_value);
+	if (imx678->link_freq)
+		imx678->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+	v4l2_ctrl_new_std(ctrl_hdlr, &imx678_ctrl_ops, V4L2_CID_ANALOGUE_GAIN,
+				IMX678_ANA_GAIN_MIN, IMX678_ANA_GAIN_MAX,
+				IMX678_ANA_GAIN_STEP, IMX678_ANA_GAIN_DEFAULT);
+
+	v4l2_ctrl_new_std(ctrl_hdlr, &imx678_ctrl_ops, V4L2_CID_DIGITAL_GAIN,
+				IMX678_DGTL_GAIN_MIN, IMX678_DGTL_GAIN_MAX,
+				IMX678_DGTL_GAIN_STEP, IMX678_DGTL_GAIN_DEFAULT);
+
+	imx678->vblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx678_ctrl_ops,
+                       V4L2_CID_VBLANK, IMX678_VBLANK_MIN,
+                       0xffff, 1, IMX678_VBLANK_MIN);
+    imx678->hblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx678_ctrl_ops,
+                       V4L2_CID_HBLANK, 0, 0xffff, 1, 0);
+
+	imx678->exposure = v4l2_ctrl_new_std(ctrl_hdlr, &imx678_ctrl_ops,
+                         V4L2_CID_EXPOSURE,
+                         IMX678_EXPOSURE_MIN,
+                         IMX678_EXPOSURE_MAX,
+                         IMX678_EXPOSURE_STEP,
+                         IMX678_EXPOSURE_DEFAULT);
+
+	imx678->sd.ctrl_handler = ctrl_hdlr;
 
 	// No controls to initialize
 	mutex_unlock(&imx678->mutex);
@@ -918,12 +1167,19 @@ static int imx678_check_hwcfg(struct device *dev)
 		goto error_out;
 	}
 
-	if (ep_cfg.nr_of_link_frequencies != 1 ||
-	    ep_cfg.link_frequencies[0] != IMX678_DEFAULT_LINK_FREQ) {
-		dev_err(dev, "Link frequency not supported: %lld\n",
-			ep_cfg.link_frequencies[0]);
+	if (ep_cfg.nr_of_link_frequencies != 1) {
+		dev_err(dev, "Only one link frequency supported\n");
 		goto error_out;
 	}
+
+	if((ep_cfg.link_frequencies[0] != IMX678_DEFAULT_LINK_FREQ) &&
+			(ep_cfg.link_frequencies[0] != IMX678_2LANE_1080P_LINK_FREQ) &&
+			(ep_cfg.link_frequencies[0] != IMX678_2LANE_4K_LINK_FREQ)) {
+		dev_err(dev, "Link frequency not supported: %lld\n",
+				ep_cfg.link_frequencies[0]);
+		goto error_out;
+	}
+	imx678->link_freq_value = ep_cfg.link_frequencies[0];
 
 	ret = 0;
 
@@ -1103,6 +1359,7 @@ exit:
 
 	return ret;
 }
+
 int cam_bload_get_version(struct i2c_client *client)
 {
 	int ret = 0;
@@ -1147,6 +1404,7 @@ int cam_bload_get_version(struct i2c_client *client)
 
 	return 0;
 }
+
 int cam_bload_erase_flash(struct i2c_client *client)
 {
         unsigned short int pagenum = 0x0000;
@@ -1244,6 +1502,7 @@ int cam_bload_erase_flash(struct i2c_client *client)
 
         return 0;
 }
+
 unsigned short int cam_bload_calc_crc16(unsigned char *buf, int len)
 {
         unsigned short int crc = 0;
@@ -1258,6 +1517,7 @@ unsigned short int cam_bload_calc_crc16(unsigned char *buf, int len)
 
         return crc;
 }
+
 unsigned char cam_bload_inv_errorcheck(unsigned char *buf, int len)
 {
         unsigned int checksum = 0x00;
@@ -1410,6 +1670,7 @@ int cam_bload_parse_send_cmd(struct i2c_client *client,
 
         return 0;
 }
+
 int cam_bload_read_fw(struct i2c_client *client,
 			unsigned short int *orig_crc16)
 {
@@ -1467,6 +1728,7 @@ int cam_bload_read_fw(struct i2c_client *client,
 
         return ret;
 }
+
 int cam_bload_read(struct i2c_client *client, unsigned int g_bload_flashaddr,
                    char *bytearray, unsigned int len)
 {
@@ -1549,6 +1811,7 @@ int cam_bload_read(struct i2c_client *client, unsigned int g_bload_flashaddr,
 
         return 0;
 }
+
 int cam_bload_verify_flash(struct i2c_client *client,
                            unsigned short int orig_crc)
 {
@@ -1593,6 +1856,7 @@ int cam_bload_verify_flash(struct i2c_client *client,
 
         return 0;
 }
+
 int cam_bload_go(struct i2c_client *client)
 {
         int ret = 0;
@@ -1980,6 +2244,7 @@ static int cam_list_ctrls(struct i2c_client *client, struct imx678 *priv,
         return ret;
 
 }
+
 static int cam_list_fmts(struct i2c_client *client, struct imx678 *priv,
 			ISP_STREAM_INFO *stream_info, int *frm_fmt_size)
 {
@@ -2148,12 +2413,18 @@ static int cam_list_fmts(struct i2c_client *client, struct imx678 *priv,
 					priv->cam_frmfmt[mode].mode = mode;
 					priv->streamdb[index] = mode;
 #ifdef EN_DEBUG_PRINTS
-					dev_info(&client->dev, "stream mode : %d width : %d height : %d framerate : %d\n",
+					dev_info(&client->dev, "stream mode : %d width : %d height : %d framerate : %d, fourecc : %#x\n",
 							priv->cam_frmfmt[mode].mode, stream_info->width, stream_info->height,
-							priv->cam_frmfmt[mode].num_framerates);
+							priv->cam_frmfmt[mode].num_framerates, stream_info->fmt_fourcc);
 					dev_info(&client->dev, "stream_info->frame_rate.disc.frame_rate_num = %d --------------\n",
 							stream_info->frame_rate.disc.frame_rate_num);
 #endif
+					if ((stream_info->fmt_fourcc == V4L2_PIX_FMT_SRGGB12) ||
+							(stream_info->fmt_fourcc == V4L2_PIX_FMT_SGBRG12)) {
+						priv->cam_frmfmt[mode].hmax = 1100;
+						priv->cam_frmfmt[mode].vmax = 2250;
+					}
+					
 					mode++;
 					break;
 
@@ -2178,10 +2449,11 @@ static int cam_list_fmts(struct i2c_client *client, struct imx678 *priv,
 }
 
 /* --------------------- GPIO Toggling --------------------- */
-
 static void toggle_gpio_mcu(unsigned int gpio, int val)
 {
-	if (gpio_cansleep(gpio)) {
+	struct gpio_desc *desc = gpio_to_desc(gpio);
+
+	if (gpiod_cansleep(desc)) {
 		gpio_direction_output(gpio,val);
 		gpio_set_value_cansleep(gpio, val);
 	} else {
@@ -2191,7 +2463,6 @@ static void toggle_gpio_mcu(unsigned int gpio, int val)
 }
 
 /* --------- Camera Module Initialization Process ---------- */
-
 int cam_core_initialize(struct imx678 *priv)
 {
         struct i2c_client *client = priv->i2c_client;
@@ -2378,6 +2649,7 @@ int cam_core_initialize(struct imx678 *priv)
 		return -EFAULT;
 	}
 
+	priv->nr_supported_formats = frm_fmt_size;
 	priv->stream_info = devm_kzalloc (dev,
 			sizeof(ISP_STREAM_INFO) * (frm_fmt_size + 1), GFP_KERNEL);
 	priv->streamdb = devm_kzalloc(dev, sizeof(int) * (frm_fmt_size + 1), GFP_KERNEL);
@@ -2465,12 +2737,6 @@ static int imx678_probe(struct i2c_client *client)
 		return -EINVAL;
 	}
 
-	ret = imx678_get_regulators(imx678);
-	if (ret) {
-		dev_err(dev, "failed to get regulators  %d\n", ret);
-		return ret;
-	}
-
 	/* Request cam reset pin */
 	imx678->reset_gpio = of_get_named_gpio(node, "reset-gpios", 0);
 
@@ -2518,13 +2784,19 @@ static int imx678_probe(struct i2c_client *client)
 		goto error_handler_free;
 	}
 
+	ret = v4l2_subdev_init_finalize(&imx678->sd);
+	if (ret < 0) {
+		dev_err(dev, "Failed in finalize %d\n", ret);
+		goto error_media_entity;
+	}
+
 	ret = v4l2_async_register_subdev_sensor(&imx678->sd);
 	if (ret < 0) {
 		dev_err(dev, "failed to register sensor sub-device: %d\n", ret);
 		goto error_media_entity;
 	}
 
-	dev_info (dev, "Detected IMX678 Camera\n");
+	dev_err (dev, "Detected IMX678 Camera\n");
 
 	return 0;
 
@@ -2594,7 +2866,7 @@ static struct i2c_driver imx678_i2c_driver = {
 		.of_match_table	= imx678_dt_ids,
 		.pm = &imx678_pm_ops,
 	},
-	.probe_new = imx678_probe,
+	.probe = imx678_probe,
 	.remove = imx678_remove,
 };
 

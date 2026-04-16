@@ -22,13 +22,13 @@
 #include <linux/uaccess.h>
 #include "internal.h"
 
-static int ramfs_nommu_setattr(struct user_namespace *, struct dentry *, struct iattr *);
+static int ramfs_nommu_setattr(struct mnt_idmap *, struct dentry *, struct iattr *);
 static unsigned long ramfs_nommu_get_unmapped_area(struct file *file,
 						   unsigned long addr,
 						   unsigned long len,
 						   unsigned long pgoff,
 						   unsigned long flags);
-static int ramfs_nommu_mmap(struct file *file, struct vm_area_struct *vma);
+static int ramfs_nommu_mmap_prepare(struct vm_area_desc *desc);
 
 static unsigned ramfs_mmap_capabilities(struct file *file)
 {
@@ -38,12 +38,12 @@ static unsigned ramfs_mmap_capabilities(struct file *file)
 
 const struct file_operations ramfs_file_operations = {
 	.mmap_capabilities	= ramfs_mmap_capabilities,
-	.mmap			= ramfs_nommu_mmap,
+	.mmap_prepare		= ramfs_nommu_mmap_prepare,
 	.get_unmapped_area	= ramfs_nommu_get_unmapped_area,
 	.read_iter		= generic_file_read_iter,
 	.write_iter		= generic_file_write_iter,
 	.fsync			= noop_fsync,
-	.splice_read		= generic_file_splice_read,
+	.splice_read		= filemap_splice_read,
 	.splice_write		= iter_file_splice_write,
 	.llseek			= generic_file_llseek,
 };
@@ -70,7 +70,7 @@ int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 
 	/* make various checks */
 	order = get_order(newsize);
-	if (unlikely(order >= MAX_ORDER))
+	if (unlikely(order > MAX_PAGE_ORDER))
 		return -EFBIG;
 
 	ret = inode_newsize_ok(inode, newsize);
@@ -158,7 +158,7 @@ static int ramfs_nommu_resize(struct inode *inode, loff_t newsize, loff_t size)
  * handle a change of attributes
  * - we're specifically interested in a change of size
  */
-static int ramfs_nommu_setattr(struct user_namespace *mnt_userns,
+static int ramfs_nommu_setattr(struct mnt_idmap *idmap,
 			       struct dentry *dentry, struct iattr *ia)
 {
 	struct inode *inode = d_inode(dentry);
@@ -166,7 +166,7 @@ static int ramfs_nommu_setattr(struct user_namespace *mnt_userns,
 	int ret = 0;
 
 	/* POSIX UID/GID verification for setting inode attributes */
-	ret = setattr_prepare(&init_user_ns, dentry, ia);
+	ret = setattr_prepare(&nop_mnt_idmap, dentry, ia);
 	if (ret)
 		return ret;
 
@@ -186,7 +186,7 @@ static int ramfs_nommu_setattr(struct user_namespace *mnt_userns,
 		}
 	}
 
-	setattr_copy(&init_user_ns, inode, ia);
+	setattr_copy(&nop_mnt_idmap, inode, ia);
  out:
 	ia->ia_valid = old_ia_valid;
 	return ret;
@@ -262,12 +262,12 @@ out:
 /*
  * set up a mapping for shared memory segments
  */
-static int ramfs_nommu_mmap(struct file *file, struct vm_area_struct *vma)
+static int ramfs_nommu_mmap_prepare(struct vm_area_desc *desc)
 {
-	if (!(vma->vm_flags & (VM_SHARED | VM_MAYSHARE)))
+	if (!is_nommu_shared_mapping(desc->vm_flags))
 		return -ENOSYS;
 
-	file_accessed(file);
-	vma->vm_ops = &generic_file_vm_ops;
+	file_accessed(desc->file);
+	desc->vm_ops = &generic_file_vm_ops;
 	return 0;
 }

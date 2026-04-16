@@ -70,9 +70,17 @@ struct perf_record_lost {
 	__u64			 lost;
 };
 
+#define PERF_RECORD_MISC_LOST_SAMPLES_BPF (1 << 15)
+
 struct perf_record_lost_samples {
 	struct perf_event_header header;
 	__u64			 lost;
+};
+
+#define MAX_ID_HDR_ENTRIES  6
+struct perf_record_lost_samples_and_ids {
+	struct perf_record_lost_samples lost;
+	__u64 sample_ids[MAX_ID_HDR_ENTRIES];
 };
 
 /*
@@ -146,8 +154,18 @@ struct perf_record_switch {
 struct perf_record_header_attr {
 	struct perf_event_header header;
 	struct perf_event_attr	 attr;
-	__u64			 id[];
+	/*
+	 * Array of u64 id follows here but we cannot use a flexible array
+	 * because size of attr in the data can be different then current
+	 * version.  Please use perf_record_header_attr_id() below.
+	 *
+	 * __u64		 id[];  // do not use this
+	 */
 };
+
+/* Returns the pointer to id array based on the actual attr size. */
+#define perf_record_header_attr_id(evt)			\
+	((void *)&(evt)->attr.attr + (evt)->attr.attr.size)
 
 enum {
 	PERF_CPU_MAP__CPUS = 0,
@@ -273,6 +291,7 @@ struct perf_record_header_event_type {
 struct perf_record_header_tracing_data {
 	struct perf_event_header header;
 	__u32			 size;
+	__u32			 pad;
 };
 
 #define PERF_RECORD_MISC_BUILD_ID_SIZE (1 << 15)
@@ -378,7 +397,8 @@ enum {
 	PERF_STAT_CONFIG_TERM__AGGR_MODE	= 0,
 	PERF_STAT_CONFIG_TERM__INTERVAL		= 1,
 	PERF_STAT_CONFIG_TERM__SCALE		= 2,
-	PERF_STAT_CONFIG_TERM__MAX		= 3,
+	PERF_STAT_CONFIG_TERM__AGGR_LEVEL	= 3,
+	PERF_STAT_CONFIG_TERM__MAX		= 4,
 };
 
 struct perf_record_stat_config_entry {
@@ -438,6 +458,32 @@ struct perf_record_compressed {
 	char			 data[];
 };
 
+/*
+ * `header.size` includes the padding we are going to add while writing the record.
+ * `data_size` only includes the size of `data[]` itself.
+ */
+struct perf_record_compressed2 {
+	struct perf_event_header header;
+	__u64			 data_size;
+	char			 data[];
+};
+
+#define BPF_METADATA_KEY_LEN   64
+#define BPF_METADATA_VALUE_LEN 256
+#define BPF_PROG_NAME_LEN      KSYM_NAME_LEN
+
+struct perf_record_bpf_metadata_entry {
+	char key[BPF_METADATA_KEY_LEN];
+	char value[BPF_METADATA_VALUE_LEN];
+};
+
+struct perf_record_bpf_metadata {
+	struct perf_event_header	      header;
+	char				      prog_name[BPF_PROG_NAME_LEN];
+	__u64				      nr_entries;
+	struct perf_record_bpf_metadata_entry entries[];
+};
+
 enum perf_user_event_type { /* above any possible kernel type */
 	PERF_RECORD_USER_TYPE_START		= 64,
 	PERF_RECORD_HEADER_ATTR			= 64,
@@ -459,6 +505,8 @@ enum perf_user_event_type { /* above any possible kernel type */
 	PERF_RECORD_HEADER_FEATURE		= 80,
 	PERF_RECORD_COMPRESSED			= 81,
 	PERF_RECORD_FINISHED_INIT		= 82,
+	PERF_RECORD_COMPRESSED2			= 83,
+	PERF_RECORD_BPF_METADATA		= 84,
 	PERF_RECORD_HEADER_MAX
 };
 
@@ -499,6 +547,8 @@ union perf_event {
 	struct perf_record_time_conv		time_conv;
 	struct perf_record_header_feature	feat;
 	struct perf_record_compressed		pack;
+	struct perf_record_compressed2		pack2;
+	struct perf_record_bpf_metadata		bpf_metadata;
 };
 
 #endif /* __LIBPERF_EVENT_H */

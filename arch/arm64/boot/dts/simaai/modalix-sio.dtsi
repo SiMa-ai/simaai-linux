@@ -8,6 +8,8 @@
 / {
 	sio0: sio@0 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		status = "disabled";
 		ranges;
 
@@ -19,95 +21,109 @@
 			pins_spi00_deafult: pins_spi00 {
 				function = "spi";
 				groups = "spi0_group";
+				drive-strength = <7>;
 			};
 
 			pins_spi01_deafult: pins_spi01 {
 				function = "spi";
 				groups = "spi1_group";
+				drive-strength = <7>;
 			};
 
 			pins_i2c00_deafult: pins_i2c00 {
 				function = "i2c";
 				groups = "i2c0_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c01_deafult: pins_i2c01 {
 				function = "i2c";
 				groups = "i2c1_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c02_deafult: pins_i2c02 {
 				function = "i2c";
 				groups = "i2c2_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c03_deafult: pins_i2c03 {
 				function = "i2c";
 				groups = "i2c3_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_uart00_deafult: pins_uart00 {
 				function = "uart";
 				groups = "uart0_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart01_deafult: pins_uart01 {
 				function = "uart";
 				groups = "uart1_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart02_deafult: pins_uart02 {
 				function = "uart";
 				groups = "uart2_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart03_deafult: pins_uart03 {
 				function = "uart";
 				groups = "uart3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio00_deafult: pins_gpio00 {
 				function = "gpio";
 				groups = "gpio0_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio01_deafult: pins_gpio01 {
 				function = "gpio";
 				groups = "gpio1_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio02_deafult: pins_gpio02 {
 				function = "gpio";
 				groups = "gpio2_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio03_deafult: pins_gpio03 {
 				function = "gpio";
 				groups = "gpio3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio04_deafult: pins_gpio04 {
 				function = "gpio";
 				groups = "gpio4_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio05_deafult: pins_gpio05 {
 				function = "gpio";
 				groups = "gpio5_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio06_deafult: pins_gpio06 {
 				function = "gpio";
 				groups = "gpio6_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio07_deafult: pins_gpio07 {
 				function = "gpio";
 				groups = "gpio7_group";
+				drive-strength = <7>;
 			};
 		};
 
@@ -330,6 +346,8 @@
 
 	sio1: sio@1 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		status = "disabled";
 		ranges;
 
@@ -341,95 +359,109 @@
 			pins_spi10_deafult: pins_spi10 {
 				function = "spi";
 				groups = "spi0_group";
+				drive-strength = <7>;
 			};
 
 			pins_spi11_deafult: pins_spi11 {
 				function = "spi";
 				groups = "spi1_group";
+				drive-strength = <7>;
 			};
 
 			pins_i2c10_deafult: pins_i2c10 {
 				function = "i2c";
 				groups = "i2c0_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c11_deafult: pins_i2c11 {
 				function = "i2c";
 				groups = "i2c1_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c12_deafult: pins_i2c12 {
 				function = "i2c";
 				groups = "i2c2_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c13_deafult: pins_i2c13 {
 				function = "i2c";
 				groups = "i2c3_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_uart10_deafult: pins_uart10 {
 				function = "uart";
 				groups = "uart0_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart11_deafult: pins_uart11 {
 				function = "uart";
 				groups = "uart1_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart12_deafult: pins_uart12 {
 				function = "uart";
 				groups = "uart2_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart13_deafult: pins_uart13 {
 				function = "uart";
 				groups = "uart3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio10_deafult: pins_gpio10 {
 				function = "gpio";
 				groups = "gpio0_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio11_deafult: pins_gpio11 {
 				function = "gpio";
 				groups = "gpio1_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio12_deafult: pins_gpio12 {
 				function = "gpio";
 				groups = "gpio2_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio13_deafult: pins_gpio13 {
 				function = "gpio";
 				groups = "gpio3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio14_deafult: pins_gpio14 {
 				function = "gpio";
 				groups = "gpio4_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio15_deafult: pins_gpio15 {
 				function = "gpio";
 				groups = "gpio5_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio16_deafult: pins_gpio16 {
 				function = "gpio";
 				groups = "gpio6_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio17_deafult: pins_gpio17 {
 				function = "gpio";
 				groups = "gpio7_group";
+				drive-strength = <7>;
 			};
 		};
 
@@ -652,6 +684,8 @@
 
 	sio2: sio@2 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		status = "disabled";
 		ranges;
 
@@ -663,95 +697,109 @@
 			pins_spi20_deafult: pins_spi20 {
 				function = "spi";
 				groups = "spi0_group";
+				drive-strength = <7>;
 			};
 
 			pins_spi21_deafult: pins_spi21 {
 				function = "spi";
 				groups = "spi1_group";
+				drive-strength = <7>;
 			};
 
 			pins_i2c20_deafult: pins_i2c20 {
 				function = "i2c";
 				groups = "i2c0_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c21_deafult: pins_i2c21 {
 				function = "i2c";
 				groups = "i2c1_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c22_deafult: pins_i2c22 {
 				function = "i2c";
 				groups = "i2c2_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c23_deafult: pins_i2c23 {
 				function = "i2c";
 				groups = "i2c3_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_uart20_deafult: pins_uart20 {
 				function = "uart";
 				groups = "uart0_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart21_deafult: pins_uart21 {
 				function = "uart";
 				groups = "uart1_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart22_deafult: pins_uart22 {
 				function = "uart";
 				groups = "uart2_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart23_deafult: pins_uart23 {
 				function = "uart";
 				groups = "uart3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio20_deafult: pins_gpio20 {
 				function = "gpio";
 				groups = "gpio0_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio21_deafult: pins_gpio21 {
 				function = "gpio";
 				groups = "gpio1_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio22_deafult: pins_gpio22 {
 				function = "gpio";
 				groups = "gpio2_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio23_deafult: pins_gpio23 {
 				function = "gpio";
 				groups = "gpio3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio24_deafult: pins_gpio24 {
 				function = "gpio";
 				groups = "gpio4_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio25_deafult: pins_gpio25 {
 				function = "gpio";
 				groups = "gpio5_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio26_deafult: pins_gpio26 {
 				function = "gpio";
 				groups = "gpio6_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio27_deafult: pins_gpio27 {
 				function = "gpio";
 				groups = "gpio7_group";
+				drive-strength = <7>;
 			};
 		};
 
@@ -974,6 +1022,8 @@
 
 	sio3: sio@3 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		status = "disabled";
 		ranges;
 
@@ -985,95 +1035,109 @@
 			pins_spi30_deafult: pins_spi30 {
 				function = "spi";
 				groups = "spi0_group";
+				drive-strength = <7>;
 			};
 
 			pins_spi31_deafult: pins_spi31 {
 				function = "spi";
 				groups = "spi1_group";
+				drive-strength = <7>;
 			};
 
 			pins_i2c30_deafult: pins_i2c30 {
 				function = "i2c";
 				groups = "i2c0_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c31_deafult: pins_i2c31 {
 				function = "i2c";
 				groups = "i2c1_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c32_deafult: pins_i2c32 {
 				function = "i2c";
 				groups = "i2c2_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c33_deafult: pins_i2c33 {
 				function = "i2c";
 				groups = "i2c3_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_uart30_deafult: pins_uart30 {
 				function = "uart";
 				groups = "uart0_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart31_deafult: pins_uart31 {
 				function = "uart";
 				groups = "uart1_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart32_deafult: pins_uart32 {
 				function = "uart";
 				groups = "uart2_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart33_deafult: pins_uart33 {
 				function = "uart";
 				groups = "uart3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio30_deafult: pins_gpio30 {
 				function = "gpio";
 				groups = "gpio0_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio31_deafult: pins_gpio31 {
 				function = "gpio";
 				groups = "gpio1_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio32_deafult: pins_gpio32 {
 				function = "gpio";
 				groups = "gpio2_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio33_deafult: pins_gpio33 {
 				function = "gpio";
 				groups = "gpio3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio34_deafult: pins_gpio34 {
 				function = "gpio";
 				groups = "gpio4_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio35_deafult: pins_gpio35 {
 				function = "gpio";
 				groups = "gpio5_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio36_deafult: pins_gpio36 {
 				function = "gpio";
 				groups = "gpio6_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio37_deafult: pins_gpio37 {
 				function = "gpio";
 				groups = "gpio7_group";
+				drive-strength = <7>;
 			};
 		};
 
@@ -1296,6 +1360,8 @@
 
 	sio4: sio@4 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		status = "disabled";
 		ranges;
 
@@ -1307,95 +1373,109 @@
 			pins_spi40_deafult: pins_spi40 {
 				function = "spi";
 				groups = "spi0_group";
+				drive-strength = <7>;
 			};
 
 			pins_spi41_deafult: pins_spi41 {
 				function = "spi";
 				groups = "spi1_group";
+				drive-strength = <7>;
 			};
 
 			pins_i2c40_deafult: pins_i2c40 {
 				function = "i2c";
 				groups = "i2c0_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c41_deafult: pins_i2c41 {
 				function = "i2c";
 				groups = "i2c1_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c42_deafult: pins_i2c42 {
 				function = "i2c";
 				groups = "i2c2_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c43_deafult: pins_i2c43 {
 				function = "i2c";
 				groups = "i2c3_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_uart40_deafult: pins_uart40 {
 				function = "uart";
 				groups = "uart0_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart41_deafult: pins_uart41 {
 				function = "uart";
 				groups = "uart1_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart42_deafult: pins_uart42 {
 				function = "uart";
 				groups = "uart2_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart43_deafult: pins_uart43 {
 				function = "uart";
 				groups = "uart3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio40_deafult: pins_gpio40 {
 				function = "gpio";
 				groups = "gpio0_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio41_deafult: pins_gpio41 {
 				function = "gpio";
 				groups = "gpio1_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio42_deafult: pins_gpio42 {
 				function = "gpio";
 				groups = "gpio2_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio43_deafult: pins_gpio43 {
 				function = "gpio";
 				groups = "gpio3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio44_deafult: pins_gpio44 {
 				function = "gpio";
 				groups = "gpio4_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio45_deafult: pins_gpio45 {
 				function = "gpio";
 				groups = "gpio5_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio46_deafult: pins_gpio46 {
 				function = "gpio";
 				groups = "gpio6_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio47_deafult: pins_gpio47 {
 				function = "gpio";
 				groups = "gpio7_group";
+				drive-strength = <7>;
 			};
 		};
 
@@ -1618,6 +1698,8 @@
 
 	sio5: sio@5 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		status = "disabled";
 		ranges;
 
@@ -1629,95 +1711,109 @@
 			pins_spi50_deafult: pins_spi50 {
 				function = "spi";
 				groups = "spi0_group";
+				drive-strength = <7>;
 			};
 
 			pins_spi51_deafult: pins_spi51 {
 				function = "spi";
 				groups = "spi1_group";
+				drive-strength = <7>;
 			};
 
 			pins_i2c50_deafult: pins_i2c50 {
 				function = "i2c";
 				groups = "i2c0_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c51_deafult: pins_i2c51 {
 				function = "i2c";
 				groups = "i2c1_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c52_deafult: pins_i2c52 {
 				function = "i2c";
 				groups = "i2c2_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c53_deafult: pins_i2c53 {
 				function = "i2c";
 				groups = "i2c3_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_uart50_deafult: pins_uart50 {
 				function = "uart";
 				groups = "uart0_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart51_deafult: pins_uart51 {
 				function = "uart";
 				groups = "uart1_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart52_deafult: pins_uart52 {
 				function = "uart";
 				groups = "uart2_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart53_deafult: pins_uart53 {
 				function = "uart";
 				groups = "uart3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio50_deafult: pins_gpio50 {
 				function = "gpio";
 				groups = "gpio0_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio51_deafult: pins_gpio51 {
 				function = "gpio";
 				groups = "gpio1_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio52_deafult: pins_gpio52 {
 				function = "gpio";
 				groups = "gpio2_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio53_deafult: pins_gpio53 {
 				function = "gpio";
 				groups = "gpio3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio54_deafult: pins_gpio54 {
 				function = "gpio";
 				groups = "gpio4_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio55_deafult: pins_gpio55 {
 				function = "gpio";
 				groups = "gpio5_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio56_deafult: pins_gpio56 {
 				function = "gpio";
 				groups = "gpio6_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio57_deafult: pins_gpio57 {
 				function = "gpio";
 				groups = "gpio7_group";
+				drive-strength = <7>;
 			};
 		};
 
@@ -1940,6 +2036,8 @@
 
 	sio6: sio@6 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		status = "disabled";
 		ranges;
 
@@ -1951,95 +2049,109 @@
 			pins_spi60_deafult: pins_spi60 {
 				function = "spi";
 				groups = "spi0_group";
+				drive-strength = <7>;
 			};
 
 			pins_spi61_deafult: pins_spi61 {
 				function = "spi";
 				groups = "spi1_group";
+				drive-strength = <7>;
 			};
 
 			pins_i2c60_deafult: pins_i2c60 {
 				function = "i2c";
 				groups = "i2c0_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c61_deafult: pins_i2c61 {
 				function = "i2c";
 				groups = "i2c1_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c62_deafult: pins_i2c62 {
 				function = "i2c";
 				groups = "i2c2_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c63_deafult: pins_i2c63 {
 				function = "i2c";
 				groups = "i2c3_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_uart60_deafult: pins_uart60 {
 				function = "uart";
 				groups = "uart0_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart61_deafult: pins_uart61 {
 				function = "uart";
 				groups = "uart1_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart62_deafult: pins_uart62 {
 				function = "uart";
 				groups = "uart2_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart63_deafult: pins_uart63 {
 				function = "uart";
 				groups = "uart3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio60_deafult: pins_gpio60 {
 				function = "gpio";
 				groups = "gpio0_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio61_deafult: pins_gpio61 {
 				function = "gpio";
 				groups = "gpio1_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio62_deafult: pins_gpio62 {
 				function = "gpio";
 				groups = "gpio2_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio63_deafult: pins_gpio63 {
 				function = "gpio";
 				groups = "gpio3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio64_deafult: pins_gpio64 {
 				function = "gpio";
 				groups = "gpio4_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio65_deafult: pins_gpio65 {
 				function = "gpio";
 				groups = "gpio5_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio66_deafult: pins_gpio66 {
 				function = "gpio";
 				groups = "gpio6_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio67_deafult: pins_gpio67 {
 				function = "gpio";
 				groups = "gpio7_group";
+				drive-strength = <7>;
 			};
 		};
 
@@ -2262,6 +2374,8 @@
 
 	sio7: sio@7 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		status = "disabled";
 		ranges;
 
@@ -2273,95 +2387,109 @@
 			pins_spi70_deafult: pins_spi70 {
 				function = "spi";
 				groups = "spi0_group";
+				drive-strength = <7>;
 			};
 
 			pins_spi71_deafult: pins_spi71 {
 				function = "spi";
 				groups = "spi1_group";
+				drive-strength = <7>;
 			};
 
 			pins_i2c70_deafult: pins_i2c70 {
 				function = "i2c";
 				groups = "i2c0_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c71_deafult: pins_i2c71 {
 				function = "i2c";
 				groups = "i2c1_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c72_deafult: pins_i2c72 {
 				function = "i2c";
 				groups = "i2c2_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_i2c73_deafult: pins_i2c73 {
 				function = "i2c";
 				groups = "i2c3_group";
-				drive-strength = <4>;
+				drive-strength = <7>;
 			};
 
 			pins_uart70_deafult: pins_uart70 {
 				function = "uart";
 				groups = "uart0_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart71_deafult: pins_uart71 {
 				function = "uart";
 				groups = "uart1_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart72_deafult: pins_uart72 {
 				function = "uart";
 				groups = "uart2_group";
+				drive-strength = <7>;
 			};
 
 			pins_uart73_deafult: pins_uart73 {
 				function = "uart";
 				groups = "uart3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio70_deafult: pins_gpio70 {
 				function = "gpio";
 				groups = "gpio0_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio71_deafult: pins_gpio71 {
 				function = "gpio";
 				groups = "gpio1_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio72_deafult: pins_gpio72 {
 				function = "gpio";
 				groups = "gpio2_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio73_deafult: pins_gpio73 {
 				function = "gpio";
 				groups = "gpio3_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio74_deafult: pins_gpio74 {
 				function = "gpio";
 				groups = "gpio4_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio75_deafult: pins_gpio75 {
 				function = "gpio";
 				groups = "gpio5_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio76_deafult: pins_gpio76 {
 				function = "gpio";
 				groups = "gpio6_group";
+				drive-strength = <7>;
 			};
 
 			pins_gpio77_deafult: pins_gpio77 {
 				function = "gpio";
 				groups = "gpio7_group";
+				drive-strength = <7>;
 			};
 		};
 

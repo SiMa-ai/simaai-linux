@@ -92,10 +92,11 @@ static void mcu_power_off(void)
 	mutex_unlock(&mcu->lock);
 }
 
-static void mcu_gpio_set(struct gpio_chip *gc, unsigned int gpio, int val)
+static int mcu_gpio_set(struct gpio_chip *gc, unsigned int gpio, int val)
 {
 	struct mcu *mcu = gpiochip_get_data(gc);
 	u8 bit = 1 << (4 + gpio);
+	int ret;
 
 	mutex_lock(&mcu->lock);
 	if (val)
@@ -103,14 +104,16 @@ static void mcu_gpio_set(struct gpio_chip *gc, unsigned int gpio, int val)
 	else
 		mcu->reg_ctrl |= bit;
 
-	i2c_smbus_write_byte_data(mcu->client, MCU_REG_CTRL, mcu->reg_ctrl);
+	ret = i2c_smbus_write_byte_data(mcu->client, MCU_REG_CTRL,
+					mcu->reg_ctrl);
 	mutex_unlock(&mcu->lock);
+
+	return ret;
 }
 
 static int mcu_gpio_dir_out(struct gpio_chip *gc, unsigned int gpio, int val)
 {
-	mcu_gpio_set(gc, gpio, val);
-	return 0;
+	return mcu_gpio_set(gc, gpio, val);
 }
 
 static int mcu_gpiochip_add(struct mcu *mcu)
@@ -211,7 +214,7 @@ static struct i2c_driver mcu_driver = {
 		.name = "mcu-mpc8349emitx",
 		.of_match_table = mcu_of_match_table,
 	},
-	.probe_new = mcu_probe,
+	.probe = mcu_probe,
 	.remove	= mcu_remove,
 	.id_table = mcu_ids,
 };

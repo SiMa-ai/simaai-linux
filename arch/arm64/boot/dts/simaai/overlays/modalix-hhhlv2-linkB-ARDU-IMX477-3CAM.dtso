@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+	max_des_0_ser_0_cam_0_xclk: max_des_0_ser_0_cam_0_xclk {
+		status = "okay";
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+};
+
+&i2c01 {
+        max_des_0: gmsl-deserializer@28 {
+                #address-cells = <1>;
+                #size-cells = <0>;
+
+                compatible = "maxim,max96716a";
+                reg = <0x28>;
+        };
+};
+
+&max_des_0 {
+        i2c-alias-pool = <0x42 0x43>;
+        max_des_0_i2c_adapter: i2c-atr {
+                #address-cells = <1>;
+                #size-cells = <0>;
+        };
+
+        ports {
+                #address-cells = <1>;
+                #size-cells = <0>;
+        };
+};
+
+&max_des_0 {
+        ports {
+                port@3 {
+                        reg = <3>;
+                        max_des_0_phy_1_out: endpoint@0 {
+                                reg = <0>;
+                                clock-lanes = <0>;
+                                data-lanes = <1 2 3 4>;
+                                link-frequencies = /bits/ 64 <500000000>;
+                        };
+                };
+        };
+};
+
+&csi3 {
+    status = "okay";
+};
+
+&csi30in{
+    clock-lanes = <0>;
+    data-lanes = <1 2 3 4>;
+    link-frequencies = /bits/ 64 <500000000>;
+    remote-endpoint = <&max_des_0_phy_1_out>;
+};
+
+&max_des_0_phy_1_out {
+        remote-endpoint = <&csi30in>;
+};
+
+&max_des_0_i2c_adapter {
+        max_des_0_i2c_1: i2c@1 {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                reg = <0x1>;
+        };
+};
+
+&max_des_0_i2c_1 {
+        max_des_0_ser_0: gmsl-serializer@42 {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                #gpio-cells = <2>;
+
+                compatible = "maxim,max96717";
+                reg = <0x42>;
+
+                gpio-controller;
+                gpio-ranges = <&max_des_0_ser_0 0 0 11>;
+        };
+};
+
+&max_des_0_ser_0 {
+        i2c-alias-pool = <0x10 0x11>;
+        i2c-atr {
+                #address-cells = <1>;
+                #size-cells = <0>;
+
+                max_des_0_ser_0_i2c_0: i2c@0 {
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+                        reg = <0x0>;
+                };
+        };
+
+        ports {
+                #address-cells = <1>;
+                #size-cells = <0>;
+
+                port@1 {
+                        reg = <1>;
+                        max_des_0_ser_0_out: endpoint@0 {
+                                reg = <0>;
+                                remote-endpoint = <&max_des_0_in_0>;
+                        };
+                };
+        };
+};
+
+&max_des_0 {
+        ports {
+                port@1 {
+                        reg = <1>;
+                        max_des_0_in_0: endpoint@0 {
+                                reg = <0>;
+                                remote-endpoint = <&max_des_0_ser_0_out>;
+                        };
+                };
+        };
+};
+
+&max_des_0_ser_0_i2c_0 {
+        max_des_0_ser_0_cam_0: imx477@1a {
+                compatible = "sony,imx477";
+                reg = <0x1a>;
+
+                reset-gpios = <&max_des_0_ser_0 0 0>;
+
+                clocks = <&max_des_0_ser_0_cam_0_xclk>;
+                clock-names = "xclk";
+
+                port@1 {
+                        max_des_0_ser_0_cam_0_out: endpoint@0 {
+                                clock-lanes = <0>;
+                                data-lanes = <1 2 3 4>;
+                                link-frequencies = /bits/ 64 <450000000>;
+                                remote-endpoint = <&max_des_0_ser_0_in_0>;
+                                clock-continuous;
+                        };
+                };
+        };
+};
+
+&max_des_0_ser_0 {
+        ports {
+                port@0 {
+                        reg = <0>;
+                        max_des_0_ser_0_in_0: endpoint@0 {
+                                reg = <0>;
+                                clock-lanes = <0>;
+                                data-lanes = <1 2 3 4>;
+                                link-frequencies = /bits/ 64 <450000000>;
+                                remote-endpoint = <&max_des_0_ser_0_cam_0_out>;
+                                clock-continuous;
+                        };
+                };
+        };
+};
+
+&axi_vdma3 {
+    status = "okay";
+};
+
+&mipi_dphy_rx3 {
+    status = "okay";
+};
+
+&v4l2video3 {
+    status = "okay";
+};
+
+&v4l2vdma3 {
+    status = "okay";
+};

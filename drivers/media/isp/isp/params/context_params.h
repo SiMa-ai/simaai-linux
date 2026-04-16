@@ -122,6 +122,7 @@
 #define TEST_PATTERN_ENABLE_ID_PARAM 0x000000DD
 #define TEST_PATTERN_MODE_ID_PARAM 0x000000DE
 #define V4L2_INTERFACE_MODE_PARAM 0x000000DF
+#define SENSOR_INFO_PIXEL_FORMAT_PARAM 0x000000E0
 
 
 // ------------------------------------------------------------------------------ //

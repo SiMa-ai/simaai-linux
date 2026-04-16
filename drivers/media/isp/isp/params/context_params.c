@@ -664,7 +664,7 @@ void init_context_params( context_params *params )
     params->params[35].value = 0;
     params->params[35].default_value = 0;
     params->params[35].min = 0;
-    params->params[35].max = 16;
+    params->params[35].max = 32;
     params->params[35].flags = ( PARAM_FLAG_HANDLER_FUNCTION | PARAM_FLAG_READ | PARAM_FLAG_WRITE );
     params->params[35].values_list = NULL;
     params->params[35].param_handler = sensor_info_preset;
@@ -1208,4 +1208,13 @@ void init_context_params( context_params *params )
     params->params[95].flags = ( PARAM_FLAG_HANDLER_FUNCTION | PARAM_FLAG_READ | PARAM_FLAG_WRITE );
     params->params[95].values_list = v4l2_interface_mode_param_values_list;
     params->params[95].param_handler = v4l2_interface_mode;
+
+    // SENSOR_INFO_PIXEL_FORMAT_PARAM
+    params->params[96].value = 0;
+    params->params[96].default_value = 0x00000000;
+    params->params[96].min = 0x00000000;
+    params->params[96].max = 0xFFFFFFFF;
+    params->params[96].flags = ( PARAM_FLAG_READ );
+    params->params[96].values_list = NULL;
+    params->params[96].param_handler = NULL;
 }

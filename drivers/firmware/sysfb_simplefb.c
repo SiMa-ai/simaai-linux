@@ -27,25 +27,29 @@ static const struct simplefb_format formats[] = SIMPLEFB_FORMATS;
 __init bool sysfb_parse_mode(const struct screen_info *si,
 			     struct simplefb_platform_data *mode)
 {
-	const struct simplefb_format *f;
 	__u8 type;
+	u32 bits_per_pixel;
 	unsigned int i;
 
 	type = si->orig_video_isVGA;
 	if (type != VIDEO_TYPE_VLFB && type != VIDEO_TYPE_EFI)
 		return false;
 
+	bits_per_pixel = __screen_info_lfb_bits_per_pixel(si);
+
 	for (i = 0; i < ARRAY_SIZE(formats); ++i) {
-		f = &formats[i];
-		if (si->lfb_depth == f->bits_per_pixel &&
+		const struct simplefb_format *f = &formats[i];
+
+		if (f->transp.length)
+			continue; /* transparent formats are unsupported by VESA/EFI */
+
+		if (bits_per_pixel == f->bits_per_pixel &&
 		    si->red_size == f->red.length &&
 		    si->red_pos == f->red.offset &&
 		    si->green_size == f->green.length &&
 		    si->green_pos == f->green.offset &&
 		    si->blue_size == f->blue.length &&
-		    si->blue_pos == f->blue.offset &&
-		    si->rsvd_size == f->transp.length &&
-		    si->rsvd_pos == f->transp.offset) {
+		    si->blue_pos == f->blue.offset) {
 			mode->format = f->name;
 			mode->width = si->lfb_width;
 			mode->height = si->lfb_height;
@@ -58,7 +62,8 @@ __init bool sysfb_parse_mode(const struct screen_info *si,
 }
 
 __init struct platform_device *sysfb_create_simplefb(const struct screen_info *si,
-						     const struct simplefb_platform_data *mode)
+						     const struct simplefb_platform_data *mode,
+						     struct device *parent)
 {
 	struct platform_device *pd;
 	struct resource res;
@@ -109,6 +114,8 @@ __init struct platform_device *sysfb_create_simplefb(const struct screen_info *s
 	pd = platform_device_alloc("simple-framebuffer", 0);
 	if (!pd)
 		return ERR_PTR(-ENOMEM);
+
+	pd->dev.parent = parent;
 
 	sysfb_set_efifb_fwnode(pd);
 

@@ -17,7 +17,21 @@
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 
-#include <linux/mailbox/simaai-mailbox.h>
+#define SIMAAI_MAX_DATA_SIZE    (0x800)
+#define SIMAAI_MAX_MSG_SIZE     (sizeof(size_t) + SIMAAI_MAX_DATA_SIZE)
+/**
+ * struct simaai_mbmsg - SiMa.ai mailbox message structure
+ * @len:  Length of message
+ * @data: message payload
+ *
+ * This is the structure for data used in mbox_send_message
+ * the maximum length of data buffer is fixed to 4 kilobytes.
+ * Client is supposed to be aware of this.
+ */
+struct simaai_mbmsg {
+        size_t len;
+        u8 data[];
+};
 
 #define SIMA_MBOX_MSG_INDEX            GENMASK(14,0)
 #define SIMA_MBOX_MSG_SIZE             GENMASK(29,15)
@@ -47,7 +61,7 @@ struct sima_mbox_client {
 	/* Character device stuff */
 	struct cdev cdev;
 	dev_t dev_no;
-	struct class *dev_class;
+	struct class dev_class;
 	struct mutex dev_lock;
 	int dev_open_count;
 	int max_users;
@@ -211,7 +225,7 @@ static ssize_t mbox_dev_read(struct file *filp, char __user *buf,
 	if (ret) {
 		ret = -EFAULT;
 	} else {
-		inode->i_atime = current_time(inode);
+		inode_set_atime_to_ts(inode, current_time(inode));
 		ret = count;
 	}
 
@@ -269,14 +283,13 @@ static int create_char_dev(struct sima_mbox_client *mbox)
 		goto err_cdev;
 	}
 
-	mbox->dev_class = class_create(THIS_MODULE, mbox->name);
-	if (IS_ERR(mbox->dev_class)) {
+	ret = class_register(&mbox->dev_class);
+	if (ret) {
 		dev_err(mbox->dev, "Failed: class_create\n");
-		ret = PTR_ERR(mbox->dev_class);
 		goto err_class;
 	}
 
-	device_create(mbox->dev_class, NULL, mbox->dev_no, NULL, mbox->name);
+	device_create(&mbox->dev_class, NULL, mbox->dev_no, NULL, mbox->name);
 
 	return 0;
 
@@ -289,8 +302,8 @@ err_cdev:
 
 static void remove_char_dev(struct sima_mbox_client *mbox)
 {
-	device_destroy(mbox->dev_class, mbox->dev_no);
-	class_destroy(mbox->dev_class);
+	device_destroy(&mbox->dev_class, mbox->dev_no);
+	class_unregister(&mbox->dev_class);
 	cdev_del(&mbox->cdev);
 	unregister_chrdev_region(mbox->dev_no, 1);
 }
@@ -388,6 +401,7 @@ static int sima_mbox_client_probe(struct platform_device *pdev)
 	mbox->client.tx_block = true;
 	mbox->client.knows_txdone = false;
 	mbox->client.tx_tout = tx_tout;
+	mbox->dev_class.name = mbox->name;
 
 	mutex_init(&mbox->dev_lock);
 	mutex_init(&mbox->write_lock);
@@ -405,14 +419,12 @@ static int sima_mbox_client_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int sima_mbox_client_remove(struct platform_device *pdev)
+static void sima_mbox_client_remove(struct platform_device *pdev)
 {
 	struct sima_mbox_client *mbox = platform_get_drvdata(pdev);
 
 	remove_char_dev(mbox);
 	kfifo_free(&mbox->rx_fifo);
-
-	return 0;
 }
 
 static const struct of_device_id sima_mbox_client_match[] = {

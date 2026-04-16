@@ -103,7 +103,7 @@ int32_t acamera_init( acamera_settings *settings, uint8_t num_of_contexts, semap
 #endif
 
 #if FW_HAS_CONTROL_CHANNEL
-    ctrl_channel_init();
+    ctrl_channel_init(settings, num_of_contexts);
 #endif
 
 #if ( ISP_RTL_VERSION_R == 0 )
@@ -213,7 +213,7 @@ void acamera_process_interrupt( uint8_t slot, const uint32_t mask )
 
     // Check if slot number within range.
     if ( slot >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "IRQ slot number is out of range, skipping. IRQ slot: %d, mask: 0x%x, contexts: %d", slot, mask, FIRMWARE_CONTEXT_NUMBER );
+        LOG( LOG_DEBUG, "IRQ slot number is out of range, skipping. IRQ slot: %d, mask: 0x%x, contexts: %d", slot, mask, FIRMWARE_CONTEXT_NUMBER );
         return;
     }
 

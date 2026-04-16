@@ -34,7 +34,7 @@ static acamera_settings settings[FIRMWARE_CONTEXT_NUMBER] = {
         .sensor_name = "COMMON",
 
         .sensor_options = {
-            .is_remote = 1,
+            .is_remote = 0,
             .preset_mode = 0,
         },
 
@@ -53,7 +53,7 @@ static acamera_settings settings[FIRMWARE_CONTEXT_NUMBER] = {
         .sensor_name = "COMMON",
 
         .sensor_options = {
-            .is_remote = 1,
+            .is_remote = 0,
             .preset_mode = 0,
         },
 
@@ -72,7 +72,7 @@ static acamera_settings settings[FIRMWARE_CONTEXT_NUMBER] = {
         .sensor_name = "COMMON",
 
         .sensor_options = {
-            .is_remote = 1,
+            .is_remote = 0,
             .preset_mode = 0,
         },
 
@@ -91,7 +91,7 @@ static acamera_settings settings[FIRMWARE_CONTEXT_NUMBER] = {
         .sensor_name = "COMMON",
 
         .sensor_options = {
-            .is_remote = 1,
+            .is_remote = 0,
             .preset_mode = 0,
         },
 

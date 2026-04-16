@@ -19,6 +19,7 @@
 //! [`compiler_builtins`]: https://github.com/rust-lang/compiler-builtins
 //! [`compiler-rt`]: https://compiler-rt.llvm.org/
 
+#![allow(internal_features)]
 #![feature(compiler_builtins)]
 #![compiler_builtins]
 #![no_builtins]
@@ -28,7 +29,7 @@ macro_rules! define_panicking_intrinsics(
     ($reason: tt, { $($ident: ident, )* }) => {
         $(
             #[doc(hidden)]
-            #[no_mangle]
+            #[export_name = concat!("__rust", stringify!($ident))]
             pub extern "C" fn $ident() {
                 panic!($reason);
             }
@@ -37,14 +38,24 @@ macro_rules! define_panicking_intrinsics(
 );
 
 define_panicking_intrinsics!("`f32` should not be used", {
+    __addsf3,
     __eqsf2,
+    __extendsfdf2,
     __gesf2,
     __lesf2,
+    __ltsf2,
+    __mulsf3,
     __nesf2,
+    __truncdfsf2,
     __unordsf2,
 });
 
 define_panicking_intrinsics!("`f64` should not be used", {
+    __adddf3,
+    __eqdf2,
+    __ledf2,
+    __ltdf2,
+    __muldf3,
     __unorddf2,
 });
 
@@ -61,3 +72,30 @@ define_panicking_intrinsics!("`u128` should not be used", {
     __udivti3,
     __umodti3,
 });
+
+#[cfg(target_arch = "arm")]
+define_panicking_intrinsics!("`f32` should not be used", {
+    __aeabi_fadd,
+    __aeabi_fmul,
+    __aeabi_fcmpeq,
+    __aeabi_fcmple,
+    __aeabi_fcmplt,
+    __aeabi_fcmpun,
+});
+
+#[cfg(target_arch = "arm")]
+define_panicking_intrinsics!("`f64` should not be used", {
+    __aeabi_dadd,
+    __aeabi_dmul,
+    __aeabi_dcmple,
+    __aeabi_dcmplt,
+    __aeabi_dcmpun,
+});
+
+#[cfg(target_arch = "arm")]
+define_panicking_intrinsics!("`u64` division/modulo should not be used", {
+    __aeabi_uldivmod,
+});
+
+// NOTE: if you are adding a new intrinsic here, you should also add it to
+// `redirect-intrinsics` in `rust/Makefile`.

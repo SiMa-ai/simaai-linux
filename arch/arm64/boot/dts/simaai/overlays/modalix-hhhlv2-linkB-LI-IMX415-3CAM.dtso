@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include "modalix-gmsl.dtsi"
+
+&{/} {
+    imx415_clk1: imx415_clk1 {
+        status = "okay";
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+};
+
+&max_des0_i2c1 {
+    max_des0_ser1: gmsl-serializer@40 {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        #gpio-cells = <2>;
+
+        compatible = "maxim,max9295a";
+        reg = <0x40>;
+
+        gpio-controller;
+        gpio-ranges = <&max_des0_ser1 0 0 11>;
+
+        i2c-alias-pool = <0x48 0x49>;
+        i2c-atr {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            max_des0_ser1_i2c0: i2c@0 {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                reg = <0x0>;
+            };
+        };
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            port@0 {
+                reg = <0>;
+                max_des0_ser1_csi_in: endpoint@0 {
+                    reg = <0>;
+                };
+            };
+            port@1 {
+                reg = <1>;
+                max_des0_ser1_gmsl_out: endpoint@0 {
+                    reg = <0>;
+                };
+            };
+        };
+    };
+};
+
+&max_des0_ser1_i2c0 {
+    max_des0_ser1_cam0: imx415@1a {
+        compatible = "sony,imx415";
+        reg = <0x1a>;
+        reset-gpios = <&max_des0_ser1 0 1>;
+
+        clocks = <&imx415_clk1>;
+        clock-names = "inck";
+
+        avdd-supply = <&cam_dummy_reg>;
+        dvdd-supply = <&cam_dummy_reg>;
+        ovdd-supply = <&cam_dummy_reg>;
+
+        rotation = <180>;
+        orientation = <2>;
+
+        port@1 {
+            reg = <1>;
+            max_des0_ser1_cam0_out: endpoint@0 {
+                reg = <0>;
+                clock-lanes = <0>;
+                data-lanes = <1 2 3 4>;
+                link-frequencies = /bits/ 64 <445500000>;
+                remote-endpoint = <&max_des0_ser1_csi_in>;
+                clock-continuous;
+            };
+        };
+    };
+};
+
+&max_des0_ser1_csi_in {
+    clock-lanes = <0>;
+    data-lanes = <1 2 3 4>;
+    link-frequencies = /bits/ 64 <445500000>;
+    remote-endpoint = <&max_des0_ser1_cam0_out>;
+    clock-continuous;
+};
+
+&max_des0_ser1_gmsl_out {
+    remote-endpoint = <&max_des0_gmsl_linkB_in>;
+};
+
+&max_des0_gmsl_linkB_in {
+    remote-endpoint = <&max_des0_ser1_gmsl_out>;
+};
+
+&max_des0_portB_out {
+    clock-lanes = <0>;
+    data-lanes = <1 2 3 4>;
+    link-frequencies = /bits/ 64 <445500000>;
+    remote-endpoint = <&csi30in>;
+    clock-continuous;
+};
+
+&csi30in{
+    clock-lanes = <0>;
+    data-lanes = <1 2 3 4>;
+    link-frequencies = /bits/ 64 <445500000>;
+    remote-endpoint = <&max_des0_portB_out>;
+    clock-continuous;
+};
+
+&csi3 {
+    status = "okay";
+};
+
+&axi_vdma3 {
+    status = "okay";
+};
+
+&mipi_dphy_rx3 {
+    status = "okay";
+};
+
+&v4l2video3 {
+    status = "okay";
+};
+
+&v4l2vdma3 {
+    status = "okay";
+};

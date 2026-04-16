@@ -35,6 +35,7 @@ struct al5_dmabuf_priv {
 struct al5_dmabuf_attachment {
 	struct sg_table sgt;
 	enum dma_data_direction dma_dir;
+	struct mutex lock;
 };
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
@@ -76,6 +77,8 @@ static int al5_dmabuf_attach(struct dma_buf *dbuf, struct device *dev,
 
 	attach->dma_dir = DMA_NONE;
 
+	mutex_init(&attach->lock);
+
 	dbuf_attach->priv = attach;
 
 	return 0;
@@ -98,6 +101,7 @@ static void al5_dmabuf_detach(struct dma_buf *dbuf,
 				   attach->dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
 
 	sg_free_table(sgt);
+	mutex_destroy(&attach->lock);
 	kfree(attach);
 	db_attach->priv = NULL;
 }
@@ -107,7 +111,7 @@ static struct sg_table *al5_dmabuf_map(struct dma_buf_attachment *db_attach,
 {
 	struct al5_dmabuf_attachment *attach = db_attach->priv;
 	struct sg_table *sgt;
-	struct mutex *lock = &db_attach->dmabuf->lock;
+	struct mutex *lock = &attach->lock;
 
 	mutex_lock(lock);
 
@@ -194,7 +198,7 @@ static int al5_dmabuf_mmap_cached(struct dma_buf *buf,
                 return ret;
         }
 
-        vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
+	vm_flags_set(vma, vma->vm_flags | VM_DONTEXPAND | VM_DONTDUMP);
 
         return 0;
 }
@@ -227,7 +231,7 @@ static int al5_dmabuf_mmap(struct dma_buf *buf, struct vm_area_struct *vma)
 		return ret;
 	}
 
-	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
+	vm_flags_set(vma, vma->vm_flags | VM_DONTEXPAND | VM_DONTDUMP);
 
 	return 0;
 }

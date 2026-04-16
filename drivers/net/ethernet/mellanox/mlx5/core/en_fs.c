@@ -30,6 +30,7 @@
  * SOFTWARE.
  */
 
+#include <linux/debugfs.h>
 #include <linux/list.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
@@ -67,6 +68,7 @@ struct mlx5e_flow_steering {
 	struct mlx5e_fs_udp            *udp;
 	struct mlx5e_fs_any            *any;
 	struct mlx5e_ptp_fs            *ptp_fs;
+	struct dentry                  *dfs_root;
 };
 
 static int mlx5e_add_l2_flow_rule(struct mlx5e_flow_steering *fs,
@@ -102,6 +104,11 @@ struct mlx5e_l2_hash_node {
 static inline int mlx5e_hash_l2(const u8 *addr)
 {
 	return addr[5];
+}
+
+struct dentry *mlx5e_fs_get_debugfs_root(struct mlx5e_flow_steering *fs)
+{
+	return fs->dfs_root;
 }
 
 static void mlx5e_add_l2_to_hash(struct hlist_head *hash, const u8 *addr)
@@ -276,7 +283,7 @@ static int __mlx5e_add_vlan_rule(struct mlx5e_flow_steering *fs,
 	if (IS_ERR(*rule_p)) {
 		err = PTR_ERR(*rule_p);
 		*rule_p = NULL;
-		fs_err(fs, "%s: add rule failed\n", __func__);
+		fs_err(fs, "add rule failed\n");
 	}
 
 	return err;
@@ -388,8 +395,7 @@ int mlx5e_add_vlan_trap(struct mlx5e_flow_steering *fs, int trap_id, int tir_num
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
 		fs->vlan->trap_rule = NULL;
-		fs_err(fs, "%s: add VLAN trap rule failed, err %d\n",
-		       __func__, err);
+		fs_err(fs, "add VLAN trap rule failed, err %d\n", err);
 		return err;
 	}
 	fs->vlan->trap_rule = rule;
@@ -414,8 +420,7 @@ int mlx5e_add_mac_trap(struct mlx5e_flow_steering *fs, int trap_id, int tir_num)
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
 		fs->l2.trap_rule = NULL;
-		fs_err(fs, "%s: add MAC trap rule failed, err %d\n",
-		       __func__, err);
+		fs_err(fs, "add MAC trap rule failed, err %d\n", err);
 		return err;
 	}
 	fs->l2.trap_rule = rule;
@@ -479,7 +484,9 @@ static int mlx5e_vlan_rx_add_svid(struct mlx5e_flow_steering *fs,
 	}
 
 	/* Need to fix some features.. */
+	netdev_lock(netdev);
 	netdev_update_features(netdev);
+	netdev_unlock(netdev);
 	return err;
 }
 
@@ -516,7 +523,9 @@ int mlx5e_fs_vlan_rx_kill_vid(struct mlx5e_flow_steering *fs,
 	} else if (be16_to_cpu(proto) == ETH_P_8021AD) {
 		clear_bit(vid, fs->vlan->active_svlans);
 		mlx5e_fs_del_vlan_rule(fs, MLX5E_VLAN_RULE_TYPE_MATCH_STAG_VID, vid);
+		netdev_lock(netdev);
 		netdev_update_features(netdev);
+		netdev_unlock(netdev);
 	}
 
 	return 0;
@@ -756,7 +765,7 @@ static int mlx5e_add_promisc_rule(struct mlx5e_flow_steering *fs)
 	if (IS_ERR(*rule_p)) {
 		err = PTR_ERR(*rule_p);
 		*rule_p = NULL;
-		fs_err(fs, "%s: add promiscuous rule failed\n", __func__);
+		fs_err(fs, "add promiscuous rule failed\n");
 	}
 	kvfree(spec);
 	return err;
@@ -771,11 +780,12 @@ static int mlx5e_create_promisc_table(struct mlx5e_flow_steering *fs)
 	ft_attr.max_fte = MLX5E_PROMISC_TABLE_SIZE;
 	ft_attr.autogroup.max_num_groups = 1;
 	ft_attr.level = MLX5E_PROMISC_FT_LEVEL;
-	ft_attr.prio = MLX5E_NIC_PRIO;
+	ft_attr.prio = MLX5E_PROMISC_PRIO;
 
 	ft->t = mlx5_create_auto_grouped_flow_table(fs->ns, &ft_attr);
 	if (IS_ERR(ft->t)) {
 		err = PTR_ERR(ft->t);
+		ft->t = NULL;
 		fs_err(fs, "fail to create promisc table err=%d\n", err);
 		return err;
 	}
@@ -803,7 +813,7 @@ static void mlx5e_del_promisc_rule(struct mlx5e_flow_steering *fs)
 
 static void mlx5e_destroy_promisc_table(struct mlx5e_flow_steering *fs)
 {
-	if (WARN(!fs->promisc.ft.t, "Trying to remove non-existing promiscuous table"))
+	if (!fs->promisc.ft.t)
 		return;
 	mlx5e_del_promisc_rule(fs);
 	mlx5_destroy_flow_table(fs->promisc.ft.t);
@@ -890,12 +900,14 @@ static void mlx5e_set_inner_ttc_params(struct mlx5e_flow_steering *fs,
 	int tt;
 
 	memset(ttc_params, 0, sizeof(*ttc_params));
-	ttc_params->ns = mlx5_get_flow_namespace(fs->mdev,
-						 MLX5_FLOW_NAMESPACE_KERNEL);
+	ttc_params->ns_type = MLX5_FLOW_NAMESPACE_KERNEL;
 	ft_attr->level = MLX5E_INNER_TTC_FT_LEVEL;
 	ft_attr->prio = MLX5E_NIC_PRIO;
 
 	for (tt = 0; tt < MLX5_NUM_TT; tt++) {
+		if (mlx5_ttc_is_decrypted_esp_tt(tt))
+			continue;
+
 		ttc_params->dests[tt].type = MLX5_FLOW_DESTINATION_TYPE_TIR;
 		ttc_params->dests[tt].tir_num =
 			tt == MLX5_TT_ANY ?
@@ -905,21 +917,34 @@ static void mlx5e_set_inner_ttc_params(struct mlx5e_flow_steering *fs,
 	}
 }
 
+static bool mlx5e_ipsec_rss_supported(struct mlx5_core_dev *mdev)
+{
+	return MLX5_CAP_NIC_RX_FT_FIELD_SUPPORT_2(mdev, ipsec_next_header) &&
+	       MLX5_CAP_NIC_RX_FT_FIELD_SUPPORT_2(mdev, outer_l4_type_ext) &&
+	       MLX5_CAP_NIC_RX_FT_FIELD_SUPPORT_2(mdev, inner_l4_type_ext);
+}
+
 void mlx5e_set_ttc_params(struct mlx5e_flow_steering *fs,
 			  struct mlx5e_rx_res *rx_res,
-			  struct ttc_params *ttc_params, bool tunnel)
+			  struct ttc_params *ttc_params, bool tunnel,
+			  bool ipsec_rss)
 
 {
 	struct mlx5_flow_table_attr *ft_attr = &ttc_params->ft_attr;
 	int tt;
 
 	memset(ttc_params, 0, sizeof(*ttc_params));
-	ttc_params->ns = mlx5_get_flow_namespace(fs->mdev,
-						 MLX5_FLOW_NAMESPACE_KERNEL);
+	ttc_params->ns_type = MLX5_FLOW_NAMESPACE_KERNEL;
 	ft_attr->level = MLX5E_TTC_FT_LEVEL;
 	ft_attr->prio = MLX5E_NIC_PRIO;
 
+	ttc_params->ipsec_rss = ipsec_rss &&
+				mlx5e_ipsec_rss_supported(fs->mdev);
+
 	for (tt = 0; tt < MLX5_NUM_TT; tt++) {
+		if (mlx5_ttc_is_decrypted_esp_tt(tt))
+			continue;
+
 		ttc_params->dests[tt].type = MLX5_FLOW_DESTINATION_TYPE_TIR;
 		ttc_params->dests[tt].tir_num =
 			tt == MLX5_TT_ANY ?
@@ -987,7 +1012,7 @@ static int mlx5e_add_l2_flow_rule(struct mlx5e_flow_steering *fs,
 
 	ai->rule = mlx5_add_flow_rules(ft, spec, &flow_act, &dest, 1);
 	if (IS_ERR(ai->rule)) {
-		fs_err(fs, "%s: add l2 rule(mac:%pM) failed\n", __func__, mv_dmac);
+		fs_err(fs, "add l2 rule(mac:%pM) failed\n", mv_dmac);
 		err = PTR_ERR(ai->rule);
 		ai->rule = NULL;
 	}
@@ -1277,9 +1302,7 @@ static int mlx5e_create_inner_ttc_table(struct mlx5e_flow_steering *fs,
 	mlx5e_set_inner_ttc_params(fs, rx_res, &ttc_params);
 	fs->inner_ttc = mlx5_create_inner_ttc_table(fs->mdev,
 						    &ttc_params);
-	if (IS_ERR(fs->inner_ttc))
-		return PTR_ERR(fs->inner_ttc);
-	return 0;
+	return PTR_ERR_OR_ZERO(fs->inner_ttc);
 }
 
 int mlx5e_create_ttc_table(struct mlx5e_flow_steering *fs,
@@ -1287,11 +1310,9 @@ int mlx5e_create_ttc_table(struct mlx5e_flow_steering *fs,
 {
 	struct ttc_params ttc_params = {};
 
-	mlx5e_set_ttc_params(fs, rx_res, &ttc_params, true);
+	mlx5e_set_ttc_params(fs, rx_res, &ttc_params, true, true);
 	fs->ttc = mlx5_create_ttc_table(fs->mdev, &ttc_params);
-	if (IS_ERR(fs->ttc))
-		return PTR_ERR(fs->ttc);
-	return 0;
+	return PTR_ERR_OR_ZERO(fs->ttc);
 }
 
 int mlx5e_create_flow_steering(struct mlx5e_flow_steering *fs,
@@ -1307,8 +1328,7 @@ int mlx5e_create_flow_steering(struct mlx5e_flow_steering *fs,
 		return -EOPNOTSUPP;
 
 	mlx5e_fs_set_ns(fs, ns, false);
-	err = mlx5e_arfs_create_tables(fs, rx_res,
-				       !!(netdev->hw_features & NETIF_F_NTUPLE));
+	err = mlx5e_arfs_create_tables(fs, rx_res, mlx5e_fs_has_arfs(netdev));
 	if (err) {
 		fs_err(fs, "Failed to create arfs tables, err=%d\n", err);
 		netdev->hw_features &= ~NETIF_F_NTUPLE;
@@ -1355,7 +1375,7 @@ err_destroy_ttc_table:
 err_destroy_inner_ttc_table:
 	mlx5e_destroy_inner_ttc_table(fs);
 err_destroy_arfs_tables:
-	mlx5e_arfs_destroy_tables(fs, !!(netdev->hw_features & NETIF_F_NTUPLE));
+	mlx5e_arfs_destroy_tables(fs, mlx5e_fs_has_arfs(netdev));
 
 	return err;
 }
@@ -1429,9 +1449,19 @@ static int mlx5e_fs_ethtool_alloc(struct mlx5e_flow_steering *fs)
 static void mlx5e_fs_ethtool_free(struct mlx5e_flow_steering *fs) { }
 #endif
 
+static void mlx5e_fs_debugfs_init(struct mlx5e_flow_steering *fs,
+				  struct dentry *dfs_root)
+{
+	if (IS_ERR_OR_NULL(dfs_root))
+		return;
+
+	fs->dfs_root = debugfs_create_dir("fs", dfs_root);
+}
+
 struct mlx5e_flow_steering *mlx5e_fs_init(const struct mlx5e_profile *profile,
 					  struct mlx5_core_dev *mdev,
-					  bool state_destroy)
+					  bool state_destroy,
+					  struct dentry *dfs_root)
 {
 	struct mlx5e_flow_steering *fs;
 	int err;
@@ -1458,6 +1488,8 @@ struct mlx5e_flow_steering *mlx5e_fs_init(const struct mlx5e_profile *profile,
 	if (err)
 		goto err_free_tc;
 
+	mlx5e_fs_debugfs_init(fs, dfs_root);
+
 	return fs;
 err_free_tc:
 	mlx5e_fs_tc_free(fs);
@@ -1471,6 +1503,9 @@ err:
 
 void mlx5e_fs_cleanup(struct mlx5e_flow_steering *fs)
 {
+	if (!fs)
+		return;
+	debugfs_remove_recursive(fs->dfs_root);
 	mlx5e_fs_ethtool_free(fs);
 	mlx5e_fs_tc_free(fs);
 	mlx5e_fs_vlan_free(fs);

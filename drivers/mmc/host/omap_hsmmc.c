@@ -620,8 +620,6 @@ static void omap_hsmmc_set_bus_mode(struct omap_hsmmc_host *host)
 		OMAP_HSMMC_WRITE(host->base, CON, con & ~OD);
 }
 
-#ifdef CONFIG_PM
-
 /*
  * Restore the MMC host context, if it was lost as result of a
  * power state change.
@@ -689,6 +687,7 @@ out:
 	return 0;
 }
 
+#ifdef CONFIG_PM
 /*
  * Save the MMC host context (store the number of power state changes so far).
  */
@@ -1663,7 +1662,6 @@ static int mmc_regs_show(struct seq_file *s, void *data)
 	seq_printf(s, "CAPA:\t\t0x%08x\n",
 			OMAP_HSMMC_READ(host->base, CAPA));
 
-	pm_runtime_mark_last_busy(host->dev);
 	pm_runtime_put_autosuspend(host->dev);
 
 	return 0;
@@ -1736,18 +1734,18 @@ static struct omap_hsmmc_platform_data *of_get_hsmmc_pdata(struct device *dev)
 	if (legacy && legacy->name)
 		pdata->name = legacy->name;
 
-	if (of_find_property(np, "ti,dual-volt", NULL))
+	if (of_property_read_bool(np, "ti,dual-volt"))
 		pdata->controller_flags |= OMAP_HSMMC_SUPPORTS_DUAL_VOLT;
 
-	if (of_find_property(np, "ti,non-removable", NULL)) {
+	if (of_property_read_bool(np, "ti,non-removable")) {
 		pdata->nonremovable = true;
 		pdata->no_regulator_off_init = true;
 	}
 
-	if (of_find_property(np, "ti,needs-special-reset", NULL))
+	if (of_property_read_bool(np, "ti,needs-special-reset"))
 		pdata->features |= HSMMC_HAS_UPDATED_RESET;
 
-	if (of_find_property(np, "ti,needs-special-hs-handling", NULL))
+	if (of_property_read_bool(np, "ti,needs-special-hs-handling"))
 		pdata->features |= HSMMC_HAS_HSPE_SUPPORT;
 
 	return pdata;
@@ -1790,24 +1788,21 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(pdev, 0);
-	if (res == NULL || irq < 0)
-		return -ENXIO;
+	if (irq < 0)
+		return irq;
 
-	base = devm_ioremap_resource(&pdev->dev, res);
+	base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
-	mmc = mmc_alloc_host(sizeof(struct omap_hsmmc_host), &pdev->dev);
-	if (!mmc) {
-		ret = -ENOMEM;
-		goto err;
-	}
+	mmc = devm_mmc_alloc_host(&pdev->dev, sizeof(*host));
+	if (!mmc)
+		return -ENOMEM;
 
 	ret = mmc_of_parse(mmc);
 	if (ret)
-		goto err1;
+		return ret;
 
 	host		= mmc_priv(mmc);
 	host->mmc	= mmc;
@@ -1843,7 +1838,7 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 	if (IS_ERR(host->fclk)) {
 		ret = PTR_ERR(host->fclk);
 		host->fclk = NULL;
-		goto err1;
+		return ret;
 	}
 
 	if (host->pdata->controller_flags & OMAP_HSMMC_BROKEN_MULTIBLOCK_READ) {
@@ -1957,7 +1952,6 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 	}
 
 	omap_hsmmc_debugfs(mmc);
-	pm_runtime_mark_last_busy(host->dev);
 	pm_runtime_put_autosuspend(host->dev);
 
 	return 0;
@@ -1974,13 +1968,10 @@ err_irq:
 	pm_runtime_put_sync(host->dev);
 	pm_runtime_disable(host->dev);
 	clk_disable_unprepare(host->dbclk);
-err1:
-	mmc_free_host(mmc);
-err:
 	return ret;
 }
 
-static int omap_hsmmc_remove(struct platform_device *pdev)
+static void omap_hsmmc_remove(struct platform_device *pdev)
 {
 	struct omap_hsmmc_host *host = platform_get_drvdata(pdev);
 
@@ -1996,13 +1987,8 @@ static int omap_hsmmc_remove(struct platform_device *pdev)
 	pm_runtime_disable(host->dev);
 	device_init_wakeup(&pdev->dev, false);
 	clk_disable_unprepare(host->dbclk);
-
-	mmc_free_host(host->mmc);
-
-	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int omap_hsmmc_suspend(struct device *dev)
 {
 	struct omap_hsmmc_host *host = dev_get_drvdata(dev);
@@ -2041,13 +2027,10 @@ static int omap_hsmmc_resume(struct device *dev)
 	if (!(host->mmc->pm_flags & MMC_PM_KEEP_POWER))
 		omap_hsmmc_conf_bus_power(host);
 
-	pm_runtime_mark_last_busy(host->dev);
 	pm_runtime_put_autosuspend(host->dev);
 	return 0;
 }
-#endif
 
-#ifdef CONFIG_PM
 static int omap_hsmmc_runtime_suspend(struct device *dev)
 {
 	struct omap_hsmmc_host *host;
@@ -2115,11 +2098,10 @@ static int omap_hsmmc_runtime_resume(struct device *dev)
 	spin_unlock_irqrestore(&host->irq_lock, flags);
 	return 0;
 }
-#endif
 
 static const struct dev_pm_ops omap_hsmmc_dev_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(omap_hsmmc_suspend, omap_hsmmc_resume)
-	SET_RUNTIME_PM_OPS(omap_hsmmc_runtime_suspend, omap_hsmmc_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(omap_hsmmc_suspend, omap_hsmmc_resume)
+	RUNTIME_PM_OPS(omap_hsmmc_runtime_suspend, omap_hsmmc_runtime_resume, NULL)
 };
 
 static struct platform_driver omap_hsmmc_driver = {
@@ -2128,7 +2110,7 @@ static struct platform_driver omap_hsmmc_driver = {
 	.driver		= {
 		.name = DRIVER_NAME,
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
-		.pm = &omap_hsmmc_dev_pm_ops,
+		.pm = pm_ptr(&omap_hsmmc_dev_pm_ops),
 		.of_match_table = of_match_ptr(omap_mmc_of_match),
 	},
 };

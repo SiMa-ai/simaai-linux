@@ -469,10 +469,10 @@ static int fdomain_host_reset(struct scsi_cmnd *cmd)
 }
 
 static int fdomain_biosparam(struct scsi_device *sdev,
-			     struct block_device *bdev,	sector_t capacity,
+			     struct gendisk *disk, sector_t capacity,
 			     int geom[])
 {
-	unsigned char *p = scsi_bios_ptable(bdev);
+	unsigned char *p = scsi_bios_ptable(disk);
 
 	if (p && p[65] == 0xaa && p[64] == 0x55 /* Partition table valid */
 	    && p[4]) {	 /* Partition type */
@@ -496,7 +496,7 @@ static int fdomain_biosparam(struct scsi_device *sdev,
 	return 0;
 }
 
-static struct scsi_host_template fdomain_template = {
+static const struct scsi_host_template fdomain_template = {
 	.module			= THIS_MODULE,
 	.name			= "Future Domain TMC-16x0",
 	.proc_name		= "fdomain",

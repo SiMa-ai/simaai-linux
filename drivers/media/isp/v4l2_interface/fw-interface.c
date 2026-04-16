@@ -310,19 +310,14 @@ int fw_intf_isp_get_sensor_info( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_i
 
     /* get sensor preset number */
     acamera_command( ctx_id, TSENSOR, SENSOR_SUPPORTED_PRESETS, 0, COMMAND_GET, &num_presets );
-    if ( num_presets > V4L2_SENSOR_INFO_MODES_MAX ) {
-        LOG( LOG_ERR, "Sensor preset number (%u) is out of reserved range ( V4L2_SENSOR_INFO_MODES_MAX = %u )",
-             num_presets, V4L2_SENSOR_INFO_MODES_MAX );
-        num_presets = V4L2_SENSOR_INFO_MODES_MAX;
-    }
 
-	LOG( LOG_INFO, "num of presets %d", num_presets);
+	LOG( LOG_DEBUG, "num of presets %d", num_presets);
     /**
      * fill sensor info structure. Unique resolutions added as modes.
      * Sensor modes with the same resolution added as submodes under corresponding mode
      */
     for ( i = 0; i < num_presets; i++ ) {
-        uint32_t width = 0, height = 0, fps = 0, exposures = 0, num_channels = 0, data_width = 0, ret_val = 0;
+        uint32_t width = 0, height = 0, fps = 0, exposures = 0, num_channels = 0, data_width = 0, pixel_format = 0, ret_val = 0;
 
         /* get next preset */
         acamera_command( ctx_id, TSENSOR, SENSOR_INFO_PRESET, i, COMMAND_SET, &ret_val );
@@ -332,11 +327,13 @@ int fw_intf_isp_get_sensor_info( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_i
         acamera_command( ctx_id, TSENSOR, SENSOR_INFO_EXPOSURES, 0, COMMAND_GET, &exposures );
         acamera_command( ctx_id, TSENSOR, SENSOR_INFO_CHANNELS, 0, COMMAND_GET, &num_channels );
         acamera_command( ctx_id, TSENSOR, SENSOR_INFO_DATA_WIDTH, 0, COMMAND_GET, &data_width );
-        LOG( LOG_INFO, "index : %d, width: %04u, height: %04u, data width: %d", i, width, height, data_width);
+        acamera_command( ctx_id, TSENSOR, SENSOR_INFO_PIXEL_FORMAT, 0, COMMAND_GET, &pixel_format );
+        LOG( LOG_DEBUG, "index : %d, width: %04u, height: %04u, data width: %d, pixel format: %#x", i, width, height, data_width, pixel_format);
 
         /* find existing mode index from sensor_info with corresponding resolution */
         for ( j = 0; j < sensor_info->num_modes; j++ ) {
-            if ( ( sensor_info->mode[j].width == width ) && ( sensor_info->mode[j].height == height ) ) {
+            if ( ( sensor_info->mode[j].width == width ) && ( sensor_info->mode[j].height == height ) && 
+                ( sensor_info->mode[j].data_width == data_width ) && ( sensor_info->mode[j].pixel_format == pixel_format ) ) {
                 break;
             }
         }
@@ -348,9 +345,10 @@ int fw_intf_isp_get_sensor_info( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_i
 
             sensor_info->mode[j].width = width;
             sensor_info->mode[j].height = height;
+            sensor_info->mode[j].data_width = data_width;
+            sensor_info->mode[j].pixel_format = pixel_format;
             sensor_info->mode[j].sub_mode[cur_sub_mode].exposures = exposures;
             sensor_info->mode[j].sub_mode[cur_sub_mode].fps = fps;
-            sensor_info->mode[j].sub_mode[cur_sub_mode].data_width = data_width;
             sensor_info->mode[j].sub_mode[cur_sub_mode].num_channels = num_channels;
             sensor_info->mode[j].sub_mode[cur_sub_mode].sensor_preset = i;
             sensor_info->mode[j].num_sub_modes++;
@@ -369,19 +367,19 @@ int fw_intf_isp_get_sensor_info( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_i
     fw_intf_isp_update_sensor_info_mode( ctx_id, sensor_info );
 
     // Print out sensor info structure
-    LOG( LOG_INFO, "/* dump sensor info structure ----------------------------------" );
+    LOG( LOG_DEBUG, "/* dump sensor info structure ----------------------------------" );
     for ( i = 0; i < sensor_info->num_modes; i++ ) {
-        LOG( LOG_INFO, "   |--mode: %02d, width: %04u, height: %04u", i, sensor_info->mode[i].width, sensor_info->mode[i].height );
+        LOG( LOG_DEBUG, "   |--mode: %02d, width: %04u, height: %04u pixel format: %#x, data width: %u", i, sensor_info->mode[i].width,
+                sensor_info->mode[i].height, sensor_info->mode[i].pixel_format, sensor_info->mode[i].data_width );
         for ( j = 0; j < sensor_info->mode[i].num_sub_modes; j++ )
-            LOG( LOG_INFO, "      |--sub mode %02d: fps: %u, exposures: %u, channels: %u, data width: %u, sensor preset: %u",
+            LOG( LOG_DEBUG, "      |--sub mode %02d: fps: %u, exposures: %u, channels: %u, sensor preset: %u",
                  j,
                  sensor_info->mode[i].sub_mode[j].fps / 256,
                  sensor_info->mode[i].sub_mode[j].exposures,
                  sensor_info->mode[i].sub_mode[j].num_channels,
-                 sensor_info->mode[i].sub_mode[j].data_width,
-                 sensor_info->mode[i].sub_mode[j].sensor_preset );
+                 sensor_info->mode[i].sub_mode[j].sensor_preset);
     }
-    LOG( LOG_INFO, "--------------------------------------------------------------*/" );
+    LOG( LOG_DEBUG, "--------------------------------------------------------------*/" );
 
 #else
     /* Return default settings (1080p) */
@@ -393,8 +391,9 @@ int fw_intf_isp_get_sensor_info( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_i
     sensor_info->mode[0].sub_mode[0].fps = 30 * 256;
     sensor_info->mode[0].sub_mode[0].exposures = 1;
     sensor_info->mode[0].sub_mode[0].num_channels = 1;
-    sensor_info->mode[0].sub_mode[0].data_width = 12;
     sensor_info->mode[0].sub_mode[0].sensor_preset = 0;
+    sensor_info->mode[0].data_width = 12;
+    sensor_info->mode[0].pixel_format = V4L2_PIX_FMT_SRGGB12;
     sensor_info->mode[0].width = 1920;
     sensor_info->mode[0].height = 1080;
 #endif
@@ -527,11 +526,17 @@ void fw_intf_stream_stop( uint32_t ctx_id, isp_v4l2_stream_type_t stream_type, u
     }
 }
 
+#define V4L2_FOURCC_STR(fmt) \
+    (char)((fmt) & 0xff), \
+    (char)(((fmt) >> 8) & 0xff), \
+    (char)(((fmt) >> 16) & 0xff), \
+    (char)(((fmt) >> 24) & 0xff)
+
 /**
  * fw-interface per-stream config interface
  */
 int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor_info,
-                                   isp_v4l2_stream_type_t stream_type, uint32_t *width, uint32_t *height )
+                                   isp_v4l2_stream_type_t stream_type, uint32_t *width, uint32_t *height, uint32_t pixel_format )
 {
     if ( ( sensor_info == NULL ) || ( width == NULL ) || ( height == NULL ) ) {
         LOG( LOG_ERR, "Invalid parameter. One or several parameters are NULL" );
@@ -548,10 +553,10 @@ int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor
         return -EBUSY;
     }
 
-    LOG( LOG_INFO, "stream_set_resolution, context id: %u, stream type: %d, width: %d, height: %d",
-         ctx_id, stream_type, *width, *height );
+    LOG( LOG_DEBUG, "stream_set_resolution, context id: %u, stream type: %d, width: %d, height: %d, pixel format: %u, (%c%c%c%c)",
+         ctx_id, stream_type, *width, *height, pixel_format, V4L2_FOURCC_STR( pixel_format ) );
 
-    if ( stream_type == V4L2_STREAM_TYPE_RAW  || stream_type == V4L2_STREAM_TYPE_OUT) {
+    if ( stream_type == V4L2_STREAM_TYPE_RAW  || stream_type == V4L2_STREAM_TYPE_OUT || stream_type == V4L2_STREAM_TYPE_M2M) {
 #if defined( TSENSOR ) && defined( SENSOR_PRESET )
 
         uint32_t sensor_preset = 0;
@@ -567,12 +572,16 @@ int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor
         LOG( LOG_INFO, "stream_set_resolution, target resolution: %dx%d, current resolution: %dx%d",
              target_width, target_height, current_width, current_height );
 
+//TODO : Check if this is really needed now
+#if 0
         if ( ( current_width != target_width ) || ( current_height != target_height ) ) {
-
+#endif
             uint32_t mode, sub_mode = 0, fps = 0;
             // Search sensor info for the mode with matching resolution
             for ( mode = 0; mode < sensor_info->num_modes; mode++ ) {
-                if ( sensor_info->mode[mode].width == target_width && sensor_info->mode[mode].height == target_height ) {
+                if ( sensor_info->mode[mode].width == target_width &&
+                            sensor_info->mode[mode].height == target_height &&
+                            sensor_info->mode[mode].pixel_format == pixel_format ) {
 
                     // Find sub mode with the highest FPS value.
                     // This should be changed in the future to pick required resolution from application
@@ -596,8 +605,8 @@ int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor
             }
 
             /* set sensor resolution preset */
-            LOG( LOG_INFO, "Setting new sensor resolution: %dx%d, sensor preset: %d, fps: %d",
-                 target_width, target_height, sensor_preset, fps / 256 );
+            LOG( LOG_DEBUG, "Setting new sensor resolution: %dx%d, from : %dx%d sensor preset: %d, fps: %d, pixel format: %u",
+                 target_width, target_height, current_width, current_height, sensor_preset, fps / 256, pixel_format );
 
             uint32_t ret_val;
             uint8_t rc = acamera_command( ctx_id, TSENSOR, SENSOR_PRESET, sensor_preset, COMMAND_SET, &ret_val );
@@ -609,12 +618,13 @@ int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor
             // Update sensor info current mode and sub mode
             sensor_info->cur_mode = mode;
             sensor_info->mode[mode].cur_sub_mode = sub_mode;
-
+#if 0
         } else {
             acamera_command( ctx_id, TSENSOR, SENSOR_PRESET, 0, COMMAND_GET, &sensor_preset );
             LOG( LOG_INFO, "No resolution change required, using current sensor resolution: %dx%d, sensor preset: %d",
                  target_width, target_height, sensor_preset );
         }
+#endif
 #endif
     }
 

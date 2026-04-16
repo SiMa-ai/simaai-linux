@@ -14,6 +14,7 @@
 #include <net/netlink.h>
 #include <net/pkt_cls.h>
 #include <net/tc_act/tc_gate.h>
+#include <net/tc_wrapper.h>
 
 static struct tc_action_ops act_gate_ops;
 
@@ -113,39 +114,42 @@ static enum hrtimer_restart gate_timer_func(struct hrtimer *timer)
 	return HRTIMER_RESTART;
 }
 
-static int tcf_gate_act(struct sk_buff *skb, const struct tc_action *a,
-			struct tcf_result *res)
+TC_INDIRECT_SCOPE int tcf_gate_act(struct sk_buff *skb,
+				   const struct tc_action *a,
+				   struct tcf_result *res)
 {
 	struct tcf_gate *gact = to_gate(a);
-
-	spin_lock(&gact->tcf_lock);
+	int action = READ_ONCE(gact->tcf_action);
 
 	tcf_lastuse_update(&gact->tcf_tm);
-	bstats_update(&gact->tcf_bstats, skb);
+	tcf_action_update_bstats(&gact->common, skb);
 
+	spin_lock(&gact->tcf_lock);
 	if (unlikely(gact->current_gate_status & GATE_ACT_PENDING)) {
 		spin_unlock(&gact->tcf_lock);
-		return gact->tcf_action;
+		return action;
 	}
 
-	if (!(gact->current_gate_status & GATE_ACT_GATE_OPEN))
+	if (!(gact->current_gate_status & GATE_ACT_GATE_OPEN)) {
+		spin_unlock(&gact->tcf_lock);
 		goto drop;
+	}
 
 	if (gact->current_max_octets >= 0) {
 		gact->current_entry_octets += qdisc_pkt_len(skb);
 		if (gact->current_entry_octets > gact->current_max_octets) {
-			gact->tcf_qstats.overlimits++;
-			goto drop;
+			spin_unlock(&gact->tcf_lock);
+			goto overlimit;
 		}
 	}
-
 	spin_unlock(&gact->tcf_lock);
 
-	return gact->tcf_action;
+	return action;
+
+overlimit:
+	tcf_action_inc_overlimit_qstats(&gact->common);
 drop:
-	gact->tcf_qstats.drops++;
-	spin_unlock(&gact->tcf_lock);
-
+	tcf_action_inc_drop_qstats(&gact->common);
 	return TC_ACT_SHOT;
 }
 
@@ -186,15 +190,10 @@ static int fill_gate_entry(struct nlattr **tb, struct tcfg_gate_entry *entry,
 
 	entry->interval = interval;
 
-	if (tb[TCA_GATE_ENTRY_IPV])
-		entry->ipv = nla_get_s32(tb[TCA_GATE_ENTRY_IPV]);
-	else
-		entry->ipv = -1;
+	entry->ipv = nla_get_s32_default(tb[TCA_GATE_ENTRY_IPV], -1);
 
-	if (tb[TCA_GATE_ENTRY_MAX_OCTETS])
-		entry->maxoctets = nla_get_s32(tb[TCA_GATE_ENTRY_MAX_OCTETS]);
-	else
-		entry->maxoctets = -1;
+	entry->maxoctets = nla_get_s32_default(tb[TCA_GATE_ENTRY_MAX_OCTETS],
+					       -1);
 
 	return 0;
 }
@@ -288,8 +287,7 @@ static void gate_setup_timer(struct tcf_gate *gact, u64 basetime,
 	gact->param.tcfg_basetime = basetime;
 	gact->param.tcfg_clockid = clockid;
 	gact->tk_offset = tko;
-	hrtimer_init(&gact->hitimer, clockid, HRTIMER_MODE_ABS_SOFT);
-	gact->hitimer.function = gate_timer_func;
+	hrtimer_setup(&gact->hitimer, gate_timer_func, clockid, HRTIMER_MODE_ABS_SOFT);
 }
 
 static int tcf_gate_init(struct net *net, struct nlattr *nla,
@@ -352,11 +350,11 @@ static int tcf_gate_init(struct net *net, struct nlattr *nla,
 		return err;
 
 	if (err && bind)
-		return 0;
+		return ACT_P_BOUND;
 
 	if (!err) {
-		ret = tcf_idr_create(tn, index, est, a,
-				     &act_gate_ops, bind, false, flags);
+		ret = tcf_idr_create_from_flags(tn, index, est, a,
+						&act_gate_ops, bind, flags);
 		if (ret) {
 			tcf_idr_cleanup(tn, index);
 			return ret;
@@ -641,6 +639,7 @@ static struct tc_action_ops act_gate_ops = {
 	.offload_act_setup =	tcf_gate_offload_act_setup,
 	.size		=	sizeof(struct tcf_gate),
 };
+MODULE_ALIAS_NET_ACT("gate");
 
 static __net_init int gate_init_net(struct net *net)
 {
@@ -673,4 +672,5 @@ static void __exit gate_cleanup_module(void)
 
 module_init(gate_init_module);
 module_exit(gate_cleanup_module);
+MODULE_DESCRIPTION("TC gate action");
 MODULE_LICENSE("GPL v2");

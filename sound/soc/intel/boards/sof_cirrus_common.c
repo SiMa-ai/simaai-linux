@@ -91,7 +91,7 @@ static const struct {
 static int cs35l41_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *codec_dai;
 	int clk_freq, i, ret;
 
@@ -155,7 +155,7 @@ static const char * const cs35l41_name_prefixes[] = { "WL", "WR", "TL", "TR" };
  */
 static int cs35l41_compute_codec_conf(void)
 {
-	const char * const uid_strings[] = { "0", "1", "2", "3" };
+	static const char * const uid_strings[] = { "0", "1", "2", "3" };
 	unsigned int uid, sz = 0;
 	struct acpi_device *adev;
 	struct device *physdev;
@@ -168,11 +168,16 @@ static int cs35l41_compute_codec_conf(void)
 			continue;
 		}
 		physdev = get_device(acpi_get_first_physical_node(adev));
+		acpi_dev_put(adev);
+		if (!physdev) {
+			pr_devel("Cannot find physical node for HID %s UID %u (%s)\n", CS35L41_HID,
+					uid, cs35l41_name_prefixes[uid]);
+			return 0;
+		}
 		cs35l41_components[sz].name = dev_name(physdev);
 		cs35l41_components[sz].dai_name = CS35L41_CODEC_DAI;
 		cs35l41_codec_conf[sz].dlc.name = dev_name(physdev);
 		cs35l41_codec_conf[sz].name_prefix = cs35l41_name_prefixes[uid];
-		acpi_dev_put(adev);
 		sz++;
 	}
 
@@ -188,14 +193,14 @@ void cs35l41_set_dai_link(struct snd_soc_dai_link *link)
 	link->init = cs35l41_init;
 	link->ops = &cs35l41_ops;
 }
-EXPORT_SYMBOL_NS(cs35l41_set_dai_link, SND_SOC_INTEL_SOF_CIRRUS_COMMON);
+EXPORT_SYMBOL_NS(cs35l41_set_dai_link, "SND_SOC_INTEL_SOF_CIRRUS_COMMON");
 
 void cs35l41_set_codec_conf(struct snd_soc_card *card)
 {
 	card->codec_conf = cs35l41_codec_conf;
 	card->num_configs = ARRAY_SIZE(cs35l41_codec_conf);
 }
-EXPORT_SYMBOL_NS(cs35l41_set_codec_conf, SND_SOC_INTEL_SOF_CIRRUS_COMMON);
+EXPORT_SYMBOL_NS(cs35l41_set_codec_conf, "SND_SOC_INTEL_SOF_CIRRUS_COMMON");
 
 MODULE_DESCRIPTION("ASoC Intel SOF Cirrus Logic helpers");
 MODULE_LICENSE("GPL");

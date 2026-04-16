@@ -35,7 +35,6 @@
 #include "acamera_math.h"
 #include "sensor_api.h"
 #include "imx678_config.h"
-
 #include "acamera_aframe.h"
 #include "isp-v4l2.h"
 #include "acamera_isp_config.h"
@@ -52,7 +51,6 @@
 // Added to communicate with the MCU I2C
 #include "isp-v4l2.h"
 #include <linux/i2c.h>
-
 #include "sensor_bus_config.h"
 #include <linux/simaai-stu.h>
 
@@ -230,7 +228,7 @@ static int cam_write(struct i2c_client *client, u8 * val, u32 count)
         return 0;
 }
 
-unsigned char errorcheck(char *data, unsigned int len)
+static unsigned char errorcheck(char *data, unsigned int len)
 {
 	unsigned int i = 0;
 	unsigned char crc = 0x00;
@@ -244,17 +242,22 @@ unsigned char errorcheck(char *data, unsigned int len)
 // I2C Initialization
 static bool i2c_client_init(sensor_private_t *priv) {
 
+	struct v4l2_subdev *sd_sensor = NULL;
 	isp_v4l2_dev_t *isp_dev = isp_v4l2_get_dev(priv->ctx_id);
 	if (!isp_dev) {
 		LOG( LOG_ERR, "Failed to get isp dev for context %d", priv->ctx_id);
 		return false;
 	}
 
-	struct v4l2_subdev *sd_sensor = isp_dev->sd[SD_CAMERA];
+#if 0
+#if MIPI_ISP_INTGRATION
+	sd_sensor = isp_dev->remote_sd[SD_CAMERA];
 	if (!sd_sensor) {
 		LOG( LOG_ERR, "Failed to get sensor sd for locaion %d", priv->ctx_id);
 		return false;
 	}
+#endif
+#endif
 
 	priv->client = v4l2_get_subdevdata(sd_sensor);
 	if(!(priv->client)) {
@@ -262,14 +265,14 @@ static bool i2c_client_init(sensor_private_t *priv) {
 		return false;
 	}
 
-	LOG(LOG_INFO, "SUCCESS I2C context %d with address %x",
+	LOG(LOG_DEBUG, "SUCCESS I2C context %d with address %x",
 			priv->ctx_id, priv->client->addr);
 
 	return true;
 }
 
 // Setting Gain
-int32_t cam_set_gain(void *sensor_priv, uint64_t gain)
+static int32_t cam_set_gain(void *sensor_priv, uint64_t gain)
 {
 	unsigned char mc_data[100];
         uint32_t payload_len = 0;
@@ -339,7 +342,7 @@ exit:
 }
 
 // Setting exposure
-int32_t cam_set_exposure(void *sensor_priv, uint64_t exp)
+static int32_t cam_set_exposure(void *sensor_priv, uint64_t exp)
 {
 	unsigned char mc_data[100];
         uint32_t payload_len = 0;
@@ -410,7 +413,7 @@ exit:
 }
 
 // Setting frame rate
-int32_t cam_set_framerate(void *sensor_priv, uint32_t fps)
+static int32_t cam_set_framerate(void *sensor_priv, uint32_t fps)
 {
 	unsigned char mc_data[100];
         uint32_t payload_len = 0;
@@ -571,7 +574,7 @@ static void sensor_alloc_white_balance_gains( void *sensor_priv, int32_t gain[4]
 
 static void sensor_update( void *sensor_priv )
 {
-	LOG (LOG_INFO, "Sensor update called");
+	LOG (LOG_ERR, "NOT IMPLEMENTED : sensor update called");
 }
 
 static void work_queue_fn(struct work_struct *work) {
@@ -680,8 +683,6 @@ static int submit_dma_request(sensor_private_t *priv, aframe_t *input_frame) {
 		dma_async_issue_pending(priv->dma);
 	}
 
-	LOG( LOG_INFO, "SUCCESS : MIPI submitting buffer");
-
 	return 0;
 }
 
@@ -752,7 +753,8 @@ static void sensor_set_mode( void *sensor_priv, uint8_t mode )
 
 static uint16_t sensor_get_id( void *sensor_priv )
 {
-    return 0xFFFF;
+    sensor_private_t *priv = (sensor_private_t *)sensor_priv;
+    return priv->ctx_id;
 }
 
 static const sensor_param_t *sensor_get_parameters( void *sensor_priv )
@@ -764,7 +766,7 @@ static const sensor_param_t *sensor_get_parameters( void *sensor_priv )
 static uint8_t sensor_fps_control( void *sensor_priv, uint8_t fps )
 {
     // This sensor does not support FPS switching.
-	LOG( LOG_DEBUG, "Sensor fps control");
+	LOG( LOG_ERR, "NOT IMPLEMENTED : Sensor FPS control");
     return 0;
 }
 

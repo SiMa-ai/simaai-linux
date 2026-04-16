@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2022 Loongson Technology Corporation Limited
  */
+#include <linux/bitfield.h>
 #include <linux/bpf.h>
 #include <linux/filter.h>
 #include <asm/cacheflush.h>
@@ -15,7 +16,9 @@ struct jit_ctx {
 	unsigned int flags;
 	unsigned int epilogue_offset;
 	u32 *offset;
+	int num_exentries;
 	union loongarch_instruction *image;
+	union loongarch_instruction *ro_image;
 	u32 stack_size;
 };
 
@@ -24,6 +27,11 @@ struct jit_data {
 	u8 *image;
 	struct jit_ctx ctx;
 };
+
+static inline void emit_nop(union loongarch_instruction *insn)
+{
+	insn->word = INSN_NOP;
+}
 
 #define emit_insn(ctx, func, ...)						\
 do {										\
@@ -148,7 +156,7 @@ static inline void move_imm(struct jit_ctx *ctx, enum loongarch_gpr rd, long imm
 			 * no need to call lu32id to do a new filled operation.
 			 */
 			imm_51_31 = (imm >> 31) & 0x1fffff;
-			if (imm_51_31 != 0 || imm_51_31 != 0x1fffff) {
+			if (imm_51_31 != 0 && imm_51_31 != 0x1fffff) {
 				/* lu32id rd, imm_51_32 */
 				imm_51_32 = (imm >> 32) & 0xfffff;
 				emit_insn(ctx, lu32id, rd, imm_51_32);
@@ -300,4 +308,9 @@ static inline int emit_tailcall_jmp(struct jit_ctx *ctx, u8 cond, enum loongarch
 	}
 
 	return -EINVAL;
+}
+
+static inline void bpf_flush_icache(void *start, void *end)
+{
+	flush_icache_range((unsigned long)start, (unsigned long)end);
 }

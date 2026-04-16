@@ -142,7 +142,6 @@ static struct sas_task *sas_create_task(struct scsi_cmnd *cmd,
 	task->dev = dev;
 	task->task_proto = task->dev->tproto; /* BUG_ON(!SSP) */
 
-	task->ssp_task.retry_count = 1;
 	int_to_scsilun(cmd->device->lun, &lun);
 	memcpy(task->ssp_task.LUN, &lun.scsi_lun, 8);
 	task->ssp_task.task_attr = TASK_ATTR_SIMPLE;
@@ -279,7 +278,7 @@ static enum task_disposition sas_scsi_find_task(struct sas_task *task)
 	unsigned long flags;
 	int i, res;
 	struct sas_internal *si =
-		to_sas_internal(task->dev->port->ha->core.shost->transportt);
+		to_sas_internal(task->dev->port->ha->shost->transportt);
 
 	for (i = 0; i < 5; i++) {
 		pr_notice("%s: aborting task 0x%p\n", __func__, task);
@@ -327,7 +326,7 @@ static int sas_recover_lu(struct domain_device *dev, struct scsi_cmnd *cmd)
 	int res = TMF_RESP_FUNC_FAILED;
 	struct scsi_lun lun;
 	struct sas_internal *i =
-		to_sas_internal(dev->port->ha->core.shost->transportt);
+		to_sas_internal(dev->port->ha->shost->transportt);
 
 	int_to_scsilun(cmd->device->lun, &lun);
 
@@ -355,7 +354,7 @@ static int sas_recover_I_T(struct domain_device *dev)
 {
 	int res = TMF_RESP_FUNC_FAILED;
 	struct sas_internal *i =
-		to_sas_internal(dev->port->ha->core.shost->transportt);
+		to_sas_internal(dev->port->ha->shost->transportt);
 
 	pr_notice("I_T nexus reset for dev %016llx\n",
 		  SAS_ADDR(dev->sas_addr));
@@ -387,37 +386,7 @@ struct sas_phy *sas_get_local_phy(struct domain_device *dev)
 }
 EXPORT_SYMBOL_GPL(sas_get_local_phy);
 
-static void sas_wait_eh(struct domain_device *dev)
-{
-	struct sas_ha_struct *ha = dev->port->ha;
-	DEFINE_WAIT(wait);
-
-	if (dev_is_sata(dev)) {
-		ata_port_wait_eh(dev->sata_dev.ap);
-		return;
-	}
- retry:
-	spin_lock_irq(&ha->lock);
-
-	while (test_bit(SAS_DEV_EH_PENDING, &dev->state)) {
-		prepare_to_wait(&ha->eh_wait_q, &wait, TASK_UNINTERRUPTIBLE);
-		spin_unlock_irq(&ha->lock);
-		schedule();
-		spin_lock_irq(&ha->lock);
-	}
-	finish_wait(&ha->eh_wait_q, &wait);
-
-	spin_unlock_irq(&ha->lock);
-
-	/* make sure SCSI EH is complete */
-	if (scsi_host_in_recovery(ha->core.shost)) {
-		msleep(10);
-		goto retry;
-	}
-}
-
-static int sas_queue_reset(struct domain_device *dev, int reset_type,
-			   u64 lun, int wait)
+static int sas_queue_reset(struct domain_device *dev, int reset_type, u64 lun)
 {
 	struct sas_ha_struct *ha = dev->port->ha;
 	int scheduled = 0, tries = 100;
@@ -425,8 +394,6 @@ static int sas_queue_reset(struct domain_device *dev, int reset_type,
 	/* ata: promote lun reset to bus reset */
 	if (dev_is_sata(dev)) {
 		sas_ata_schedule_reset(dev);
-		if (wait)
-			sas_ata_wait_eh(dev);
 		return SUCCESS;
 	}
 
@@ -440,12 +407,9 @@ static int sas_queue_reset(struct domain_device *dev, int reset_type,
 			set_bit(SAS_DEV_EH_PENDING, &dev->state);
 			set_bit(reset_type, &dev->state);
 			int_to_scsilun(lun, &dev->ssp_dev.reset_lun);
-			scsi_schedule_eh(ha->core.shost);
+			scsi_schedule_eh(ha->shost);
 		}
 		spin_unlock_irq(&ha->lock);
-
-		if (wait)
-			sas_wait_eh(dev);
 
 		if (scheduled)
 			return SUCCESS;
@@ -499,7 +463,7 @@ int sas_eh_device_reset_handler(struct scsi_cmnd *cmd)
 	struct sas_internal *i = to_sas_internal(host->transportt);
 
 	if (current != host->ehandler)
-		return sas_queue_reset(dev, SAS_DEV_LU_RESET, cmd->device->lun, 0);
+		return sas_queue_reset(dev, SAS_DEV_LU_RESET, cmd->device->lun);
 
 	int_to_scsilun(cmd->device->lun, &lun);
 
@@ -522,7 +486,7 @@ int sas_eh_target_reset_handler(struct scsi_cmnd *cmd)
 	struct sas_internal *i = to_sas_internal(host->transportt);
 
 	if (current != host->ehandler)
-		return sas_queue_reset(dev, SAS_DEV_RESET, 0, 0);
+		return sas_queue_reset(dev, SAS_DEV_RESET, 0);
 
 	if (!i->dft->lldd_I_T_nexus_reset)
 		return FAILED;
@@ -840,14 +804,14 @@ EXPORT_SYMBOL_GPL(sas_target_alloc);
 
 #define SAS_DEF_QD 256
 
-int sas_slave_configure(struct scsi_device *scsi_dev)
+int sas_sdev_configure(struct scsi_device *scsi_dev, struct queue_limits *lim)
 {
 	struct domain_device *dev = sdev_to_domain_dev(scsi_dev);
 
 	BUG_ON(dev->rphy->identify.device_type != SAS_END_DEVICE);
 
 	if (dev_is_sata(dev)) {
-		ata_sas_slave_configure(scsi_dev, dev->sata_dev.ap);
+		ata_sas_sdev_configure(scsi_dev, lim, dev->sata_dev.ap);
 		return 0;
 	}
 
@@ -865,15 +829,14 @@ int sas_slave_configure(struct scsi_device *scsi_dev)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(sas_slave_configure);
+EXPORT_SYMBOL_GPL(sas_sdev_configure);
 
 int sas_change_queue_depth(struct scsi_device *sdev, int depth)
 {
 	struct domain_device *dev = sdev_to_domain_dev(sdev);
 
 	if (dev_is_sata(dev))
-		return ata_change_queue_depth(dev->sata_dev.ap,
-					      sas_to_ata_dev(dev), sdev, depth);
+		return ata_change_queue_depth(dev->sata_dev.ap, sdev, depth);
 
 	if (!sdev->tagged_supported)
 		depth = 1;
@@ -882,7 +845,7 @@ int sas_change_queue_depth(struct scsi_device *sdev, int depth)
 EXPORT_SYMBOL_GPL(sas_change_queue_depth);
 
 int sas_bios_param(struct scsi_device *scsi_dev,
-			  struct block_device *bdev,
+			  struct gendisk *unused,
 			  sector_t capacity, int *hsc)
 {
 	hsc[0] = 255;
@@ -896,13 +859,13 @@ EXPORT_SYMBOL_GPL(sas_bios_param);
 
 void sas_task_internal_done(struct sas_task *task)
 {
-	del_timer(&task->slow_task->timer);
+	timer_delete(&task->slow_task->timer);
 	complete(&task->slow_task->completion);
 }
 
 void sas_task_internal_timedout(struct timer_list *t)
 {
-	struct sas_task_slow *slow = from_timer(slow, t, timer);
+	struct sas_task_slow *slow = timer_container_of(slow, t, timer);
 	struct sas_task *task = slow->task;
 	bool is_completed = true;
 	unsigned long flags;
@@ -926,7 +889,7 @@ static int sas_execute_internal_abort(struct domain_device *device,
 				      unsigned int qid, void *data)
 {
 	struct sas_ha_struct *ha = device->port->ha;
-	struct sas_internal *i = to_sas_internal(ha->core.shost->transportt);
+	struct sas_internal *i = to_sas_internal(ha->shost->transportt);
 	struct sas_task *task = NULL;
 	int res, retry;
 
@@ -948,7 +911,7 @@ static int sas_execute_internal_abort(struct domain_device *device,
 
 		res = i->dft->lldd_execute_task(task, GFP_KERNEL);
 		if (res) {
-			del_timer_sync(&task->slow_task->timer);
+			timer_delete_sync(&task->slow_task->timer);
 			pr_err("Executing internal abort failed %016llx (%d)\n",
 			       SAS_ADDR(device->sas_addr), res);
 			break;
@@ -1016,7 +979,7 @@ int sas_execute_tmf(struct domain_device *device, void *parameter,
 {
 	struct sas_task *task;
 	struct sas_internal *i =
-		to_sas_internal(device->port->ha->core.shost->transportt);
+		to_sas_internal(device->port->ha->shost->transportt);
 	int res, retry;
 
 	for (retry = 0; retry < TASK_RETRY; retry++) {
@@ -1047,7 +1010,7 @@ int sas_execute_tmf(struct domain_device *device, void *parameter,
 
 		res = i->dft->lldd_execute_task(task, GFP_KERNEL);
 		if (res) {
-			del_timer_sync(&task->slow_task->timer);
+			timer_delete_sync(&task->slow_task->timer);
 			pr_err("executing TMF task failed %016llx (%d)\n",
 			       SAS_ADDR(device->sas_addr), res);
 			break;
@@ -1217,7 +1180,7 @@ void sas_task_abort(struct sas_task *task)
 
 		if (!slow)
 			return;
-		if (!del_timer(&slow->timer))
+		if (!timer_delete(&slow->timer))
 			return;
 		slow->timer.function(&slow->timer);
 		return;
@@ -1230,14 +1193,14 @@ void sas_task_abort(struct sas_task *task)
 }
 EXPORT_SYMBOL_GPL(sas_task_abort);
 
-int sas_slave_alloc(struct scsi_device *sdev)
+int sas_sdev_init(struct scsi_device *sdev)
 {
 	if (dev_is_sata(sdev_to_domain_dev(sdev)) && sdev->lun)
 		return -ENXIO;
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(sas_slave_alloc);
+EXPORT_SYMBOL_GPL(sas_sdev_init);
 
 void sas_target_destroy(struct scsi_target *starget)
 {

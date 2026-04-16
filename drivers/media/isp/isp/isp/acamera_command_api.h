@@ -167,6 +167,7 @@
 #define ISP_MODULES_MANUAL_SHADING 0x00000062
 #define ISP_MODULES_MANUAL_DEMOSAIC 0x00000063
 #define ISP_MODULES_FORCE_BIST_MISMATCH 0x00000064
+#define SENSOR_INFO_PIXEL_FORMAT 0x00000065
 
 
 // ------------------------------------------------------------------------------ //

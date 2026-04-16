@@ -13,11 +13,9 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/pm.h>
-#include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/acpi.h>
 #include <linux/regmap.h>
-#include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/firmware.h>
 #include <sound/core.h>
@@ -1673,7 +1671,7 @@ static int rt1011_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 
 	snd_soc_dapm_mutex_lock(dapm);
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		reg_val |= RT1011_I2S_TDM_MS_S;
 		break;
 	default:
@@ -2184,7 +2182,7 @@ static const struct regmap_config rt1011_regmap = {
 	.max_register = RT1011_MAX_REG + 1,
 	.volatile_reg = rt1011_volatile_register,
 	.readable_reg = rt1011_readable_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = rt1011_reg,
 	.num_reg_defaults = ARRAY_SIZE(rt1011_reg),
 	.use_single_read = true,
@@ -2194,21 +2192,21 @@ static const struct regmap_config rt1011_regmap = {
 #if defined(CONFIG_OF)
 static const struct of_device_id rt1011_of_match[] = {
 	{ .compatible = "realtek,rt1011", },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, rt1011_of_match);
 #endif
 
 #ifdef CONFIG_ACPI
 static const struct acpi_device_id rt1011_acpi_match[] = {
-	{"10EC1011", 0,},
-	{},
+	{ "10EC1011" },
+	{ }
 };
 MODULE_DEVICE_TABLE(acpi, rt1011_acpi_match);
 #endif
 
 static const struct i2c_device_id rt1011_i2c_id[] = {
-	{ "rt1011", 0 },
+	{ "rt1011" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, rt1011_i2c_id);
@@ -2483,7 +2481,7 @@ static struct i2c_driver rt1011_i2c_driver = {
 		.of_match_table = of_match_ptr(rt1011_of_match),
 		.acpi_match_table = ACPI_PTR(rt1011_acpi_match)
 	},
-	.probe_new = rt1011_i2c_probe,
+	.probe = rt1011_i2c_probe,
 	.shutdown = rt1011_i2c_shutdown,
 	.id_table = rt1011_i2c_id,
 };

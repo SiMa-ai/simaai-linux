@@ -2439,10 +2439,10 @@ static int rt5670_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	unsigned int reg_val = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		rt5670->master[dai->id] = 1;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		reg_val |= RT5670_I2S_MS_S;
 		rt5670->master[dai->id] = 0;
 		break;
@@ -2863,7 +2863,7 @@ static const struct regmap_config rt5670_regmap = {
 					       RT5670_PR_SPACING),
 	.volatile_reg = rt5670_volatile_register,
 	.readable_reg = rt5670_readable_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = rt5670_reg,
 	.num_reg_defaults = ARRAY_SIZE(rt5670_reg),
 	.ranges = rt5670_ranges,
@@ -2871,19 +2871,19 @@ static const struct regmap_config rt5670_regmap = {
 };
 
 static const struct i2c_device_id rt5670_i2c_id[] = {
-	{ "rt5670", 0 },
-	{ "rt5671", 0 },
-	{ "rt5672", 0 },
+	{ "rt5670" },
+	{ "rt5671" },
+	{ "rt5672" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, rt5670_i2c_id);
 
 #ifdef CONFIG_ACPI
 static const struct acpi_device_id rt5670_acpi_match[] = {
-	{ "10EC5670", 0},
-	{ "10EC5672", 0},
-	{ "10EC5640", 0}, /* quirk */
-	{ },
+	{ "10EC5640" }, /* quirk */
+	{ "10EC5670" },
+	{ "10EC5672" },
+	{ }
 };
 MODULE_DEVICE_TABLE(acpi, rt5670_acpi_match);
 #endif
@@ -3328,7 +3328,7 @@ static struct i2c_driver rt5670_i2c_driver = {
 		.name = "rt5670",
 		.acpi_match_table = ACPI_PTR(rt5670_acpi_match),
 	},
-	.probe_new = rt5670_i2c_probe,
+	.probe    = rt5670_i2c_probe,
 	.remove   = rt5670_i2c_remove,
 	.id_table = rt5670_i2c_id,
 };

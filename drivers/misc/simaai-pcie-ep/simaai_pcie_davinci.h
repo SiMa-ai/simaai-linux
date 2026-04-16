@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: GPL-2.0
+/**
+ * Definitions for Davinci HW offset
+ *
+ * Copyright (C) 2025 SiMa.ai
+ * Author:
+ */
+
+#ifndef _SIMA_PCIE_DAVINCI_H_
+#define _SIMA_PCIE_DAVINCI_H_
+
+#define DAV_OFF_SOC_STATUS 0x230
+
+#define DAV_OFF_SMCMD 0x200
+#define DAV_OFF_SMRSP 0x300
+
+#define DAV_OFF_SMCMD_LOW 0x228
+#define DAV_OFF_SMCMD_HIGH 0x22C
+
+#define DAV_OFF_MWQ_HEAD 0x23C
+#define DAV_OFF_MWQ_TAIL 0x33C
+#define DAV_OFF_MCQ_HEAD 0x234
+#define DAV_OFF_MCQ_TAIL 0x334
+#define DAV_OFF_MRQ_HEAD 0x208
+#define DAV_OFF_MRQ_TAIL 0x308
+
+#define DAV_OFF_DWQ012_HEAD 0x220
+#define DAV_OFF_DWQ345_HEAD 0x224
+#define DAV_OFF_DWQ012_TAIL 0x190
+#define DAV_OFF_DWQ345_TAIL 0x194
+
+#define DAV_OFF_DCQ012_HEAD 0x320
+#define DAV_OFF_DCQ345_HEAD 0x324
+#define DAV_OFF_DCQ012_TAIL 0x198
+#define DAV_OFF_DCQ345_TAIL 0x19c
+
+#define DAV_OFF_DRQ012_HEAD 0x328
+#define DAV_OFF_DRQ345_HEAD 0x32C
+#define DAV_OFF_DRQ012_TAIL 0x1a0
+#define DAV_OFF_DRQ345_TAIL 0x1a4
+
+#define DAV_OFF_NET_RXTAIL 0x31c
+#define DAV_OFF_NET_TXHEAD 0x31c
+#define DAV_OFF_NET_TXTAIL 0x21c
+#define DAV_OFF_NET_RXHEAD 0x21c
+
+#endif

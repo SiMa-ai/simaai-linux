@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0
+
+comment "Synopsys mipi dphy drivers"
+
+config DWC_MIPI_DPHY_GEN3
+        tristate "DesignWare platform support using a Gen3 D-PHY"
+        depends on VIDEO_DWC_MIPI_CSI2
+        select GENERIC_PHY
+        help
+         Synopsys MIPI D-PHY Generation 3 reference driver.
+
+          If unsure, say N.
+
+if DWC_MIPI_DPHY_GEN3
+
+config DWC_MIPI_TC_DPHY_GEN3
+        bool "Platform support using a Synopsys Test Chip"
+        help
+         Synopsys Test Chip is for prototyping purposes.
+
+         If unsure, say N.
+
+endif # DWC_MIPI_DPHY_GEN3

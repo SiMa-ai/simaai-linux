@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SIMAAI_PCIE_EP
+	tristate "SiMa.ai PCIe EP Device driver support"
+	depends on ARCH_SIMAAI
+	help
+	  Enable support for SiMa.ai PCIe EP device driver support on SoC
+

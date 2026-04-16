@@ -26,6 +26,7 @@ extern "C" {
 
 #include "system_types.h"
 #include "acamera_configuration.h"
+#include "acamera_settings.h"
 
 #define CTRL_CHANNEL_DEV_NAME "isp_control"
 #define CTRL_CHANNEL_DEV_NODE_NAME "/dev/" CTRL_CHANNEL_DEV_NAME
@@ -52,7 +53,7 @@ struct ctrl_cmd_item {
     uint32_t cmd_value;
 };
 
-int32_t ctrl_channel_init( void );
+int32_t ctrl_channel_init( acamera_settings *settings, uint8_t num_of_contexts );
 void ctrl_channel_process( void );
 void ctrl_channel_deinit( void );
 

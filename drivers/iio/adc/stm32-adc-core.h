@@ -10,6 +10,9 @@
 #ifndef __STM32_ADC_H
 #define __STM32_ADC_H
 
+#include <linux/bitfield.h>
+#include <linux/bits.h>
+
 /*
  * STM32 - ADC global register map
  * ________________________________________________________
@@ -91,6 +94,7 @@
 #define STM32H7_ADC_IER			0x04
 #define STM32H7_ADC_CR			0x08
 #define STM32H7_ADC_CFGR		0x0C
+#define STM32H7_ADC_CFGR2		0x10
 #define STM32H7_ADC_SMPR1		0x14
 #define STM32H7_ADC_SMPR2		0x18
 #define STM32H7_ADC_PCSEL		0x1C
@@ -111,6 +115,11 @@
 #define STM32MP1_ADC_VERR		0x3F4
 #define STM32MP1_ADC_IPDR		0x3F8
 #define STM32MP1_ADC_SIDR		0x3FC
+
+/* STM32MP13 - Registers for each ADC instance */
+#define STM32MP13_ADC_DIFSEL		0xB0
+#define STM32MP13_ADC_CALFACT		0xB4
+#define STM32MP13_ADC2_OR		0xC8
 
 /* STM32H7 - common registers for all ADC instances */
 #define STM32H7_ADC_CSR			(STM32_ADCX_COMN_OFFSET + 0x00)
@@ -137,6 +146,7 @@
 #define STM32H7_LINCALRDYW3		BIT(24)
 #define STM32H7_LINCALRDYW2		BIT(23)
 #define STM32H7_LINCALRDYW1		BIT(22)
+#define STM32H7_LINCALRDYW_MASK		GENMASK(27, 22)
 #define STM32H7_ADCALLIN		BIT(16)
 #define STM32H7_BOOST			BIT(8)
 #define STM32H7_ADSTP			BIT(4)
@@ -154,12 +164,22 @@
 #define STM32H7_DMNGT_SHIFT		0
 #define STM32H7_DMNGT_MASK		GENMASK(1, 0)
 
+/* STM32H7_ADC_CFGR2 bit fields */
+#define STM32H7_OVSR_MASK		GENMASK(25, 16) /* Correspond to OSVR field in datasheet */
+#define STM32H7_OVSR(v)			FIELD_PREP(STM32H7_OVSR_MASK, v)
+#define STM32H7_OVSS_MASK		GENMASK(8, 5)
+#define STM32H7_OVSS(v)			FIELD_PREP(STM32H7_OVSS_MASK, v)
+#define STM32H7_ROVSE			BIT(0)
+
 enum stm32h7_adc_dmngt {
 	STM32H7_DMNGT_DR_ONLY,		/* Regular data in DR only */
 	STM32H7_DMNGT_DMA_ONESHOT,	/* DMA one shot mode */
 	STM32H7_DMNGT_DFSDM,		/* DFSDM mode */
 	STM32H7_DMNGT_DMA_CIRC,		/* DMA circular mode */
 };
+
+/* STM32H7_ADC_DIFSEL - bit fields */
+#define STM32H7_DIFSEL_MASK		GENMASK(19, 0)
 
 /* STM32H7_ADC_CALFACT - bit fields */
 #define STM32H7_CALFACT_D_SHIFT		16
@@ -210,7 +230,35 @@ enum stm32h7_adc_dmngt {
 /* STM32MP1_ADC_SIDR - bit fields */
 #define STM32MP1_SIDR_MASK		GENMASK(31, 0)
 
+/* STM32MP13_ADC_CFGR specific bit fields */
+#define STM32MP13_DMAEN			BIT(0)
+#define STM32MP13_DMACFG		BIT(1)
+#define STM32MP13_DFSDMCFG		BIT(2)
+#define STM32MP13_RES_SHIFT		3
+#define STM32MP13_RES_MASK		GENMASK(4, 3)
+
+/* STM32MP13_ADC_CFGR2 bit fields */
+#define STM32MP13_OVSR_MASK		GENMASK(4, 2)
+#define STM32MP13_OVSR(v)		FIELD_PREP(STM32MP13_OVSR_MASK, v)
+#define STM32MP13_OVSS_MASK		GENMASK(8, 5)
+#define STM32MP13_OVSS(v)		FIELD_PREP(STM32MP13_OVSS_MASK, v)
+
+/* STM32MP13_ADC_DIFSEL - bit fields */
+#define STM32MP13_DIFSEL_MASK		GENMASK(18, 0)
+
+/* STM32MP13_ADC_CALFACT - bit fields */
+#define STM32MP13_CALFACT_D_SHIFT	16
+#define STM32MP13_CALFACT_D_MASK	GENMASK(22, 16)
+#define STM32MP13_CALFACT_S_SHIFT	0
+#define STM32MP13_CALFACT_S_MASK	GENMASK(6, 0)
+
+/* STM32MP13_ADC2_OR - bit fields */
+#define STM32MP13_OP2			BIT(2)
+#define STM32MP13_OP1			BIT(1)
+#define STM32MP13_OP0			BIT(0)
+
 #define STM32MP15_IPIDR_NUMBER		0x00110005
+#define STM32MP13_IPIDR_NUMBER		0x00110006
 
 /**
  * struct stm32_adc_common - stm32 ADC driver common data (for all instances)

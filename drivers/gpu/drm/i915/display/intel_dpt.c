@@ -5,9 +5,12 @@
 
 #include "gem/i915_gem_domain.h"
 #include "gem/i915_gem_internal.h"
+#include "gem/i915_gem_lmem.h"
 #include "gt/gen8_ppgtt.h"
 
 #include "i915_drv.h"
+#include "intel_display_core.h"
+#include "intel_display_rpm.h"
 #include "intel_display_types.h"
 #include "intel_dpt.h"
 #include "intel_fb.h"
@@ -26,11 +29,9 @@ static inline struct i915_dpt *
 i915_vm_to_dpt(struct i915_address_space *vm)
 {
 	BUILD_BUG_ON(offsetof(struct i915_dpt, vm));
-	GEM_BUG_ON(!i915_is_dpt(vm));
+	drm_WARN_ON(&vm->i915->drm, !i915_is_dpt(vm));
 	return container_of(vm, struct i915_dpt, vm);
 }
-
-#define dpt_total_entries(dpt) ((dpt)->vm.total >> PAGE_SHIFT)
 
 static void gen8_set_pte(void __iomem *addr, gen8_pte_t pte)
 {
@@ -40,24 +41,24 @@ static void gen8_set_pte(void __iomem *addr, gen8_pte_t pte)
 static void dpt_insert_page(struct i915_address_space *vm,
 			    dma_addr_t addr,
 			    u64 offset,
-			    enum i915_cache_level level,
+			    unsigned int pat_index,
 			    u32 flags)
 {
 	struct i915_dpt *dpt = i915_vm_to_dpt(vm);
 	gen8_pte_t __iomem *base = dpt->iomem;
 
 	gen8_set_pte(base + offset / I915_GTT_PAGE_SIZE,
-		     vm->pte_encode(addr, level, flags));
+		     vm->pte_encode(addr, pat_index, flags));
 }
 
 static void dpt_insert_entries(struct i915_address_space *vm,
 			       struct i915_vma_resource *vma_res,
-			       enum i915_cache_level level,
+			       unsigned int pat_index,
 			       u32 flags)
 {
 	struct i915_dpt *dpt = i915_vm_to_dpt(vm);
 	gen8_pte_t __iomem *base = dpt->iomem;
-	const gen8_pte_t pte_encode = vm->pte_encode(0, level, flags);
+	const gen8_pte_t pte_encode = vm->pte_encode(0, pat_index, flags);
 	struct sgt_iter sgt_iter;
 	dma_addr_t addr;
 	int i;
@@ -80,7 +81,7 @@ static void dpt_clear_range(struct i915_address_space *vm,
 static void dpt_bind_vma(struct i915_address_space *vm,
 			 struct i915_vm_pt_stash *stash,
 			 struct i915_vma_resource *vma_res,
-			 enum i915_cache_level cache_level,
+			 unsigned int pat_index,
 			 u32 flags)
 {
 	u32 pte_flags;
@@ -95,7 +96,7 @@ static void dpt_bind_vma(struct i915_address_space *vm,
 	if (vma_res->bi.lmem)
 		pte_flags |= PTE_LM;
 
-	vm->insert_entries(vm, vma_res, cache_level, pte_flags);
+	vm->insert_entries(vm, vma_res, pat_index, pte_flags);
 
 	vma_res->page_sizes_gtt = I915_GTT_PAGE_SIZE;
 
@@ -120,11 +121,13 @@ static void dpt_cleanup(struct i915_address_space *vm)
 	i915_gem_object_put(dpt->obj);
 }
 
-struct i915_vma *intel_dpt_pin(struct i915_address_space *vm)
+struct i915_vma *intel_dpt_pin_to_ggtt(struct i915_address_space *vm,
+				       unsigned int alignment)
 {
 	struct drm_i915_private *i915 = vm->i915;
+	struct intel_display *display = i915->display;
 	struct i915_dpt *dpt = i915_vm_to_dpt(vm);
-	intel_wakeref_t wakeref;
+	struct ref_tracker *wakeref;
 	struct i915_vma *vma;
 	void __iomem *iomem;
 	struct i915_gem_ww_ctx ww;
@@ -134,16 +137,16 @@ struct i915_vma *intel_dpt_pin(struct i915_address_space *vm)
 	if (i915_gem_object_is_stolen(dpt->obj))
 		pin_flags |= PIN_MAPPABLE;
 
-	wakeref = intel_runtime_pm_get(&i915->runtime_pm);
-	atomic_inc(&i915->gpu_error.pending_fb_pin);
+	wakeref = intel_display_rpm_get(display);
+	atomic_inc(&display->restore.pending_fb_pin);
 
 	for_i915_gem_ww(&ww, err, true) {
 		err = i915_gem_object_lock(dpt->obj, &ww);
 		if (err)
 			continue;
 
-		vma = i915_gem_object_ggtt_pin_ww(dpt->obj, &ww, NULL, 0, 4096,
-						  pin_flags);
+		vma = i915_gem_object_ggtt_pin_ww(dpt->obj, &ww, NULL, 0,
+						  alignment, pin_flags);
 		if (IS_ERR(vma)) {
 			err = PTR_ERR(vma);
 			continue;
@@ -163,13 +166,15 @@ struct i915_vma *intel_dpt_pin(struct i915_address_space *vm)
 		i915_vma_get(vma);
 	}
 
-	atomic_dec(&i915->gpu_error.pending_fb_pin);
-	intel_runtime_pm_put(&i915->runtime_pm, wakeref);
+	dpt->obj->mm.dirty = true;
+
+	atomic_dec(&display->restore.pending_fb_pin);
+	intel_display_rpm_put(display, wakeref);
 
 	return err ? ERR_PTR(err) : vma;
 }
 
-void intel_dpt_unpin(struct i915_address_space *vm)
+void intel_dpt_unpin_from_ggtt(struct i915_address_space *vm)
 {
 	struct i915_dpt *dpt = i915_vm_to_dpt(vm);
 
@@ -179,7 +184,7 @@ void intel_dpt_unpin(struct i915_address_space *vm)
 
 /**
  * intel_dpt_resume - restore the memory mapping for all DPT FBs during system resume
- * @i915: device instance
+ * @display: display device instance
  *
  * Restore the memory mapping during system resume for all framebuffers which
  * are mapped to HW via a GGTT->DPT page table. The content of these page
@@ -189,26 +194,26 @@ void intel_dpt_unpin(struct i915_address_space *vm)
  * This function must be called after the mappings in GGTT have been restored calling
  * i915_ggtt_resume().
  */
-void intel_dpt_resume(struct drm_i915_private *i915)
+void intel_dpt_resume(struct intel_display *display)
 {
 	struct drm_framebuffer *drm_fb;
 
-	if (!HAS_DISPLAY(i915))
+	if (!HAS_DISPLAY(display))
 		return;
 
-	mutex_lock(&i915->drm.mode_config.fb_lock);
-	drm_for_each_fb(drm_fb, &i915->drm) {
+	mutex_lock(&display->drm->mode_config.fb_lock);
+	drm_for_each_fb(drm_fb, display->drm) {
 		struct intel_framebuffer *fb = to_intel_framebuffer(drm_fb);
 
 		if (fb->dpt_vm)
-			i915_ggtt_resume_vm(fb->dpt_vm);
+			i915_ggtt_resume_vm(fb->dpt_vm, true);
 	}
-	mutex_unlock(&i915->drm.mode_config.fb_lock);
+	mutex_unlock(&display->drm->mode_config.fb_lock);
 }
 
 /**
  * intel_dpt_suspend - suspend the memory mapping for all DPT FBs during system suspend
- * @i915: device instance
+ * @display: display device instance
  *
  * Suspend the memory mapping during system suspend for all framebuffers which
  * are mapped to HW via a GGTT->DPT page table.
@@ -216,29 +221,29 @@ void intel_dpt_resume(struct drm_i915_private *i915)
  * This function must be called before the mappings in GGTT are suspended calling
  * i915_ggtt_suspend().
  */
-void intel_dpt_suspend(struct drm_i915_private *i915)
+void intel_dpt_suspend(struct intel_display *display)
 {
 	struct drm_framebuffer *drm_fb;
 
-	if (!HAS_DISPLAY(i915))
+	if (!HAS_DISPLAY(display))
 		return;
 
-	mutex_lock(&i915->drm.mode_config.fb_lock);
+	mutex_lock(&display->drm->mode_config.fb_lock);
 
-	drm_for_each_fb(drm_fb, &i915->drm) {
+	drm_for_each_fb(drm_fb, display->drm) {
 		struct intel_framebuffer *fb = to_intel_framebuffer(drm_fb);
 
 		if (fb->dpt_vm)
-			i915_ggtt_suspend_vm(fb->dpt_vm);
+			i915_ggtt_suspend_vm(fb->dpt_vm, true);
 	}
 
-	mutex_unlock(&i915->drm.mode_config.fb_lock);
+	mutex_unlock(&display->drm->mode_config.fb_lock);
 }
 
 struct i915_address_space *
 intel_dpt_create(struct intel_framebuffer *fb)
 {
-	struct drm_gem_object *obj = &intel_fb_obj(&fb->base)->base;
+	struct drm_gem_object *obj = intel_fb_bo(&fb->base);
 	struct drm_i915_private *i915 = to_i915(obj->dev);
 	struct drm_i915_gem_object *dpt_obj;
 	struct i915_address_space *vm;
@@ -258,7 +263,7 @@ intel_dpt_create(struct intel_framebuffer *fb)
 		dpt_obj = i915_gem_object_create_stolen(i915, size);
 	if (IS_ERR(dpt_obj) && !HAS_LMEM(i915)) {
 		drm_dbg_kms(&i915->drm, "Allocating dpt from smem\n");
-		dpt_obj = i915_gem_object_create_internal(i915, size);
+		dpt_obj = i915_gem_object_create_shmem(i915, size);
 	}
 	if (IS_ERR(dpt_obj))
 		return ERR_CAST(dpt_obj);
@@ -297,9 +302,10 @@ intel_dpt_create(struct intel_framebuffer *fb)
 	vm->vma_ops.bind_vma    = dpt_bind_vma;
 	vm->vma_ops.unbind_vma  = dpt_unbind_vma;
 
-	vm->pte_encode = gen8_ggtt_pte_encode;
+	vm->pte_encode = vm->gt->ggtt->vm.pte_encode;
 
 	dpt->obj = dpt_obj;
+	dpt->obj->is_dpt = true;
 
 	return &dpt->vm;
 }
@@ -308,5 +314,11 @@ void intel_dpt_destroy(struct i915_address_space *vm)
 {
 	struct i915_dpt *dpt = i915_vm_to_dpt(vm);
 
+	dpt->obj->is_dpt = false;
 	i915_vm_put(&dpt->vm);
+}
+
+u64 intel_dpt_offset(struct i915_vma *dpt_vma)
+{
+	return i915_vma_offset(dpt_vma);
 }

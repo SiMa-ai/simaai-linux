@@ -9,7 +9,6 @@
 #include <linux/gpio/consumer.h>
 #include <linux/slab.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/pm_qos.h>
@@ -49,10 +48,8 @@ static irqreturn_t gpio_ir_recv_irq(int irq, void *dev_id)
 	if (val >= 0)
 		ir_raw_event_store_edge(gpio_dev->rcdev, val == 1);
 
-	if (pmdev) {
-		pm_runtime_mark_last_busy(pmdev);
+	if (pmdev)
 		pm_runtime_put_autosuspend(pmdev);
-	}
 
 	return IRQ_HANDLED;
 }
@@ -74,13 +71,9 @@ static int gpio_ir_recv_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	gpio_dev->gpiod = devm_gpiod_get(dev, NULL, GPIOD_IN);
-	if (IS_ERR(gpio_dev->gpiod)) {
-		rc = PTR_ERR(gpio_dev->gpiod);
-		/* Just try again if this happens */
-		if (rc != -EPROBE_DEFER)
-			dev_err(dev, "error getting gpio (%d)\n", rc);
-		return rc;
-	}
+	if (IS_ERR(gpio_dev->gpiod))
+		return dev_err_probe(dev, PTR_ERR(gpio_dev->gpiod),
+				     "error getting gpio\n");
 	gpio_dev->irq = gpiod_to_irq(gpio_dev->gpiod);
 	if (gpio_dev->irq < 0)
 		return gpio_dev->irq;
@@ -107,6 +100,8 @@ static int gpio_ir_recv_probe(struct platform_device *pdev)
 		rcdev->map_name = RC_MAP_EMPTY;
 
 	gpio_dev->rcdev = rcdev;
+	if (of_property_read_bool(np, "wakeup-source"))
+		device_init_wakeup(dev, true);
 
 	rc = devm_rc_register_device(dev, rcdev);
 	if (rc < 0) {
@@ -130,7 +125,7 @@ static int gpio_ir_recv_probe(struct platform_device *pdev)
 				"gpio-ir-recv-irq", gpio_dev);
 }
 
-static int gpio_ir_recv_remove(struct platform_device *pdev)
+static void gpio_ir_recv_remove(struct platform_device *pdev)
 {
 	struct gpio_rc_dev *gpio_dev = platform_get_drvdata(pdev);
 	struct device *pmdev = gpio_dev->pmdev;
@@ -143,8 +138,6 @@ static int gpio_ir_recv_remove(struct platform_device *pdev)
 		pm_runtime_put_noidle(pmdev);
 		pm_runtime_set_suspended(pmdev);
 	}
-
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -209,7 +202,7 @@ static struct platform_driver gpio_ir_recv_driver = {
 	.remove = gpio_ir_recv_remove,
 	.driver = {
 		.name   = KBUILD_MODNAME,
-		.of_match_table = of_match_ptr(gpio_ir_recv_of_match),
+		.of_match_table = gpio_ir_recv_of_match,
 #ifdef CONFIG_PM
 		.pm	= &gpio_ir_recv_pm_ops,
 #endif

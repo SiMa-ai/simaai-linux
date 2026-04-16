@@ -307,7 +307,7 @@ static int pcsimaai_pconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 			offset = SIMMAAI_NVS_HYS_ADDR;
 			break;
 		case PIN_CONFIG_DRIVE_STRENGTH:
-			val = pcsimaai_pconf_mA_to_field(arg);
+			val = pcsimaai_pconf_mA_to_field(arg) << ((pin & 7) * 4);
 			mask = 0xf << ((pin & 7) * 4);
 			offset = SIMMAAI_NVS_STR_ADDR + ((pin / 8) * 4);
 			break;
@@ -459,13 +459,11 @@ static int pcnvssimaai_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int pcnvssimaai_remove(struct platform_device *pdev)
+static void pcnvssimaai_remove(struct platform_device *pdev)
 {
 	struct pcsimaai_pinctrl *pctl = platform_get_drvdata(pdev);
 
 	pinctrl_unregister(pctl->pctl);
-
-	return 0;
 }
 
 static const struct of_device_id pcnvssimaai_of_match[] = {
@@ -477,6 +475,7 @@ static const struct of_device_id pcnvssimaai_of_match[] = {
 		.compatible = "simaai,pinctrl-nvs-sdemmc",
 		.data = &sdioemmc_plat,
 	},
+	{ },
 };
 
 MODULE_DEVICE_TABLE(of, pcnvssimaai_of_match);
@@ -495,4 +494,3 @@ module_platform_driver(pcnvssimaai_driver);
 MODULE_AUTHOR("Yurii Konovalenko <yurii.konovalenko@sima.ai>");
 MODULE_DESCRIPTION("SiMa.ai NVS Pin Control Driver");
 MODULE_LICENSE("GPL");
-

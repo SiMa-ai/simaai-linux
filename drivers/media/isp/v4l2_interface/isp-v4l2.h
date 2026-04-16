@@ -36,21 +36,6 @@
 #include "isp-v4l2-ctrl.h"
 #include "isp-v4l2-stream.h"
 
-enum ISP_SUBDEVS {
-	SD_CAMERA,
-	SD_MIPI_CSI,
-	SD_MAX
-};
-
-enum MIPI_CONTROLERS {
-	MIPI_CONTROLER_0,
-	MIPI_CONTROLER_1,
-	MIPI_CONTROLER_2,
-	MIPI_CONTROLER_3,
-	MIPI_CONTROLLER_MAX
-};
-
-
 typedef struct _isp_v4l2_dev {
     /* device */
     uint32_t ctx_id;
@@ -72,12 +57,7 @@ typedef struct _isp_v4l2_dev {
     atomic_t opened;
     volatile unsigned long stream_on_mask;
     volatile unsigned long stream_open_mask;
-
-	//SIMA.AI specific
-	struct v4l2_async_notifier subdev_notifier;
-	//struct dma_chan *dma;
-	struct v4l2_async_subdev asd[SD_MAX];
-	struct v4l2_subdev *sd[SD_MAX];
+	
 } isp_v4l2_dev_t;
 
 

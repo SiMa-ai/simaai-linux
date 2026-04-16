@@ -1,22 +1,3 @@
-/*
-*
-* SPDX-License-Identifier: GPL-2.0
-*
-* Copyright (C) 2011-2021 ARM or its affiliates
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; version 2.
-* This program is distributed in the hope that it will be useful, but
-* WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-* or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
-* for more details.
-* You should have received a copy of the GNU General Public License along
-* with this program; if not, write to the Free Software Foundation, Inc.,
-* 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-*
-*/
-
 #include "sensor_api.h"  
 #include "acamera_logger.h"
 
@@ -27,11 +8,11 @@
 
 extern struct platform_device *g_pdev;
 
-// Extern functions for dummy sensor
 extern void sensor_init_dummy( void **priv, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
-// Extern functions for imx477 sensor
 extern void sensor_init_imx477( void **priv, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
 extern void sensor_init_imx678( void **priv, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
+extern void sensor_init_imx568( void **priv, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
+extern void sensor_init_og05c10( void **priv, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
 
 struct sensor_info {
 	int sensor_id;
@@ -43,6 +24,8 @@ struct sensor_info sensors[] = {
 	{0, sensor_init_dummy},
 	{1, sensor_init_imx477},
 	{2, sensor_init_imx678},
+	{3, sensor_init_imx568},
+	{4, sensor_init_og05c10}
 };
 
 uint32_t get_sensor_id(uint32_t ctx_id) {
@@ -54,7 +37,7 @@ uint32_t get_sensor_id(uint32_t ctx_id) {
 
 	port = of_graph_get_port_by_id(g_pdev->dev.of_node, ctx_id);
 	if (!port) {
-		LOG (LOG_ERR, "failed to get port by ctx id : %u", ctx_id);
+		LOG (LOG_DEBUG, "failed to get port by ctx id : %u", ctx_id);
 		return 0;
 	}
 
@@ -86,7 +69,7 @@ int8_t get_dma_index(uint32_t ctx_id) {
 
 	port = of_graph_get_port_by_id(g_pdev->dev.of_node, ctx_id);
 	if (!port) {
-		LOG (LOG_ERR, "failed to get port by ctx id : %u", ctx_id);
+		LOG (LOG_DEBUG, "failed to get port by ctx id : %u", ctx_id);
 		return -EINVAL;
 	}
 

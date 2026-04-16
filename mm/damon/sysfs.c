@@ -5,1056 +5,11 @@
  * Copyright (c) 2022 SeongJae Park <sj@kernel.org>
  */
 
-#include <linux/damon.h>
-#include <linux/kobject.h>
 #include <linux/pid.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 
-static DEFINE_MUTEX(damon_sysfs_lock);
-
-/*
- * unsigned long range directory
- */
-
-struct damon_sysfs_ul_range {
-	struct kobject kobj;
-	unsigned long min;
-	unsigned long max;
-};
-
-static struct damon_sysfs_ul_range *damon_sysfs_ul_range_alloc(
-		unsigned long min,
-		unsigned long max)
-{
-	struct damon_sysfs_ul_range *range = kmalloc(sizeof(*range),
-			GFP_KERNEL);
-
-	if (!range)
-		return NULL;
-	range->kobj = (struct kobject){};
-	range->min = min;
-	range->max = max;
-
-	return range;
-}
-
-static ssize_t min_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	struct damon_sysfs_ul_range *range = container_of(kobj,
-			struct damon_sysfs_ul_range, kobj);
-
-	return sysfs_emit(buf, "%lu\n", range->min);
-}
-
-static ssize_t min_store(struct kobject *kobj, struct kobj_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct damon_sysfs_ul_range *range = container_of(kobj,
-			struct damon_sysfs_ul_range, kobj);
-	unsigned long min;
-	int err;
-
-	err = kstrtoul(buf, 0, &min);
-	if (err)
-		return err;
-
-	range->min = min;
-	return count;
-}
-
-static ssize_t max_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	struct damon_sysfs_ul_range *range = container_of(kobj,
-			struct damon_sysfs_ul_range, kobj);
-
-	return sysfs_emit(buf, "%lu\n", range->max);
-}
-
-static ssize_t max_store(struct kobject *kobj, struct kobj_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct damon_sysfs_ul_range *range = container_of(kobj,
-			struct damon_sysfs_ul_range, kobj);
-	unsigned long max;
-	int err;
-
-	err = kstrtoul(buf, 0, &max);
-	if (err)
-		return err;
-
-	range->max = max;
-	return count;
-}
-
-static void damon_sysfs_ul_range_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct damon_sysfs_ul_range, kobj));
-}
-
-static struct kobj_attribute damon_sysfs_ul_range_min_attr =
-		__ATTR_RW_MODE(min, 0600);
-
-static struct kobj_attribute damon_sysfs_ul_range_max_attr =
-		__ATTR_RW_MODE(max, 0600);
-
-static struct attribute *damon_sysfs_ul_range_attrs[] = {
-	&damon_sysfs_ul_range_min_attr.attr,
-	&damon_sysfs_ul_range_max_attr.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(damon_sysfs_ul_range);
-
-static struct kobj_type damon_sysfs_ul_range_ktype = {
-	.release = damon_sysfs_ul_range_release,
-	.sysfs_ops = &kobj_sysfs_ops,
-	.default_groups = damon_sysfs_ul_range_groups,
-};
-
-/*
- * schemes/stats directory
- */
-
-struct damon_sysfs_stats {
-	struct kobject kobj;
-	unsigned long nr_tried;
-	unsigned long sz_tried;
-	unsigned long nr_applied;
-	unsigned long sz_applied;
-	unsigned long qt_exceeds;
-};
-
-static struct damon_sysfs_stats *damon_sysfs_stats_alloc(void)
-{
-	return kzalloc(sizeof(struct damon_sysfs_stats), GFP_KERNEL);
-}
-
-static ssize_t nr_tried_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	struct damon_sysfs_stats *stats = container_of(kobj,
-			struct damon_sysfs_stats, kobj);
-
-	return sysfs_emit(buf, "%lu\n", stats->nr_tried);
-}
-
-static ssize_t sz_tried_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	struct damon_sysfs_stats *stats = container_of(kobj,
-			struct damon_sysfs_stats, kobj);
-
-	return sysfs_emit(buf, "%lu\n", stats->sz_tried);
-}
-
-static ssize_t nr_applied_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_stats *stats = container_of(kobj,
-			struct damon_sysfs_stats, kobj);
-
-	return sysfs_emit(buf, "%lu\n", stats->nr_applied);
-}
-
-static ssize_t sz_applied_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_stats *stats = container_of(kobj,
-			struct damon_sysfs_stats, kobj);
-
-	return sysfs_emit(buf, "%lu\n", stats->sz_applied);
-}
-
-static ssize_t qt_exceeds_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_stats *stats = container_of(kobj,
-			struct damon_sysfs_stats, kobj);
-
-	return sysfs_emit(buf, "%lu\n", stats->qt_exceeds);
-}
-
-static void damon_sysfs_stats_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct damon_sysfs_stats, kobj));
-}
-
-static struct kobj_attribute damon_sysfs_stats_nr_tried_attr =
-		__ATTR_RO_MODE(nr_tried, 0400);
-
-static struct kobj_attribute damon_sysfs_stats_sz_tried_attr =
-		__ATTR_RO_MODE(sz_tried, 0400);
-
-static struct kobj_attribute damon_sysfs_stats_nr_applied_attr =
-		__ATTR_RO_MODE(nr_applied, 0400);
-
-static struct kobj_attribute damon_sysfs_stats_sz_applied_attr =
-		__ATTR_RO_MODE(sz_applied, 0400);
-
-static struct kobj_attribute damon_sysfs_stats_qt_exceeds_attr =
-		__ATTR_RO_MODE(qt_exceeds, 0400);
-
-static struct attribute *damon_sysfs_stats_attrs[] = {
-	&damon_sysfs_stats_nr_tried_attr.attr,
-	&damon_sysfs_stats_sz_tried_attr.attr,
-	&damon_sysfs_stats_nr_applied_attr.attr,
-	&damon_sysfs_stats_sz_applied_attr.attr,
-	&damon_sysfs_stats_qt_exceeds_attr.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(damon_sysfs_stats);
-
-static struct kobj_type damon_sysfs_stats_ktype = {
-	.release = damon_sysfs_stats_release,
-	.sysfs_ops = &kobj_sysfs_ops,
-	.default_groups = damon_sysfs_stats_groups,
-};
-
-/*
- * watermarks directory
- */
-
-struct damon_sysfs_watermarks {
-	struct kobject kobj;
-	enum damos_wmark_metric metric;
-	unsigned long interval_us;
-	unsigned long high;
-	unsigned long mid;
-	unsigned long low;
-};
-
-static struct damon_sysfs_watermarks *damon_sysfs_watermarks_alloc(
-		enum damos_wmark_metric metric, unsigned long interval_us,
-		unsigned long high, unsigned long mid, unsigned long low)
-{
-	struct damon_sysfs_watermarks *watermarks = kmalloc(
-			sizeof(*watermarks), GFP_KERNEL);
-
-	if (!watermarks)
-		return NULL;
-	watermarks->kobj = (struct kobject){};
-	watermarks->metric = metric;
-	watermarks->interval_us = interval_us;
-	watermarks->high = high;
-	watermarks->mid = mid;
-	watermarks->low = low;
-	return watermarks;
-}
-
-/* Should match with enum damos_wmark_metric */
-static const char * const damon_sysfs_wmark_metric_strs[] = {
-	"none",
-	"free_mem_rate",
-};
-
-static ssize_t metric_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-
-	return sysfs_emit(buf, "%s\n",
-			damon_sysfs_wmark_metric_strs[watermarks->metric]);
-}
-
-static ssize_t metric_store(struct kobject *kobj, struct kobj_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-	enum damos_wmark_metric metric;
-
-	for (metric = 0; metric < NR_DAMOS_WMARK_METRICS; metric++) {
-		if (sysfs_streq(buf, damon_sysfs_wmark_metric_strs[metric])) {
-			watermarks->metric = metric;
-			return count;
-		}
-	}
-	return -EINVAL;
-}
-
-static ssize_t interval_us_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-
-	return sysfs_emit(buf, "%lu\n", watermarks->interval_us);
-}
-
-static ssize_t interval_us_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-	int err = kstrtoul(buf, 0, &watermarks->interval_us);
-
-	return err ? err : count;
-}
-
-static ssize_t high_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-
-	return sysfs_emit(buf, "%lu\n", watermarks->high);
-}
-
-static ssize_t high_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-	int err = kstrtoul(buf, 0, &watermarks->high);
-
-	return err ? err : count;
-}
-
-static ssize_t mid_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-
-	return sysfs_emit(buf, "%lu\n", watermarks->mid);
-}
-
-static ssize_t mid_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-	int err = kstrtoul(buf, 0, &watermarks->mid);
-
-	return err ? err : count;
-}
-
-static ssize_t low_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-
-	return sysfs_emit(buf, "%lu\n", watermarks->low);
-}
-
-static ssize_t low_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
-			struct damon_sysfs_watermarks, kobj);
-	int err = kstrtoul(buf, 0, &watermarks->low);
-
-	return err ? err : count;
-}
-
-static void damon_sysfs_watermarks_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct damon_sysfs_watermarks, kobj));
-}
-
-static struct kobj_attribute damon_sysfs_watermarks_metric_attr =
-		__ATTR_RW_MODE(metric, 0600);
-
-static struct kobj_attribute damon_sysfs_watermarks_interval_us_attr =
-		__ATTR_RW_MODE(interval_us, 0600);
-
-static struct kobj_attribute damon_sysfs_watermarks_high_attr =
-		__ATTR_RW_MODE(high, 0600);
-
-static struct kobj_attribute damon_sysfs_watermarks_mid_attr =
-		__ATTR_RW_MODE(mid, 0600);
-
-static struct kobj_attribute damon_sysfs_watermarks_low_attr =
-		__ATTR_RW_MODE(low, 0600);
-
-static struct attribute *damon_sysfs_watermarks_attrs[] = {
-	&damon_sysfs_watermarks_metric_attr.attr,
-	&damon_sysfs_watermarks_interval_us_attr.attr,
-	&damon_sysfs_watermarks_high_attr.attr,
-	&damon_sysfs_watermarks_mid_attr.attr,
-	&damon_sysfs_watermarks_low_attr.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(damon_sysfs_watermarks);
-
-static struct kobj_type damon_sysfs_watermarks_ktype = {
-	.release = damon_sysfs_watermarks_release,
-	.sysfs_ops = &kobj_sysfs_ops,
-	.default_groups = damon_sysfs_watermarks_groups,
-};
-
-/*
- * scheme/weights directory
- */
-
-struct damon_sysfs_weights {
-	struct kobject kobj;
-	unsigned int sz;
-	unsigned int nr_accesses;
-	unsigned int age;
-};
-
-static struct damon_sysfs_weights *damon_sysfs_weights_alloc(unsigned int sz,
-		unsigned int nr_accesses, unsigned int age)
-{
-	struct damon_sysfs_weights *weights = kmalloc(sizeof(*weights),
-			GFP_KERNEL);
-
-	if (!weights)
-		return NULL;
-	weights->kobj = (struct kobject){};
-	weights->sz = sz;
-	weights->nr_accesses = nr_accesses;
-	weights->age = age;
-	return weights;
-}
-
-static ssize_t sz_permil_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_weights *weights = container_of(kobj,
-			struct damon_sysfs_weights, kobj);
-
-	return sysfs_emit(buf, "%u\n", weights->sz);
-}
-
-static ssize_t sz_permil_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_weights *weights = container_of(kobj,
-			struct damon_sysfs_weights, kobj);
-	int err = kstrtouint(buf, 0, &weights->sz);
-
-	return err ? err : count;
-}
-
-static ssize_t nr_accesses_permil_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_weights *weights = container_of(kobj,
-			struct damon_sysfs_weights, kobj);
-
-	return sysfs_emit(buf, "%u\n", weights->nr_accesses);
-}
-
-static ssize_t nr_accesses_permil_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_weights *weights = container_of(kobj,
-			struct damon_sysfs_weights, kobj);
-	int err = kstrtouint(buf, 0, &weights->nr_accesses);
-
-	return err ? err : count;
-}
-
-static ssize_t age_permil_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_weights *weights = container_of(kobj,
-			struct damon_sysfs_weights, kobj);
-
-	return sysfs_emit(buf, "%u\n", weights->age);
-}
-
-static ssize_t age_permil_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_weights *weights = container_of(kobj,
-			struct damon_sysfs_weights, kobj);
-	int err = kstrtouint(buf, 0, &weights->age);
-
-	return err ? err : count;
-}
-
-static void damon_sysfs_weights_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct damon_sysfs_weights, kobj));
-}
-
-static struct kobj_attribute damon_sysfs_weights_sz_attr =
-		__ATTR_RW_MODE(sz_permil, 0600);
-
-static struct kobj_attribute damon_sysfs_weights_nr_accesses_attr =
-		__ATTR_RW_MODE(nr_accesses_permil, 0600);
-
-static struct kobj_attribute damon_sysfs_weights_age_attr =
-		__ATTR_RW_MODE(age_permil, 0600);
-
-static struct attribute *damon_sysfs_weights_attrs[] = {
-	&damon_sysfs_weights_sz_attr.attr,
-	&damon_sysfs_weights_nr_accesses_attr.attr,
-	&damon_sysfs_weights_age_attr.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(damon_sysfs_weights);
-
-static struct kobj_type damon_sysfs_weights_ktype = {
-	.release = damon_sysfs_weights_release,
-	.sysfs_ops = &kobj_sysfs_ops,
-	.default_groups = damon_sysfs_weights_groups,
-};
-
-/*
- * quotas directory
- */
-
-struct damon_sysfs_quotas {
-	struct kobject kobj;
-	struct damon_sysfs_weights *weights;
-	unsigned long ms;
-	unsigned long sz;
-	unsigned long reset_interval_ms;
-};
-
-static struct damon_sysfs_quotas *damon_sysfs_quotas_alloc(void)
-{
-	return kzalloc(sizeof(struct damon_sysfs_quotas), GFP_KERNEL);
-}
-
-static int damon_sysfs_quotas_add_dirs(struct damon_sysfs_quotas *quotas)
-{
-	struct damon_sysfs_weights *weights;
-	int err;
-
-	weights = damon_sysfs_weights_alloc(0, 0, 0);
-	if (!weights)
-		return -ENOMEM;
-
-	err = kobject_init_and_add(&weights->kobj, &damon_sysfs_weights_ktype,
-			&quotas->kobj, "weights");
-	if (err)
-		kobject_put(&weights->kobj);
-	else
-		quotas->weights = weights;
-	return err;
-}
-
-static void damon_sysfs_quotas_rm_dirs(struct damon_sysfs_quotas *quotas)
-{
-	kobject_put(&quotas->weights->kobj);
-}
-
-static ssize_t ms_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	struct damon_sysfs_quotas *quotas = container_of(kobj,
-			struct damon_sysfs_quotas, kobj);
-
-	return sysfs_emit(buf, "%lu\n", quotas->ms);
-}
-
-static ssize_t ms_store(struct kobject *kobj, struct kobj_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct damon_sysfs_quotas *quotas = container_of(kobj,
-			struct damon_sysfs_quotas, kobj);
-	int err = kstrtoul(buf, 0, &quotas->ms);
-
-	if (err)
-		return -EINVAL;
-	return count;
-}
-
-static ssize_t bytes_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	struct damon_sysfs_quotas *quotas = container_of(kobj,
-			struct damon_sysfs_quotas, kobj);
-
-	return sysfs_emit(buf, "%lu\n", quotas->sz);
-}
-
-static ssize_t bytes_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_quotas *quotas = container_of(kobj,
-			struct damon_sysfs_quotas, kobj);
-	int err = kstrtoul(buf, 0, &quotas->sz);
-
-	if (err)
-		return -EINVAL;
-	return count;
-}
-
-static ssize_t reset_interval_ms_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_quotas *quotas = container_of(kobj,
-			struct damon_sysfs_quotas, kobj);
-
-	return sysfs_emit(buf, "%lu\n", quotas->reset_interval_ms);
-}
-
-static ssize_t reset_interval_ms_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_quotas *quotas = container_of(kobj,
-			struct damon_sysfs_quotas, kobj);
-	int err = kstrtoul(buf, 0, &quotas->reset_interval_ms);
-
-	if (err)
-		return -EINVAL;
-	return count;
-}
-
-static void damon_sysfs_quotas_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct damon_sysfs_quotas, kobj));
-}
-
-static struct kobj_attribute damon_sysfs_quotas_ms_attr =
-		__ATTR_RW_MODE(ms, 0600);
-
-static struct kobj_attribute damon_sysfs_quotas_sz_attr =
-		__ATTR_RW_MODE(bytes, 0600);
-
-static struct kobj_attribute damon_sysfs_quotas_reset_interval_ms_attr =
-		__ATTR_RW_MODE(reset_interval_ms, 0600);
-
-static struct attribute *damon_sysfs_quotas_attrs[] = {
-	&damon_sysfs_quotas_ms_attr.attr,
-	&damon_sysfs_quotas_sz_attr.attr,
-	&damon_sysfs_quotas_reset_interval_ms_attr.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(damon_sysfs_quotas);
-
-static struct kobj_type damon_sysfs_quotas_ktype = {
-	.release = damon_sysfs_quotas_release,
-	.sysfs_ops = &kobj_sysfs_ops,
-	.default_groups = damon_sysfs_quotas_groups,
-};
-
-/*
- * access_pattern directory
- */
-
-struct damon_sysfs_access_pattern {
-	struct kobject kobj;
-	struct damon_sysfs_ul_range *sz;
-	struct damon_sysfs_ul_range *nr_accesses;
-	struct damon_sysfs_ul_range *age;
-};
-
-static
-struct damon_sysfs_access_pattern *damon_sysfs_access_pattern_alloc(void)
-{
-	struct damon_sysfs_access_pattern *access_pattern =
-		kmalloc(sizeof(*access_pattern), GFP_KERNEL);
-
-	if (!access_pattern)
-		return NULL;
-	access_pattern->kobj = (struct kobject){};
-	return access_pattern;
-}
-
-static int damon_sysfs_access_pattern_add_range_dir(
-		struct damon_sysfs_access_pattern *access_pattern,
-		struct damon_sysfs_ul_range **range_dir_ptr,
-		char *name)
-{
-	struct damon_sysfs_ul_range *range = damon_sysfs_ul_range_alloc(0, 0);
-	int err;
-
-	if (!range)
-		return -ENOMEM;
-	err = kobject_init_and_add(&range->kobj, &damon_sysfs_ul_range_ktype,
-			&access_pattern->kobj, name);
-	if (err)
-		kobject_put(&range->kobj);
-	else
-		*range_dir_ptr = range;
-	return err;
-}
-
-static int damon_sysfs_access_pattern_add_dirs(
-		struct damon_sysfs_access_pattern *access_pattern)
-{
-	int err;
-
-	err = damon_sysfs_access_pattern_add_range_dir(access_pattern,
-			&access_pattern->sz, "sz");
-	if (err)
-		goto put_sz_out;
-
-	err = damon_sysfs_access_pattern_add_range_dir(access_pattern,
-			&access_pattern->nr_accesses, "nr_accesses");
-	if (err)
-		goto put_nr_accesses_sz_out;
-
-	err = damon_sysfs_access_pattern_add_range_dir(access_pattern,
-			&access_pattern->age, "age");
-	if (err)
-		goto put_age_nr_accesses_sz_out;
-	return 0;
-
-put_age_nr_accesses_sz_out:
-	kobject_put(&access_pattern->age->kobj);
-	access_pattern->age = NULL;
-put_nr_accesses_sz_out:
-	kobject_put(&access_pattern->nr_accesses->kobj);
-	access_pattern->nr_accesses = NULL;
-put_sz_out:
-	kobject_put(&access_pattern->sz->kobj);
-	access_pattern->sz = NULL;
-	return err;
-}
-
-static void damon_sysfs_access_pattern_rm_dirs(
-		struct damon_sysfs_access_pattern *access_pattern)
-{
-	kobject_put(&access_pattern->sz->kobj);
-	kobject_put(&access_pattern->nr_accesses->kobj);
-	kobject_put(&access_pattern->age->kobj);
-}
-
-static void damon_sysfs_access_pattern_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct damon_sysfs_access_pattern, kobj));
-}
-
-static struct attribute *damon_sysfs_access_pattern_attrs[] = {
-	NULL,
-};
-ATTRIBUTE_GROUPS(damon_sysfs_access_pattern);
-
-static struct kobj_type damon_sysfs_access_pattern_ktype = {
-	.release = damon_sysfs_access_pattern_release,
-	.sysfs_ops = &kobj_sysfs_ops,
-	.default_groups = damon_sysfs_access_pattern_groups,
-};
-
-/*
- * scheme directory
- */
-
-struct damon_sysfs_scheme {
-	struct kobject kobj;
-	enum damos_action action;
-	struct damon_sysfs_access_pattern *access_pattern;
-	struct damon_sysfs_quotas *quotas;
-	struct damon_sysfs_watermarks *watermarks;
-	struct damon_sysfs_stats *stats;
-};
-
-/* This should match with enum damos_action */
-static const char * const damon_sysfs_damos_action_strs[] = {
-	"willneed",
-	"cold",
-	"pageout",
-	"hugepage",
-	"nohugepage",
-	"lru_prio",
-	"lru_deprio",
-	"stat",
-};
-
-static struct damon_sysfs_scheme *damon_sysfs_scheme_alloc(
-		enum damos_action action)
-{
-	struct damon_sysfs_scheme *scheme = kmalloc(sizeof(*scheme),
-				GFP_KERNEL);
-
-	if (!scheme)
-		return NULL;
-	scheme->kobj = (struct kobject){};
-	scheme->action = action;
-	return scheme;
-}
-
-static int damon_sysfs_scheme_set_access_pattern(
-		struct damon_sysfs_scheme *scheme)
-{
-	struct damon_sysfs_access_pattern *access_pattern;
-	int err;
-
-	access_pattern = damon_sysfs_access_pattern_alloc();
-	if (!access_pattern)
-		return -ENOMEM;
-	err = kobject_init_and_add(&access_pattern->kobj,
-			&damon_sysfs_access_pattern_ktype, &scheme->kobj,
-			"access_pattern");
-	if (err)
-		goto out;
-	err = damon_sysfs_access_pattern_add_dirs(access_pattern);
-	if (err)
-		goto out;
-	scheme->access_pattern = access_pattern;
-	return 0;
-
-out:
-	kobject_put(&access_pattern->kobj);
-	return err;
-}
-
-static int damon_sysfs_scheme_set_quotas(struct damon_sysfs_scheme *scheme)
-{
-	struct damon_sysfs_quotas *quotas = damon_sysfs_quotas_alloc();
-	int err;
-
-	if (!quotas)
-		return -ENOMEM;
-	err = kobject_init_and_add(&quotas->kobj, &damon_sysfs_quotas_ktype,
-			&scheme->kobj, "quotas");
-	if (err)
-		goto out;
-	err = damon_sysfs_quotas_add_dirs(quotas);
-	if (err)
-		goto out;
-	scheme->quotas = quotas;
-	return 0;
-
-out:
-	kobject_put(&quotas->kobj);
-	return err;
-}
-
-static int damon_sysfs_scheme_set_watermarks(struct damon_sysfs_scheme *scheme)
-{
-	struct damon_sysfs_watermarks *watermarks =
-		damon_sysfs_watermarks_alloc(DAMOS_WMARK_NONE, 0, 0, 0, 0);
-	int err;
-
-	if (!watermarks)
-		return -ENOMEM;
-	err = kobject_init_and_add(&watermarks->kobj,
-			&damon_sysfs_watermarks_ktype, &scheme->kobj,
-			"watermarks");
-	if (err)
-		kobject_put(&watermarks->kobj);
-	else
-		scheme->watermarks = watermarks;
-	return err;
-}
-
-static int damon_sysfs_scheme_set_stats(struct damon_sysfs_scheme *scheme)
-{
-	struct damon_sysfs_stats *stats = damon_sysfs_stats_alloc();
-	int err;
-
-	if (!stats)
-		return -ENOMEM;
-	err = kobject_init_and_add(&stats->kobj, &damon_sysfs_stats_ktype,
-			&scheme->kobj, "stats");
-	if (err)
-		kobject_put(&stats->kobj);
-	else
-		scheme->stats = stats;
-	return err;
-}
-
-static int damon_sysfs_scheme_add_dirs(struct damon_sysfs_scheme *scheme)
-{
-	int err;
-
-	err = damon_sysfs_scheme_set_access_pattern(scheme);
-	if (err)
-		return err;
-	err = damon_sysfs_scheme_set_quotas(scheme);
-	if (err)
-		goto put_access_pattern_out;
-	err = damon_sysfs_scheme_set_watermarks(scheme);
-	if (err)
-		goto put_quotas_access_pattern_out;
-	err = damon_sysfs_scheme_set_stats(scheme);
-	if (err)
-		goto put_watermarks_quotas_access_pattern_out;
-	return 0;
-
-put_watermarks_quotas_access_pattern_out:
-	kobject_put(&scheme->watermarks->kobj);
-	scheme->watermarks = NULL;
-put_quotas_access_pattern_out:
-	kobject_put(&scheme->quotas->kobj);
-	scheme->quotas = NULL;
-put_access_pattern_out:
-	kobject_put(&scheme->access_pattern->kobj);
-	scheme->access_pattern = NULL;
-	return err;
-}
-
-static void damon_sysfs_scheme_rm_dirs(struct damon_sysfs_scheme *scheme)
-{
-	damon_sysfs_access_pattern_rm_dirs(scheme->access_pattern);
-	kobject_put(&scheme->access_pattern->kobj);
-	damon_sysfs_quotas_rm_dirs(scheme->quotas);
-	kobject_put(&scheme->quotas->kobj);
-	kobject_put(&scheme->watermarks->kobj);
-	kobject_put(&scheme->stats->kobj);
-}
-
-static ssize_t action_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	struct damon_sysfs_scheme *scheme = container_of(kobj,
-			struct damon_sysfs_scheme, kobj);
-
-	return sysfs_emit(buf, "%s\n",
-			damon_sysfs_damos_action_strs[scheme->action]);
-}
-
-static ssize_t action_store(struct kobject *kobj, struct kobj_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct damon_sysfs_scheme *scheme = container_of(kobj,
-			struct damon_sysfs_scheme, kobj);
-	enum damos_action action;
-
-	for (action = 0; action < NR_DAMOS_ACTIONS; action++) {
-		if (sysfs_streq(buf, damon_sysfs_damos_action_strs[action])) {
-			scheme->action = action;
-			return count;
-		}
-	}
-	return -EINVAL;
-}
-
-static void damon_sysfs_scheme_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct damon_sysfs_scheme, kobj));
-}
-
-static struct kobj_attribute damon_sysfs_scheme_action_attr =
-		__ATTR_RW_MODE(action, 0600);
-
-static struct attribute *damon_sysfs_scheme_attrs[] = {
-	&damon_sysfs_scheme_action_attr.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(damon_sysfs_scheme);
-
-static struct kobj_type damon_sysfs_scheme_ktype = {
-	.release = damon_sysfs_scheme_release,
-	.sysfs_ops = &kobj_sysfs_ops,
-	.default_groups = damon_sysfs_scheme_groups,
-};
-
-/*
- * schemes directory
- */
-
-struct damon_sysfs_schemes {
-	struct kobject kobj;
-	struct damon_sysfs_scheme **schemes_arr;
-	int nr;
-};
-
-static struct damon_sysfs_schemes *damon_sysfs_schemes_alloc(void)
-{
-	return kzalloc(sizeof(struct damon_sysfs_schemes), GFP_KERNEL);
-}
-
-static void damon_sysfs_schemes_rm_dirs(struct damon_sysfs_schemes *schemes)
-{
-	struct damon_sysfs_scheme **schemes_arr = schemes->schemes_arr;
-	int i;
-
-	for (i = 0; i < schemes->nr; i++) {
-		damon_sysfs_scheme_rm_dirs(schemes_arr[i]);
-		kobject_put(&schemes_arr[i]->kobj);
-	}
-	schemes->nr = 0;
-	kfree(schemes_arr);
-	schemes->schemes_arr = NULL;
-}
-
-static int damon_sysfs_schemes_add_dirs(struct damon_sysfs_schemes *schemes,
-		int nr_schemes)
-{
-	struct damon_sysfs_scheme **schemes_arr, *scheme;
-	int err, i;
-
-	damon_sysfs_schemes_rm_dirs(schemes);
-	if (!nr_schemes)
-		return 0;
-
-	schemes_arr = kmalloc_array(nr_schemes, sizeof(*schemes_arr),
-			GFP_KERNEL | __GFP_NOWARN);
-	if (!schemes_arr)
-		return -ENOMEM;
-	schemes->schemes_arr = schemes_arr;
-
-	for (i = 0; i < nr_schemes; i++) {
-		scheme = damon_sysfs_scheme_alloc(DAMOS_STAT);
-		if (!scheme) {
-			damon_sysfs_schemes_rm_dirs(schemes);
-			return -ENOMEM;
-		}
-
-		err = kobject_init_and_add(&scheme->kobj,
-				&damon_sysfs_scheme_ktype, &schemes->kobj,
-				"%d", i);
-		if (err)
-			goto out;
-		err = damon_sysfs_scheme_add_dirs(scheme);
-		if (err)
-			goto out;
-
-		schemes_arr[i] = scheme;
-		schemes->nr++;
-	}
-	return 0;
-
-out:
-	damon_sysfs_schemes_rm_dirs(schemes);
-	kobject_put(&scheme->kobj);
-	return err;
-}
-
-static ssize_t nr_schemes_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct damon_sysfs_schemes *schemes = container_of(kobj,
-			struct damon_sysfs_schemes, kobj);
-
-	return sysfs_emit(buf, "%d\n", schemes->nr);
-}
-
-static ssize_t nr_schemes_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct damon_sysfs_schemes *schemes;
-	int nr, err = kstrtoint(buf, 0, &nr);
-
-	if (err)
-		return err;
-	if (nr < 0)
-		return -EINVAL;
-
-	schemes = container_of(kobj, struct damon_sysfs_schemes, kobj);
-
-	if (!mutex_trylock(&damon_sysfs_lock))
-		return -EBUSY;
-	err = damon_sysfs_schemes_add_dirs(schemes, nr);
-	mutex_unlock(&damon_sysfs_lock);
-	if (err)
-		return err;
-	return count;
-}
-
-static void damon_sysfs_schemes_release(struct kobject *kobj)
-{
-	kfree(container_of(kobj, struct damon_sysfs_schemes, kobj));
-}
-
-static struct kobj_attribute damon_sysfs_schemes_nr_attr =
-		__ATTR_RW_MODE(nr_schemes, 0600);
-
-static struct attribute *damon_sysfs_schemes_attrs[] = {
-	&damon_sysfs_schemes_nr_attr.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(damon_sysfs_schemes);
-
-static struct kobj_type damon_sysfs_schemes_ktype = {
-	.release = damon_sysfs_schemes_release,
-	.sysfs_ops = &kobj_sysfs_ops,
-	.default_groups = damon_sysfs_schemes_groups,
-};
+#include "sysfs-common.h"
 
 /*
  * init region directory
@@ -1062,23 +17,12 @@ static struct kobj_type damon_sysfs_schemes_ktype = {
 
 struct damon_sysfs_region {
 	struct kobject kobj;
-	unsigned long start;
-	unsigned long end;
+	struct damon_addr_range ar;
 };
 
-static struct damon_sysfs_region *damon_sysfs_region_alloc(
-		unsigned long start,
-		unsigned long end)
+static struct damon_sysfs_region *damon_sysfs_region_alloc(void)
 {
-	struct damon_sysfs_region *region = kmalloc(sizeof(*region),
-			GFP_KERNEL);
-
-	if (!region)
-		return NULL;
-	region->kobj = (struct kobject){};
-	region->start = start;
-	region->end = end;
-	return region;
+	return kzalloc(sizeof(struct damon_sysfs_region), GFP_KERNEL);
 }
 
 static ssize_t start_show(struct kobject *kobj, struct kobj_attribute *attr,
@@ -1087,7 +31,7 @@ static ssize_t start_show(struct kobject *kobj, struct kobj_attribute *attr,
 	struct damon_sysfs_region *region = container_of(kobj,
 			struct damon_sysfs_region, kobj);
 
-	return sysfs_emit(buf, "%lu\n", region->start);
+	return sysfs_emit(buf, "%lu\n", region->ar.start);
 }
 
 static ssize_t start_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -1095,7 +39,7 @@ static ssize_t start_store(struct kobject *kobj, struct kobj_attribute *attr,
 {
 	struct damon_sysfs_region *region = container_of(kobj,
 			struct damon_sysfs_region, kobj);
-	int err = kstrtoul(buf, 0, &region->start);
+	int err = kstrtoul(buf, 0, &region->ar.start);
 
 	return err ? err : count;
 }
@@ -1106,7 +50,7 @@ static ssize_t end_show(struct kobject *kobj, struct kobj_attribute *attr,
 	struct damon_sysfs_region *region = container_of(kobj,
 			struct damon_sysfs_region, kobj);
 
-	return sysfs_emit(buf, "%lu\n", region->end);
+	return sysfs_emit(buf, "%lu\n", region->ar.end);
 }
 
 static ssize_t end_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -1114,7 +58,7 @@ static ssize_t end_store(struct kobject *kobj, struct kobj_attribute *attr,
 {
 	struct damon_sysfs_region *region = container_of(kobj,
 			struct damon_sysfs_region, kobj);
-	int err = kstrtoul(buf, 0, &region->end);
+	int err = kstrtoul(buf, 0, &region->ar.end);
 
 	return err ? err : count;
 }
@@ -1137,7 +81,7 @@ static struct attribute *damon_sysfs_region_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_region);
 
-static struct kobj_type damon_sysfs_region_ktype = {
+static const struct kobj_type damon_sysfs_region_ktype = {
 	.release = damon_sysfs_region_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_region_groups,
@@ -1187,7 +131,7 @@ static int damon_sysfs_regions_add_dirs(struct damon_sysfs_regions *regions,
 	regions->regions_arr = regions_arr;
 
 	for (i = 0; i < nr_regions; i++) {
-		region = damon_sysfs_region_alloc(0, 0);
+		region = damon_sysfs_region_alloc();
 		if (!region) {
 			damon_sysfs_regions_rm_dirs(regions);
 			return -ENOMEM;
@@ -1254,7 +198,7 @@ static struct attribute *damon_sysfs_regions_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_regions);
 
-static struct kobj_type damon_sysfs_regions_ktype = {
+static const struct kobj_type damon_sysfs_regions_ktype = {
 	.release = damon_sysfs_regions_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_regions_groups,
@@ -1333,7 +277,7 @@ static struct attribute *damon_sysfs_target_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_target);
 
-static struct kobj_type damon_sysfs_target_ktype = {
+static const struct kobj_type damon_sysfs_target_ktype = {
 	.release = damon_sysfs_target_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_target_groups,
@@ -1458,10 +402,168 @@ static struct attribute *damon_sysfs_targets_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_targets);
 
-static struct kobj_type damon_sysfs_targets_ktype = {
+static const struct kobj_type damon_sysfs_targets_ktype = {
 	.release = damon_sysfs_targets_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_targets_groups,
+};
+
+/*
+ * intervals goal directory
+ */
+
+struct damon_sysfs_intervals_goal {
+	struct kobject kobj;
+	unsigned long access_bp;
+	unsigned long aggrs;
+	unsigned long min_sample_us;
+	unsigned long max_sample_us;
+};
+
+static struct damon_sysfs_intervals_goal *damon_sysfs_intervals_goal_alloc(
+		unsigned long access_bp, unsigned long aggrs,
+		unsigned long min_sample_us, unsigned long max_sample_us)
+{
+	struct damon_sysfs_intervals_goal *goal = kmalloc(sizeof(*goal),
+			GFP_KERNEL);
+
+	if (!goal)
+		return NULL;
+
+	goal->kobj = (struct kobject){};
+	goal->access_bp = access_bp;
+	goal->aggrs = aggrs;
+	goal->min_sample_us = min_sample_us;
+	goal->max_sample_us = max_sample_us;
+	return goal;
+}
+
+static ssize_t access_bp_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct damon_sysfs_intervals_goal *goal = container_of(kobj,
+			struct damon_sysfs_intervals_goal, kobj);
+
+	return sysfs_emit(buf, "%lu\n", goal->access_bp);
+}
+
+static ssize_t access_bp_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct damon_sysfs_intervals_goal *goal = container_of(kobj,
+			struct damon_sysfs_intervals_goal, kobj);
+	unsigned long nr;
+	int err = kstrtoul(buf, 0, &nr);
+
+	if (err)
+		return err;
+
+	goal->access_bp = nr;
+	return count;
+}
+
+static ssize_t aggrs_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct damon_sysfs_intervals_goal *goal = container_of(kobj,
+			struct damon_sysfs_intervals_goal, kobj);
+
+	return sysfs_emit(buf, "%lu\n", goal->aggrs);
+}
+
+static ssize_t aggrs_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct damon_sysfs_intervals_goal *goal = container_of(kobj,
+			struct damon_sysfs_intervals_goal, kobj);
+	unsigned long nr;
+	int err = kstrtoul(buf, 0, &nr);
+
+	if (err)
+		return err;
+
+	goal->aggrs = nr;
+	return count;
+}
+
+static ssize_t min_sample_us_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct damon_sysfs_intervals_goal *goal = container_of(kobj,
+			struct damon_sysfs_intervals_goal, kobj);
+
+	return sysfs_emit(buf, "%lu\n", goal->min_sample_us);
+}
+
+static ssize_t min_sample_us_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct damon_sysfs_intervals_goal *goal = container_of(kobj,
+			struct damon_sysfs_intervals_goal, kobj);
+	unsigned long nr;
+	int err = kstrtoul(buf, 0, &nr);
+
+	if (err)
+		return err;
+
+	goal->min_sample_us = nr;
+	return count;
+}
+
+static ssize_t max_sample_us_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct damon_sysfs_intervals_goal *goal = container_of(kobj,
+			struct damon_sysfs_intervals_goal, kobj);
+
+	return sysfs_emit(buf, "%lu\n", goal->max_sample_us);
+}
+
+static ssize_t max_sample_us_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct damon_sysfs_intervals_goal *goal = container_of(kobj,
+			struct damon_sysfs_intervals_goal, kobj);
+	unsigned long nr;
+	int err = kstrtoul(buf, 0, &nr);
+
+	if (err)
+		return err;
+
+	goal->max_sample_us = nr;
+	return count;
+}
+
+static void damon_sysfs_intervals_goal_release(struct kobject *kobj)
+{
+	kfree(container_of(kobj, struct damon_sysfs_intervals_goal, kobj));
+}
+
+static struct kobj_attribute damon_sysfs_intervals_goal_access_bp_attr =
+		__ATTR_RW_MODE(access_bp, 0600);
+
+static struct kobj_attribute damon_sysfs_intervals_goal_aggrs_attr =
+		__ATTR_RW_MODE(aggrs, 0600);
+
+static struct kobj_attribute damon_sysfs_intervals_goal_min_sample_us_attr =
+		__ATTR_RW_MODE(min_sample_us, 0600);
+
+static struct kobj_attribute damon_sysfs_intervals_goal_max_sample_us_attr =
+		__ATTR_RW_MODE(max_sample_us, 0600);
+
+static struct attribute *damon_sysfs_intervals_goal_attrs[] = {
+	&damon_sysfs_intervals_goal_access_bp_attr.attr,
+	&damon_sysfs_intervals_goal_aggrs_attr.attr,
+	&damon_sysfs_intervals_goal_min_sample_us_attr.attr,
+	&damon_sysfs_intervals_goal_max_sample_us_attr.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(damon_sysfs_intervals_goal);
+
+static const struct kobj_type damon_sysfs_intervals_goal_ktype = {
+	.release = damon_sysfs_intervals_goal_release,
+	.sysfs_ops = &kobj_sysfs_ops,
+	.default_groups = damon_sysfs_intervals_goal_groups,
 };
 
 /*
@@ -1473,6 +575,7 @@ struct damon_sysfs_intervals {
 	unsigned long sample_us;
 	unsigned long aggr_us;
 	unsigned long update_us;
+	struct damon_sysfs_intervals_goal *intervals_goal;
 };
 
 static struct damon_sysfs_intervals *damon_sysfs_intervals_alloc(
@@ -1490,6 +593,32 @@ static struct damon_sysfs_intervals *damon_sysfs_intervals_alloc(
 	intervals->aggr_us = aggr_us;
 	intervals->update_us = update_us;
 	return intervals;
+}
+
+static int damon_sysfs_intervals_add_dirs(struct damon_sysfs_intervals *intervals)
+{
+	struct damon_sysfs_intervals_goal *goal;
+	int err;
+
+	goal = damon_sysfs_intervals_goal_alloc(0, 0, 0, 0);
+	if (!goal)
+		return -ENOMEM;
+
+	err = kobject_init_and_add(&goal->kobj,
+			&damon_sysfs_intervals_goal_ktype, &intervals->kobj,
+			"intervals_goal");
+	if (err) {
+		kobject_put(&goal->kobj);
+		intervals->intervals_goal = NULL;
+		return err;
+	}
+	intervals->intervals_goal = goal;
+	return 0;
+}
+
+static void damon_sysfs_intervals_rm_dirs(struct damon_sysfs_intervals *intervals)
+{
+	kobject_put(&intervals->intervals_goal->kobj);
 }
 
 static ssize_t sample_us_show(struct kobject *kobj,
@@ -1586,7 +715,7 @@ static struct attribute *damon_sysfs_intervals_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_intervals);
 
-static struct kobj_type damon_sysfs_intervals_ktype = {
+static const struct kobj_type damon_sysfs_intervals_ktype = {
 	.release = damon_sysfs_intervals_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_intervals_groups,
@@ -1627,6 +756,9 @@ static int damon_sysfs_attrs_add_dirs(struct damon_sysfs_attrs *attrs)
 			"intervals");
 	if (err)
 		goto put_intervals_out;
+	err = damon_sysfs_intervals_add_dirs(intervals);
+	if (err)
+		goto put_intervals_out;
 	attrs->intervals = intervals;
 
 	nr_regions_range = damon_sysfs_ul_range_alloc(10, 1000);
@@ -1655,6 +787,7 @@ put_intervals_out:
 static void damon_sysfs_attrs_rm_dirs(struct damon_sysfs_attrs *attrs)
 {
 	kobject_put(&attrs->nr_regions_range->kobj);
+	damon_sysfs_intervals_rm_dirs(attrs->intervals);
 	kobject_put(&attrs->intervals->kobj);
 }
 
@@ -1668,7 +801,7 @@ static struct attribute *damon_sysfs_attrs_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_attrs);
 
-static struct kobj_type damon_sysfs_attrs_ktype = {
+static const struct kobj_type damon_sysfs_attrs_ktype = {
 	.release = damon_sysfs_attrs_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_attrs_groups,
@@ -1678,16 +811,30 @@ static struct kobj_type damon_sysfs_attrs_ktype = {
  * context directory
  */
 
-/* This should match with enum damon_ops_id */
-static const char * const damon_sysfs_ops_strs[] = {
-	"vaddr",
-	"fvaddr",
-	"paddr",
+struct damon_sysfs_ops_name {
+	enum damon_ops_id ops_id;
+	char *name;
+};
+
+static const struct damon_sysfs_ops_name damon_sysfs_ops_names[] = {
+	{
+		.ops_id = DAMON_OPS_VADDR,
+		.name = "vaddr",
+	},
+	{
+		.ops_id = DAMON_OPS_FVADDR,
+		.name = "fvaddr",
+	},
+	{
+		.ops_id = DAMON_OPS_PADDR,
+		.name = "paddr",
+	},
 };
 
 struct damon_sysfs_context {
 	struct kobject kobj;
 	enum damon_ops_id ops_id;
+	unsigned long addr_unit;
 	struct damon_sysfs_attrs *attrs;
 	struct damon_sysfs_targets *targets;
 	struct damon_sysfs_schemes *schemes;
@@ -1703,6 +850,7 @@ static struct damon_sysfs_context *damon_sysfs_context_alloc(
 		return NULL;
 	context->kobj = (struct kobject){};
 	context->ops_id = ops_id;
+	context->addr_unit = 1;
 	return context;
 }
 
@@ -1801,14 +949,16 @@ static void damon_sysfs_context_rm_dirs(struct damon_sysfs_context *context)
 static ssize_t avail_operations_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	enum damon_ops_id id;
 	int len = 0;
+	int i;
 
-	for (id = 0; id < NR_DAMON_OPS; id++) {
-		if (!damon_is_registered_ops(id))
+	for (i = 0; i < ARRAY_SIZE(damon_sysfs_ops_names); i++) {
+		const struct damon_sysfs_ops_name *ops_name;
+
+		ops_name = &damon_sysfs_ops_names[i];
+		if (!damon_is_registered_ops(ops_name->ops_id))
 			continue;
-		len += sysfs_emit_at(buf, len, "%s\n",
-				damon_sysfs_ops_strs[id]);
+		len += sysfs_emit_at(buf, len, "%s\n", ops_name->name);
 	}
 	return len;
 }
@@ -1818,8 +968,16 @@ static ssize_t operations_show(struct kobject *kobj,
 {
 	struct damon_sysfs_context *context = container_of(kobj,
 			struct damon_sysfs_context, kobj);
+	int i;
 
-	return sysfs_emit(buf, "%s\n", damon_sysfs_ops_strs[context->ops_id]);
+	for (i = 0; i < ARRAY_SIZE(damon_sysfs_ops_names); i++) {
+		const struct damon_sysfs_ops_name *ops_name;
+
+		ops_name = &damon_sysfs_ops_names[i];
+		if (ops_name->ops_id == context->ops_id)
+			return sysfs_emit(buf, "%s\n", ops_name->name);
+	}
+	return -EINVAL;
 }
 
 static ssize_t operations_store(struct kobject *kobj,
@@ -1827,15 +985,44 @@ static ssize_t operations_store(struct kobject *kobj,
 {
 	struct damon_sysfs_context *context = container_of(kobj,
 			struct damon_sysfs_context, kobj);
-	enum damon_ops_id id;
+	int i;
 
-	for (id = 0; id < NR_DAMON_OPS; id++) {
-		if (sysfs_streq(buf, damon_sysfs_ops_strs[id])) {
-			context->ops_id = id;
+	for (i = 0; i < ARRAY_SIZE(damon_sysfs_ops_names); i++) {
+		const struct damon_sysfs_ops_name *ops_name;
+
+		ops_name = &damon_sysfs_ops_names[i];
+		if (sysfs_streq(buf, ops_name->name)) {
+			context->ops_id = ops_name->ops_id;
 			return count;
 		}
 	}
 	return -EINVAL;
+}
+
+static ssize_t addr_unit_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct damon_sysfs_context *context = container_of(kobj,
+			struct damon_sysfs_context, kobj);
+
+	return sysfs_emit(buf, "%lu\n", context->addr_unit);
+}
+
+static ssize_t addr_unit_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct damon_sysfs_context *context = container_of(kobj,
+			struct damon_sysfs_context, kobj);
+	unsigned long input_addr_unit;
+	int err = kstrtoul(buf, 0, &input_addr_unit);
+
+	if (err)
+		return err;
+	if (!input_addr_unit)
+		return -EINVAL;
+
+	context->addr_unit = input_addr_unit;
+	return count;
 }
 
 static void damon_sysfs_context_release(struct kobject *kobj)
@@ -1849,14 +1036,18 @@ static struct kobj_attribute damon_sysfs_context_avail_operations_attr =
 static struct kobj_attribute damon_sysfs_context_operations_attr =
 		__ATTR_RW_MODE(operations, 0600);
 
+static struct kobj_attribute damon_sysfs_context_addr_unit_attr =
+		__ATTR_RW_MODE(addr_unit, 0600);
+
 static struct attribute *damon_sysfs_context_attrs[] = {
 	&damon_sysfs_context_avail_operations_attr.attr,
 	&damon_sysfs_context_operations_attr.attr,
+	&damon_sysfs_context_addr_unit_attr.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(damon_sysfs_context);
 
-static struct kobj_type damon_sysfs_context_ktype = {
+static const struct kobj_type damon_sysfs_context_ktype = {
 	.release = damon_sysfs_context_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_context_groups,
@@ -1982,7 +1173,7 @@ static struct attribute *damon_sysfs_contexts_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_contexts);
 
-static struct kobj_type damon_sysfs_contexts_ktype = {
+static const struct kobj_type damon_sysfs_contexts_ktype = {
 	.release = damon_sysfs_contexts_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_contexts_groups,
@@ -1996,6 +1187,7 @@ struct damon_sysfs_kdamond {
 	struct kobject kobj;
 	struct damon_sysfs_contexts *contexts;
 	struct damon_ctx *damon_ctx;
+	unsigned int refresh_ms;
 };
 
 static struct damon_sysfs_kdamond *damon_sysfs_kdamond_alloc(void)
@@ -2030,16 +1222,6 @@ static void damon_sysfs_kdamond_rm_dirs(struct damon_sysfs_kdamond *kdamond)
 	kobject_put(&kdamond->contexts->kobj);
 }
 
-static bool damon_sysfs_ctx_running(struct damon_ctx *ctx)
-{
-	bool running;
-
-	mutex_lock(&ctx->kdamond_lock);
-	running = ctx->kdamond != NULL;
-	mutex_unlock(&ctx->kdamond_lock);
-	return running;
-}
-
 /*
  * enum damon_sysfs_cmd - Commands for a specific kdamond.
  */
@@ -2051,10 +1233,40 @@ enum damon_sysfs_cmd {
 	/* @DAMON_SYSFS_CMD_COMMIT: Update kdamond inputs. */
 	DAMON_SYSFS_CMD_COMMIT,
 	/*
+	 * @DAMON_SYSFS_CMD_COMMIT_SCHEMES_QUOTA_GOALS: Commit the quota goals
+	 * to DAMON.
+	 */
+	DAMON_SYSFS_CMD_COMMIT_SCHEMES_QUOTA_GOALS,
+	/*
 	 * @DAMON_SYSFS_CMD_UPDATE_SCHEMES_STATS: Update scheme stats sysfs
 	 * files.
 	 */
 	DAMON_SYSFS_CMD_UPDATE_SCHEMES_STATS,
+	/*
+	 * @DAMON_SYSFS_CMD_UPDATE_SCHEMES_TRIED_BYTES: Update
+	 * tried_regions/total_bytes sysfs files for each scheme.
+	 */
+	DAMON_SYSFS_CMD_UPDATE_SCHEMES_TRIED_BYTES,
+	/*
+	 * @DAMON_SYSFS_CMD_UPDATE_SCHEMES_TRIED_REGIONS: Update schemes tried
+	 * regions
+	 */
+	DAMON_SYSFS_CMD_UPDATE_SCHEMES_TRIED_REGIONS,
+	/*
+	 * @DAMON_SYSFS_CMD_CLEAR_SCHEMES_TRIED_REGIONS: Clear schemes tried
+	 * regions
+	 */
+	DAMON_SYSFS_CMD_CLEAR_SCHEMES_TRIED_REGIONS,
+	/*
+	 * @DAMON_SYSFS_CMD_UPDATE_SCHEMES_EFFECTIVE_QUOTAS: Update the
+	 * effective size quota of the scheme in bytes.
+	 */
+	DAMON_SYSFS_CMD_UPDATE_SCHEMES_EFFECTIVE_QUOTAS,
+	/*
+	 * @DAMON_SYSFS_CMD_UPDATE_TUNED_INTERVALS: Update the tuned monitoring
+	 * intevals.
+	 */
+	DAMON_SYSFS_CMD_UPDATE_TUNED_INTERVALS,
 	/*
 	 * @NR_DAMON_SYSFS_CMDS: Total number of DAMON sysfs commands.
 	 */
@@ -2066,40 +1278,31 @@ static const char * const damon_sysfs_cmd_strs[] = {
 	"on",
 	"off",
 	"commit",
+	"commit_schemes_quota_goals",
 	"update_schemes_stats",
+	"update_schemes_tried_bytes",
+	"update_schemes_tried_regions",
+	"clear_schemes_tried_regions",
+	"update_schemes_effective_quotas",
+	"update_tuned_intervals",
 };
-
-/*
- * struct damon_sysfs_cmd_request - A request to the DAMON callback.
- * @cmd:	The command that needs to be handled by the callback.
- * @kdamond:	The kobject wrapper that associated to the kdamond thread.
- *
- * This structure represents a sysfs command request that need to access some
- * DAMON context-internal data.  Because DAMON context-internal data can be
- * safely accessed from DAMON callbacks without additional synchronization, the
- * request will be handled by the DAMON callback.  None-``NULL`` @kdamond means
- * the request is valid.
- */
-struct damon_sysfs_cmd_request {
-	enum damon_sysfs_cmd cmd;
-	struct damon_sysfs_kdamond *kdamond;
-};
-
-/* Current DAMON callback request.  Protected by damon_sysfs_lock. */
-static struct damon_sysfs_cmd_request damon_sysfs_cmd_request;
 
 static ssize_t state_show(struct kobject *kobj, struct kobj_attribute *attr,
 		char *buf)
 {
 	struct damon_sysfs_kdamond *kdamond = container_of(kobj,
 			struct damon_sysfs_kdamond, kobj);
-	struct damon_ctx *ctx = kdamond->damon_ctx;
-	bool running;
+	struct damon_ctx *ctx;
+	bool running = false;
 
-	if (!ctx)
-		running = false;
-	else
-		running = damon_sysfs_ctx_running(ctx);
+	if (!mutex_trylock(&damon_sysfs_lock))
+		return -EBUSY;
+
+	ctx = kdamond->damon_ctx;
+	if (ctx)
+		running = damon_is_running(ctx);
+
+	mutex_unlock(&damon_sysfs_lock);
 
 	return sysfs_emit(buf, "%s\n", running ?
 			damon_sysfs_cmd_strs[DAMON_SYSFS_CMD_ON] :
@@ -2110,11 +1313,18 @@ static int damon_sysfs_set_attrs(struct damon_ctx *ctx,
 		struct damon_sysfs_attrs *sys_attrs)
 {
 	struct damon_sysfs_intervals *sys_intervals = sys_attrs->intervals;
+	struct damon_sysfs_intervals_goal *sys_goal =
+		sys_intervals->intervals_goal;
 	struct damon_sysfs_ul_range *sys_nr_regions =
 		sys_attrs->nr_regions_range;
 	struct damon_attrs attrs = {
 		.sample_interval = sys_intervals->sample_us,
 		.aggr_interval = sys_intervals->aggr_us,
+		.intervals_goal = {
+			.access_bp = sys_goal->access_bp,
+			.aggrs = sys_goal->aggrs,
+			.min_sample_us = sys_goal->min_sample_us,
+			.max_sample_us = sys_goal->max_sample_us},
 		.ops_update_interval = sys_intervals->update_us,
 		.min_nr_regions = sys_nr_regions->min,
 		.max_nr_regions = sys_nr_regions->max,
@@ -2122,20 +1332,9 @@ static int damon_sysfs_set_attrs(struct damon_ctx *ctx,
 	return damon_set_attrs(ctx, &attrs);
 }
 
-static void damon_sysfs_destroy_targets(struct damon_ctx *ctx)
-{
-	struct damon_target *t, *next;
-	bool has_pid = damon_target_has_pid(ctx);
-
-	damon_for_each_target_safe(t, next, ctx) {
-		if (has_pid)
-			put_pid(t->pid);
-		damon_destroy_target(t);
-	}
-}
-
 static int damon_sysfs_set_regions(struct damon_target *t,
-		struct damon_sysfs_regions *sysfs_regions)
+		struct damon_sysfs_regions *sysfs_regions,
+		unsigned long min_sz_region)
 {
 	struct damon_addr_range *ranges = kmalloc_array(sysfs_regions->nr,
 			sizeof(*ranges), GFP_KERNEL | __GFP_NOWARN);
@@ -2147,17 +1346,17 @@ static int damon_sysfs_set_regions(struct damon_target *t,
 		struct damon_sysfs_region *sys_region =
 			sysfs_regions->regions_arr[i];
 
-		if (sys_region->start > sys_region->end)
+		if (sys_region->ar.start > sys_region->ar.end)
 			goto out;
 
-		ranges[i].start = sys_region->start;
-		ranges[i].end = sys_region->end;
+		ranges[i].start = sys_region->ar.start;
+		ranges[i].end = sys_region->ar.end;
 		if (i == 0)
 			continue;
 		if (ranges[i - 1].end > ranges[i].start)
 			goto out;
 	}
-	err = damon_set_regions(t, ranges, sysfs_regions->nr);
+	err = damon_set_regions(t, ranges, sysfs_regions->nr, min_sz_region);
 out:
 	kfree(ranges);
 	return err;
@@ -2168,7 +1367,6 @@ static int damon_sysfs_add_target(struct damon_sysfs_target *sys_target,
 		struct damon_ctx *ctx)
 {
 	struct damon_target *t = damon_new_target();
-	int err = -EINVAL;
 
 	if (!t)
 		return -ENOMEM;
@@ -2176,52 +1374,13 @@ static int damon_sysfs_add_target(struct damon_sysfs_target *sys_target,
 	if (damon_target_has_pid(ctx)) {
 		t->pid = find_get_pid(sys_target->pid);
 		if (!t->pid)
-			goto destroy_targets_out;
+			/* caller will destroy targets */
+			return -EINVAL;
 	}
-	err = damon_sysfs_set_regions(t, sys_target->regions);
-	if (err)
-		goto destroy_targets_out;
-	return 0;
-
-destroy_targets_out:
-	damon_sysfs_destroy_targets(ctx);
-	return err;
+	return damon_sysfs_set_regions(t, sys_target->regions, ctx->min_sz_region);
 }
 
-/*
- * Search a target in a context that corresponds to the sysfs target input.
- *
- * Return: pointer to the target if found, NULL if not found, or negative
- * error code if the search failed.
- */
-static struct damon_target *damon_sysfs_existing_target(
-		struct damon_sysfs_target *sys_target, struct damon_ctx *ctx)
-{
-	struct pid *pid;
-	struct damon_target *t;
-
-	if (!damon_target_has_pid(ctx)) {
-		/* Up to only one target for paddr could exist */
-		damon_for_each_target(t, ctx)
-			return t;
-		return NULL;
-	}
-
-	/* ops.id should be DAMON_OPS_VADDR or DAMON_OPS_FVADDR */
-	pid = find_get_pid(sys_target->pid);
-	if (!pid)
-		return ERR_PTR(-EINVAL);
-	damon_for_each_target(t, ctx) {
-		if (t->pid == pid) {
-			put_pid(pid);
-			return t;
-		}
-	}
-	put_pid(pid);
-	return NULL;
-}
-
-static int damon_sysfs_set_targets(struct damon_ctx *ctx,
+static int damon_sysfs_add_targets(struct damon_ctx *ctx,
 		struct damon_sysfs_targets *sysfs_targets)
 {
 	int i, err;
@@ -2232,166 +1391,31 @@ static int damon_sysfs_set_targets(struct damon_ctx *ctx,
 
 	for (i = 0; i < sysfs_targets->nr; i++) {
 		struct damon_sysfs_target *st = sysfs_targets->targets_arr[i];
-		struct damon_target *t = damon_sysfs_existing_target(st, ctx);
 
-		if (IS_ERR(t))
-			return PTR_ERR(t);
-		if (!t)
-			err = damon_sysfs_add_target(st, ctx);
-		else
-			err = damon_sysfs_set_regions(t, st->regions);
+		err = damon_sysfs_add_target(st, ctx);
 		if (err)
 			return err;
 	}
 	return 0;
 }
 
-static struct damos *damon_sysfs_mk_scheme(
-		struct damon_sysfs_scheme *sysfs_scheme)
-{
-	struct damon_sysfs_access_pattern *access_pattern =
-		sysfs_scheme->access_pattern;
-	struct damon_sysfs_quotas *sysfs_quotas = sysfs_scheme->quotas;
-	struct damon_sysfs_weights *sysfs_weights = sysfs_quotas->weights;
-	struct damon_sysfs_watermarks *sysfs_wmarks = sysfs_scheme->watermarks;
-
-	struct damos_access_pattern pattern = {
-		.min_sz_region = access_pattern->sz->min,
-		.max_sz_region = access_pattern->sz->max,
-		.min_nr_accesses = access_pattern->nr_accesses->min,
-		.max_nr_accesses = access_pattern->nr_accesses->max,
-		.min_age_region = access_pattern->age->min,
-		.max_age_region = access_pattern->age->max,
-	};
-	struct damos_quota quota = {
-		.ms = sysfs_quotas->ms,
-		.sz = sysfs_quotas->sz,
-		.reset_interval = sysfs_quotas->reset_interval_ms,
-		.weight_sz = sysfs_weights->sz,
-		.weight_nr_accesses = sysfs_weights->nr_accesses,
-		.weight_age = sysfs_weights->age,
-	};
-	struct damos_watermarks wmarks = {
-		.metric = sysfs_wmarks->metric,
-		.interval = sysfs_wmarks->interval_us,
-		.high = sysfs_wmarks->high,
-		.mid = sysfs_wmarks->mid,
-		.low = sysfs_wmarks->low,
-	};
-
-	return damon_new_scheme(&pattern, sysfs_scheme->action, &quota,
-			&wmarks);
-}
-
-static void damon_sysfs_update_scheme(struct damos *scheme,
-		struct damon_sysfs_scheme *sysfs_scheme)
-{
-	struct damon_sysfs_access_pattern *access_pattern =
-		sysfs_scheme->access_pattern;
-	struct damon_sysfs_quotas *sysfs_quotas = sysfs_scheme->quotas;
-	struct damon_sysfs_weights *sysfs_weights = sysfs_quotas->weights;
-	struct damon_sysfs_watermarks *sysfs_wmarks = sysfs_scheme->watermarks;
-
-	scheme->pattern.min_sz_region = access_pattern->sz->min;
-	scheme->pattern.max_sz_region = access_pattern->sz->max;
-	scheme->pattern.min_nr_accesses = access_pattern->nr_accesses->min;
-	scheme->pattern.max_nr_accesses = access_pattern->nr_accesses->max;
-	scheme->pattern.min_age_region = access_pattern->age->min;
-	scheme->pattern.max_age_region = access_pattern->age->max;
-
-	scheme->action = sysfs_scheme->action;
-
-	scheme->quota.ms = sysfs_quotas->ms;
-	scheme->quota.sz = sysfs_quotas->sz;
-	scheme->quota.reset_interval = sysfs_quotas->reset_interval_ms;
-	scheme->quota.weight_sz = sysfs_weights->sz;
-	scheme->quota.weight_nr_accesses = sysfs_weights->nr_accesses;
-	scheme->quota.weight_age = sysfs_weights->age;
-
-	scheme->wmarks.metric = sysfs_wmarks->metric;
-	scheme->wmarks.interval = sysfs_wmarks->interval_us;
-	scheme->wmarks.high = sysfs_wmarks->high;
-	scheme->wmarks.mid = sysfs_wmarks->mid;
-	scheme->wmarks.low = sysfs_wmarks->low;
-}
-
-static int damon_sysfs_set_schemes(struct damon_ctx *ctx,
-		struct damon_sysfs_schemes *sysfs_schemes)
-{
-	struct damos *scheme, *next;
-	int i = 0;
-
-	damon_for_each_scheme_safe(scheme, next, ctx) {
-		if (i < sysfs_schemes->nr)
-			damon_sysfs_update_scheme(scheme,
-					sysfs_schemes->schemes_arr[i]);
-		else
-			damon_destroy_scheme(scheme);
-		i++;
-	}
-
-	for (; i < sysfs_schemes->nr; i++) {
-		struct damos *scheme, *next;
-
-		scheme = damon_sysfs_mk_scheme(sysfs_schemes->schemes_arr[i]);
-		if (!scheme) {
-			damon_for_each_scheme_safe(scheme, next, ctx)
-				damon_destroy_scheme(scheme);
-			return -ENOMEM;
-		}
-		damon_add_scheme(ctx, scheme);
-	}
-	return 0;
-}
-
-static void damon_sysfs_before_terminate(struct damon_ctx *ctx)
-{
-	struct damon_target *t, *next;
-
-	if (!damon_target_has_pid(ctx))
-		return;
-
-	mutex_lock(&ctx->kdamond_lock);
-	damon_for_each_target_safe(t, next, ctx) {
-		put_pid(t->pid);
-		damon_destroy_target(t);
-	}
-	mutex_unlock(&ctx->kdamond_lock);
-}
-
 /*
  * damon_sysfs_upd_schemes_stats() - Update schemes stats sysfs files.
- * @kdamond:	The kobject wrapper that associated to the kdamond thread.
+ * @data:	The kobject wrapper that associated to the kdamond thread.
  *
  * This function reads the schemes stats of specific kdamond and update the
  * related values for sysfs files.  This function should be called from DAMON
- * callbacks while holding ``damon_syfs_lock``, to safely access the DAMON
- * contexts-internal data and DAMON sysfs variables.
+ * worker thread,to safely access the DAMON contexts-internal data.  Caller
+ * should also ensure holding ``damon_syfs_lock``, and ->damon_ctx of @data is
+ * not NULL but a valid pointer, to safely access DAMON sysfs variables.
  */
-static int damon_sysfs_upd_schemes_stats(struct damon_sysfs_kdamond *kdamond)
+static int damon_sysfs_upd_schemes_stats(void *data)
 {
+	struct damon_sysfs_kdamond *kdamond = data;
 	struct damon_ctx *ctx = kdamond->damon_ctx;
-	struct damon_sysfs_schemes *sysfs_schemes;
-	struct damos *scheme;
-	int schemes_idx = 0;
 
-	if (!ctx)
-		return -EINVAL;
-	sysfs_schemes = kdamond->contexts->contexts_arr[0]->schemes;
-	damon_for_each_scheme(scheme, ctx) {
-		struct damon_sysfs_stats *sysfs_stats;
-
-		/* user could have removed the scheme sysfs dir */
-		if (schemes_idx >= sysfs_schemes->nr)
-			break;
-
-		sysfs_stats = sysfs_schemes->schemes_arr[schemes_idx++]->stats;
-		sysfs_stats->nr_tried = scheme->stat.nr_tried;
-		sysfs_stats->sz_tried = scheme->stat.sz_tried;
-		sysfs_stats->nr_applied = scheme->stat.nr_applied;
-		sysfs_stats->sz_applied = scheme->stat.sz_applied;
-		sysfs_stats->qt_exceeds = scheme->stat.qt_exceeds;
-	}
+	damon_sysfs_schemes_update_stats(
+			kdamond->contexts->contexts_arr[0]->schemes, ctx);
 	return 0;
 }
 
@@ -2399,7 +1423,7 @@ static inline bool damon_sysfs_kdamond_running(
 		struct damon_sysfs_kdamond *kdamond)
 {
 	return kdamond->damon_ctx &&
-		damon_sysfs_ctx_running(kdamond->damon_ctx);
+		damon_is_running(kdamond->damon_ctx);
 }
 
 static int damon_sysfs_apply_inputs(struct damon_ctx *ctx,
@@ -2410,66 +1434,104 @@ static int damon_sysfs_apply_inputs(struct damon_ctx *ctx,
 	err = damon_select_ops(ctx, sys_ctx->ops_id);
 	if (err)
 		return err;
+	ctx->addr_unit = sys_ctx->addr_unit;
+	/* addr_unit is respected by only DAMON_OPS_PADDR */
+	if (sys_ctx->ops_id == DAMON_OPS_PADDR)
+		ctx->min_sz_region = max(
+				DAMON_MIN_REGION / sys_ctx->addr_unit, 1);
 	err = damon_sysfs_set_attrs(ctx, sys_ctx->attrs);
 	if (err)
 		return err;
-	err = damon_sysfs_set_targets(ctx, sys_ctx->targets);
+	err = damon_sysfs_add_targets(ctx, sys_ctx->targets);
 	if (err)
 		return err;
-	return damon_sysfs_set_schemes(ctx, sys_ctx->schemes);
+	return damon_sysfs_add_schemes(ctx, sys_ctx->schemes);
 }
+
+static struct damon_ctx *damon_sysfs_build_ctx(
+		struct damon_sysfs_context *sys_ctx);
 
 /*
  * damon_sysfs_commit_input() - Commit user inputs to a running kdamond.
  * @kdamond:	The kobject wrapper for the associated kdamond.
  *
- * If the sysfs input is wrong, the kdamond will be terminated.
+ * Returns error if the sysfs input is wrong.
  */
-static int damon_sysfs_commit_input(struct damon_sysfs_kdamond *kdamond)
+static int damon_sysfs_commit_input(void *data)
 {
+	struct damon_sysfs_kdamond *kdamond = data;
+	struct damon_ctx *param_ctx, *test_ctx;
+	int err;
+
 	if (!damon_sysfs_kdamond_running(kdamond))
 		return -EINVAL;
 	/* TODO: Support multiple contexts per kdamond */
 	if (kdamond->contexts->nr != 1)
 		return -EINVAL;
 
-	return damon_sysfs_apply_inputs(kdamond->damon_ctx,
-			kdamond->contexts->contexts_arr[0]);
+	param_ctx = damon_sysfs_build_ctx(kdamond->contexts->contexts_arr[0]);
+	if (IS_ERR(param_ctx))
+		return PTR_ERR(param_ctx);
+	test_ctx = damon_new_ctx();
+	if (!test_ctx)
+		return -ENOMEM;
+	err = damon_commit_ctx(test_ctx, param_ctx);
+	if (err)
+		goto out;
+	err = damon_commit_ctx(kdamond->damon_ctx, param_ctx);
+out:
+	damon_destroy_ctx(test_ctx);
+	damon_destroy_ctx(param_ctx);
+	return err;
+}
+
+static int damon_sysfs_commit_schemes_quota_goals(void *data)
+{
+	struct damon_sysfs_kdamond *sysfs_kdamond = data;
+	struct damon_ctx *ctx;
+	struct damon_sysfs_context *sysfs_ctx;
+
+	if (!damon_sysfs_kdamond_running(sysfs_kdamond))
+		return -EINVAL;
+	/* TODO: Support multiple contexts per kdamond */
+	if (sysfs_kdamond->contexts->nr != 1)
+		return -EINVAL;
+
+	ctx = sysfs_kdamond->damon_ctx;
+	sysfs_ctx = sysfs_kdamond->contexts->contexts_arr[0];
+	return damos_sysfs_set_quota_scores(sysfs_ctx->schemes, ctx);
 }
 
 /*
- * damon_sysfs_cmd_request_callback() - DAMON callback for handling requests.
- * @c:	The DAMON context of the callback.
+ * damon_sysfs_upd_schemes_effective_quotas() - Update schemes effective quotas
+ * sysfs files.
+ * @data:	The kobject wrapper that associated to the kdamond thread.
  *
- * This function is periodically called back from the kdamond thread for @c.
- * Then, it checks if there is a waiting DAMON sysfs request and handles it.
+ * This function reads the schemes' effective quotas of specific kdamond and
+ * update the related values for sysfs files.  This function should be called
+ * from DAMON callbacks while holding ``damon_syfs_lock``, to safely access the
+ * DAMON contexts-internal data and DAMON sysfs variables.
  */
-static int damon_sysfs_cmd_request_callback(struct damon_ctx *c)
+static int damon_sysfs_upd_schemes_effective_quotas(void *data)
 {
-	struct damon_sysfs_kdamond *kdamond;
-	int err = 0;
+	struct damon_sysfs_kdamond *kdamond = data;
+	struct damon_ctx *ctx = kdamond->damon_ctx;
 
-	/* avoid deadlock due to concurrent state_store('off') */
-	if (!mutex_trylock(&damon_sysfs_lock))
-		return 0;
-	kdamond = damon_sysfs_cmd_request.kdamond;
-	if (!kdamond || kdamond->damon_ctx != c)
-		goto out;
-	switch (damon_sysfs_cmd_request.cmd) {
-	case DAMON_SYSFS_CMD_UPDATE_SCHEMES_STATS:
-		err = damon_sysfs_upd_schemes_stats(kdamond);
-		break;
-	case DAMON_SYSFS_CMD_COMMIT:
-		err = damon_sysfs_commit_input(kdamond);
-		break;
-	default:
-		break;
-	}
-	/* Mark the request as invalid now. */
-	damon_sysfs_cmd_request.kdamond = NULL;
-out:
-	mutex_unlock(&damon_sysfs_lock);
-	return err;
+	damos_sysfs_update_effective_quotas(
+			kdamond->contexts->contexts_arr[0]->schemes, ctx);
+	return 0;
+}
+
+static int damon_sysfs_upd_tuned_intervals(void *data)
+{
+	struct damon_sysfs_kdamond *kdamond = data;
+	struct damon_ctx *ctx = kdamond->damon_ctx;
+
+	kdamond->contexts->contexts_arr[0]->attrs->intervals->sample_us =
+		ctx->attrs.sample_interval;
+	kdamond->contexts->contexts_arr[0]->attrs->intervals->aggr_us =
+		ctx->attrs.aggr_interval;
+	return 0;
 }
 
 static struct damon_ctx *damon_sysfs_build_ctx(
@@ -2487,20 +1549,38 @@ static struct damon_ctx *damon_sysfs_build_ctx(
 		return ERR_PTR(err);
 	}
 
-	ctx->callback.after_wmarks_check = damon_sysfs_cmd_request_callback;
-	ctx->callback.after_aggregation = damon_sysfs_cmd_request_callback;
-	ctx->callback.before_terminate = damon_sysfs_before_terminate;
 	return ctx;
+}
+
+static unsigned long damon_sysfs_next_update_jiffies;
+
+static int damon_sysfs_repeat_call_fn(void *data)
+{
+	struct damon_sysfs_kdamond *sysfs_kdamond = data;
+
+	if (!sysfs_kdamond->refresh_ms)
+		return 0;
+	if (time_before(jiffies, damon_sysfs_next_update_jiffies))
+		return 0;
+	damon_sysfs_next_update_jiffies = jiffies +
+		msecs_to_jiffies(sysfs_kdamond->refresh_ms);
+
+	if (!mutex_trylock(&damon_sysfs_lock))
+		return 0;
+	damon_sysfs_upd_tuned_intervals(sysfs_kdamond);
+	damon_sysfs_upd_schemes_stats(sysfs_kdamond);
+	damon_sysfs_upd_schemes_effective_quotas(sysfs_kdamond);
+	mutex_unlock(&damon_sysfs_lock);
+	return 0;
 }
 
 static int damon_sysfs_turn_damon_on(struct damon_sysfs_kdamond *kdamond)
 {
 	struct damon_ctx *ctx;
+	struct damon_call_control *repeat_call_control;
 	int err;
 
 	if (damon_sysfs_kdamond_running(kdamond))
-		return -EBUSY;
-	if (damon_sysfs_cmd_request.kdamond == kdamond)
 		return -EBUSY;
 	/* TODO: support multiple contexts per kdamond */
 	if (kdamond->contexts->nr != 1)
@@ -2510,15 +1590,32 @@ static int damon_sysfs_turn_damon_on(struct damon_sysfs_kdamond *kdamond)
 		damon_destroy_ctx(kdamond->damon_ctx);
 	kdamond->damon_ctx = NULL;
 
+	repeat_call_control = kmalloc(sizeof(*repeat_call_control),
+			GFP_KERNEL);
+	if (!repeat_call_control)
+		return -ENOMEM;
+
 	ctx = damon_sysfs_build_ctx(kdamond->contexts->contexts_arr[0]);
-	if (IS_ERR(ctx))
+	if (IS_ERR(ctx)) {
+		kfree(repeat_call_control);
 		return PTR_ERR(ctx);
+	}
 	err = damon_start(&ctx, 1, false);
 	if (err) {
+		kfree(repeat_call_control);
 		damon_destroy_ctx(ctx);
 		return err;
 	}
 	kdamond->damon_ctx = ctx;
+
+	damon_sysfs_next_update_jiffies =
+		jiffies + msecs_to_jiffies(kdamond->refresh_ms);
+
+	repeat_call_control->fn = damon_sysfs_repeat_call_fn;
+	repeat_call_control->data = kdamond;
+	repeat_call_control->repeat = true;
+	repeat_call_control->dealloc_on_cancel = true;
+	damon_call(ctx, repeat_call_control);
 	return err;
 }
 
@@ -2534,63 +1631,104 @@ static int damon_sysfs_turn_damon_off(struct damon_sysfs_kdamond *kdamond)
 	 */
 }
 
+static int damon_sysfs_damon_call(int (*fn)(void *data),
+		struct damon_sysfs_kdamond *kdamond)
+{
+	struct damon_call_control call_control = {};
+	int err;
+
+	if (!kdamond->damon_ctx)
+		return -EINVAL;
+	call_control.fn = fn;
+	call_control.data = kdamond;
+	err = damon_call(kdamond->damon_ctx, &call_control);
+	return err ? err : call_control.return_code;
+}
+
+struct damon_sysfs_schemes_walk_data {
+	struct damon_sysfs_kdamond *sysfs_kdamond;
+	bool total_bytes_only;
+};
+
+/* populate the region directory */
+static void damon_sysfs_schemes_tried_regions_upd_one(void *data, struct damon_ctx *ctx,
+		struct damon_target *t, struct damon_region *r,
+		struct damos *s, unsigned long sz_filter_passed)
+{
+	struct damon_sysfs_schemes_walk_data *walk_data = data;
+	struct damon_sysfs_kdamond *sysfs_kdamond = walk_data->sysfs_kdamond;
+
+	damos_sysfs_populate_region_dir(
+			sysfs_kdamond->contexts->contexts_arr[0]->schemes,
+			ctx, t, r, s, walk_data->total_bytes_only,
+			sz_filter_passed);
+}
+
+static int damon_sysfs_update_schemes_tried_regions(
+		struct damon_sysfs_kdamond *sysfs_kdamond, bool total_bytes_only)
+{
+	struct damon_sysfs_schemes_walk_data walk_data = {
+		.sysfs_kdamond = sysfs_kdamond,
+		.total_bytes_only = total_bytes_only,
+	};
+	struct damos_walk_control control = {
+		.walk_fn = damon_sysfs_schemes_tried_regions_upd_one,
+		.data = &walk_data,
+	};
+	struct damon_ctx *ctx = sysfs_kdamond->damon_ctx;
+
+	if (!ctx)
+		return -EINVAL;
+
+	damon_sysfs_schemes_clear_regions(
+			sysfs_kdamond->contexts->contexts_arr[0]->schemes);
+	return damos_walk(ctx, &control);
+}
+
 /*
  * damon_sysfs_handle_cmd() - Handle a command for a specific kdamond.
  * @cmd:	The command to handle.
  * @kdamond:	The kobject wrapper for the associated kdamond.
  *
- * This function handles a DAMON sysfs command for a kdamond.  For commands
- * that need to access running DAMON context-internal data, it requests
- * handling of the command to the DAMON callback
- * (@damon_sysfs_cmd_request_callback()) and wait until it is properly handled,
- * or the context is completed.
+ * This function handles a DAMON sysfs command for a kdamond.
  *
  * Return: 0 on success, negative error code otherwise.
  */
 static int damon_sysfs_handle_cmd(enum damon_sysfs_cmd cmd,
 		struct damon_sysfs_kdamond *kdamond)
 {
-	bool need_wait = true;
-
-	/* Handle commands that doesn't access DAMON context-internal data */
 	switch (cmd) {
 	case DAMON_SYSFS_CMD_ON:
 		return damon_sysfs_turn_damon_on(kdamond);
 	case DAMON_SYSFS_CMD_OFF:
 		return damon_sysfs_turn_damon_off(kdamond);
+	case DAMON_SYSFS_CMD_COMMIT:
+		return damon_sysfs_damon_call(
+				damon_sysfs_commit_input, kdamond);
+	case DAMON_SYSFS_CMD_COMMIT_SCHEMES_QUOTA_GOALS:
+		return damon_sysfs_damon_call(
+				damon_sysfs_commit_schemes_quota_goals,
+				kdamond);
+	case DAMON_SYSFS_CMD_UPDATE_SCHEMES_STATS:
+		return damon_sysfs_damon_call(
+				damon_sysfs_upd_schemes_stats, kdamond);
+	case DAMON_SYSFS_CMD_UPDATE_SCHEMES_TRIED_BYTES:
+		return damon_sysfs_update_schemes_tried_regions(kdamond, true);
+	case DAMON_SYSFS_CMD_UPDATE_SCHEMES_TRIED_REGIONS:
+		return damon_sysfs_update_schemes_tried_regions(kdamond, false);
+	case DAMON_SYSFS_CMD_CLEAR_SCHEMES_TRIED_REGIONS:
+		return damon_sysfs_schemes_clear_regions(
+			kdamond->contexts->contexts_arr[0]->schemes);
+	case DAMON_SYSFS_CMD_UPDATE_SCHEMES_EFFECTIVE_QUOTAS:
+		return damon_sysfs_damon_call(
+				damon_sysfs_upd_schemes_effective_quotas,
+				kdamond);
+	case DAMON_SYSFS_CMD_UPDATE_TUNED_INTERVALS:
+		return damon_sysfs_damon_call(
+				damon_sysfs_upd_tuned_intervals, kdamond);
 	default:
-		break;
-	}
-
-	/* Pass the command to DAMON callback for safe DAMON context access */
-	if (damon_sysfs_cmd_request.kdamond)
-		return -EBUSY;
-	if (!damon_sysfs_kdamond_running(kdamond))
 		return -EINVAL;
-	damon_sysfs_cmd_request.cmd = cmd;
-	damon_sysfs_cmd_request.kdamond = kdamond;
-
-	/*
-	 * wait until damon_sysfs_cmd_request_callback() handles the request
-	 * from kdamond context
-	 */
-	mutex_unlock(&damon_sysfs_lock);
-	while (need_wait) {
-		schedule_timeout_idle(msecs_to_jiffies(100));
-		if (!mutex_trylock(&damon_sysfs_lock))
-			continue;
-		if (!damon_sysfs_cmd_request.kdamond) {
-			/* damon_sysfs_cmd_request_callback() handled */
-			need_wait = false;
-		} else if (!damon_sysfs_kdamond_running(kdamond)) {
-			/* kdamond has already finished */
-			need_wait = false;
-			damon_sysfs_cmd_request.kdamond = NULL;
-		}
-		mutex_unlock(&damon_sysfs_lock);
 	}
-	mutex_lock(&damon_sysfs_lock);
-	return 0;
 }
 
 static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -2638,6 +1776,30 @@ out:
 	return sysfs_emit(buf, "%d\n", pid);
 }
 
+static ssize_t refresh_ms_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct damon_sysfs_kdamond *kdamond = container_of(kobj,
+			struct damon_sysfs_kdamond, kobj);
+
+	return sysfs_emit(buf, "%u\n", kdamond->refresh_ms);
+}
+
+static ssize_t refresh_ms_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct damon_sysfs_kdamond *kdamond = container_of(kobj,
+			struct damon_sysfs_kdamond, kobj);
+	unsigned int nr;
+	int err = kstrtouint(buf, 0, &nr);
+
+	if (err)
+		return err;
+
+	kdamond->refresh_ms = nr;
+	return count;
+}
+
 static void damon_sysfs_kdamond_release(struct kobject *kobj)
 {
 	struct damon_sysfs_kdamond *kdamond = container_of(kobj,
@@ -2654,14 +1816,18 @@ static struct kobj_attribute damon_sysfs_kdamond_state_attr =
 static struct kobj_attribute damon_sysfs_kdamond_pid_attr =
 		__ATTR_RO_MODE(pid, 0400);
 
+static struct kobj_attribute damon_sysfs_kdamond_refresh_ms_attr =
+		__ATTR_RW_MODE(refresh_ms, 0600);
+
 static struct attribute *damon_sysfs_kdamond_attrs[] = {
 	&damon_sysfs_kdamond_state_attr.attr,
 	&damon_sysfs_kdamond_pid_attr.attr,
+	&damon_sysfs_kdamond_refresh_ms_attr.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(damon_sysfs_kdamond);
 
-static struct kobj_type damon_sysfs_kdamond_ktype = {
+static const struct kobj_type damon_sysfs_kdamond_ktype = {
 	.release = damon_sysfs_kdamond_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_kdamond_groups,
@@ -2702,8 +1868,7 @@ static bool damon_sysfs_kdamonds_busy(struct damon_sysfs_kdamond **kdamonds,
 	int i;
 
 	for (i = 0; i < nr_kdamonds; i++) {
-		if (damon_sysfs_kdamond_running(kdamonds[i]) ||
-		    damon_sysfs_cmd_request.kdamond == kdamonds[i])
+		if (damon_sysfs_kdamond_running(kdamonds[i]))
 			return true;
 	}
 
@@ -2804,7 +1969,7 @@ static struct attribute *damon_sysfs_kdamonds_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_kdamonds);
 
-static struct kobj_type damon_sysfs_kdamonds_ktype = {
+static const struct kobj_type damon_sysfs_kdamonds_ktype = {
 	.release = damon_sysfs_kdamonds_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_kdamonds_groups,
@@ -2854,7 +2019,7 @@ static struct attribute *damon_sysfs_ui_dir_attrs[] = {
 };
 ATTRIBUTE_GROUPS(damon_sysfs_ui_dir);
 
-static struct kobj_type damon_sysfs_ui_dir_ktype = {
+static const struct kobj_type damon_sysfs_ui_dir_ktype = {
 	.release = damon_sysfs_ui_dir_release,
 	.sysfs_ops = &kobj_sysfs_ops,
 	.default_groups = damon_sysfs_ui_dir_groups,
@@ -2890,3 +2055,5 @@ out:
 	return err;
 }
 subsys_initcall(damon_sysfs_init);
+
+#include "tests/sysfs-kunit.h"

@@ -8,7 +8,7 @@
 #include <linux/bpf_trace.h>
 #include <net/xdp.h>
 
-#include "mana.h"
+#include <net/mana/mana.h>
 
 void mana_xdp_tx(struct sk_buff *skb, struct net_device *ndev)
 {
@@ -91,7 +91,7 @@ u32 mana_run_xdp(struct net_device *ndev, struct mana_rxq *rxq,
 		goto out;
 
 	xdp_init_buff(xdp, PAGE_SIZE, &rxq->xdp_rxq);
-	xdp_prepare_buff(xdp, buf_va, XDP_PACKET_HEADROOM, pkt_len, false);
+	xdp_prepare_buff(xdp, buf_va, XDP_PACKET_HEADROOM, pkt_len, true);
 
 	act = bpf_prog_run_xdp(prog, xdp);
 
@@ -131,12 +131,6 @@ out:
 	rcu_read_unlock();
 
 	return act;
-}
-
-static unsigned int mana_xdp_fraglen(unsigned int len)
-{
-	return SKB_DATA_ALIGN(len) +
-	       SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 }
 
 struct bpf_prog *mana_xdp_get(struct mana_port_context *apc)
@@ -179,17 +173,19 @@ static int mana_xdp_set(struct net_device *ndev, struct bpf_prog *prog,
 {
 	struct mana_port_context *apc = netdev_priv(ndev);
 	struct bpf_prog *old_prog;
-	int buf_max;
+	struct gdma_context *gc;
+	int err;
+
+	gc = apc->ac->gdma_dev->gdma_context;
 
 	old_prog = mana_xdp_get(apc);
 
 	if (!old_prog && !prog)
 		return 0;
 
-	buf_max = XDP_PACKET_HEADROOM + mana_xdp_fraglen(ndev->mtu + ETH_HLEN);
-	if (prog && buf_max > PAGE_SIZE) {
-		netdev_err(ndev, "XDP: mtu:%u too large, buf_max:%u\n",
-			   ndev->mtu, buf_max);
+	if (prog && ndev->mtu > MANA_XDP_MTU_MAX) {
+		netdev_err(ndev, "XDP: mtu:%u too large, mtu_max:%lu\n",
+			   ndev->mtu, MANA_XDP_MTU_MAX);
 		NL_SET_ERR_MSG_MOD(extack, "XDP: mtu too large");
 
 		return -EOPNOTSUPP;
@@ -200,13 +196,57 @@ static int mana_xdp_set(struct net_device *ndev, struct bpf_prog *prog,
 	 */
 	apc->bpf_prog = prog;
 
+	if (apc->port_is_up) {
+		/* Re-create rxq's after xdp prog was loaded or unloaded.
+		 * Ex: re create rxq's to switch from full pages to smaller
+		 * size page fragments when xdp prog is unloaded and
+		 * vice-versa.
+		 */
+
+		/* Pre-allocate buffers to prevent failure in mana_attach */
+		err = mana_pre_alloc_rxbufs(apc, ndev->mtu, apc->num_queues);
+		if (err) {
+			NL_SET_ERR_MSG_MOD(extack,
+					   "XDP: Insufficient memory for tx/rx re-config");
+			return err;
+		}
+
+		err = mana_detach(ndev, false);
+		if (err) {
+			netdev_err(ndev,
+				   "mana_detach failed at xdp set: %d\n", err);
+			NL_SET_ERR_MSG_MOD(extack,
+					   "XDP: Re-config failed at detach");
+			goto err_dealloc_rxbuffs;
+		}
+
+		err = mana_attach(ndev);
+		if (err) {
+			netdev_err(ndev,
+				   "mana_attach failed at xdp set: %d\n", err);
+			NL_SET_ERR_MSG_MOD(extack,
+					   "XDP: Re-config failed at attach");
+			goto err_dealloc_rxbuffs;
+		}
+
+		mana_chn_setxdp(apc, prog);
+		mana_pre_dealloc_rxbufs(apc);
+	}
+
 	if (old_prog)
 		bpf_prog_put(old_prog);
 
-	if (apc->port_is_up)
-		mana_chn_setxdp(apc, prog);
+	if (prog)
+		ndev->max_mtu = MANA_XDP_MTU_MAX;
+	else
+		ndev->max_mtu = gc->adapter_mtu - ETH_HLEN;
 
 	return 0;
+
+err_dealloc_rxbuffs:
+	apc->bpf_prog = old_prog;
+	mana_pre_dealloc_rxbufs(apc);
+	return err;
 }
 
 int mana_bpf(struct net_device *ndev, struct netdev_bpf *bpf)

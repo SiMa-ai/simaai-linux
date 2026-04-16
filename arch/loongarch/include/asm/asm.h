@@ -110,7 +110,7 @@
 #define LONG_SRA	srai.w
 #define LONG_SRAV	sra.w
 
-#ifdef __ASSEMBLY__
+#ifdef __ASSEMBLER__
 #define LONG		.word
 #endif
 #define LONGSIZE	4
@@ -131,7 +131,7 @@
 #define LONG_SRA	srai.d
 #define LONG_SRAV	sra.d
 
-#ifdef __ASSEMBLY__
+#ifdef __ASSEMBLER__
 #define LONG		.dword
 #endif
 #define LONGSIZE	8
@@ -158,7 +158,7 @@
 
 #define PTR_SCALESHIFT	2
 
-#ifdef __ASSEMBLY__
+#ifdef __ASSEMBLER__
 #define PTR		.word
 #endif
 #define PTRSIZE		4
@@ -181,11 +181,21 @@
 
 #define PTR_SCALESHIFT	3
 
-#ifdef __ASSEMBLY__
+#ifdef __ASSEMBLER__
 #define PTR		.dword
 #endif
 #define PTRSIZE		8
 #define PTRLOG		3
+#endif
+
+/* Annotate a function as being unsuitable for kprobes. */
+#ifdef CONFIG_KPROBES
+#define _ASM_NOKPROBE(name)				\
+	.pushsection "_kprobe_blacklist", "aw";		\
+	.quad	name;					\
+	.popsection
+#else
+#define _ASM_NOKPROBE(name)
 #endif
 
 #endif /* __ASM_ASM_H */

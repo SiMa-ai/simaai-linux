@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+    imx568_vana_1: csi2_fixedregulator@0 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vana_1";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+
+    imx568_vdig_1: csi2_fixedregulator@1 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vdig_1";
+        regulator-min-microvolt = <110000>;
+        regulator-max-microvolt = <110000>;
+        regulator-always-on;
+    };
+
+    imx568_vddl_1: csi2_fixedregulator@2 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vddl_1";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+
+    imx568_clk_1: csi2_camera-clk {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+
+    i2cmux0: i2cmux@0 {
+        compatible = "i2c-mux-gpio";
+        i2c-parent = <&i2c52>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+        /* Set port6 gpio6 to GPIO_ACTIVE_LOW mode */
+        mux-gpios = <&port6 6 0>;
+
+        i2cmux0p1: i2c@1 {
+            reg = <1>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+    };
+};
+
+&port5 {
+        cam-hog1 {
+                gpio-hog;
+                /* Set port5 gpio7 to GPIO_ACTIVE_HIGH mode */
+                gpios = <7 0>;
+                output-high;
+                line-name = "cam1_powdn";
+        };
+};
+
+&i2c52 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+};
+
+&csi2 {
+    status = "okay";
+};
+
+&axi_vdma2 {
+    status = "okay";
+};
+
+&mipi_dphy_rx2 {
+    status = "okay";
+};
+
+&v4l2video2 {
+    status = "okay";
+};
+
+&v4l2vdma2 {
+    status = "okay";
+};
+
+&csi20in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <594000000>;
+    remote-endpoint = <&cam20out>;
+    clock-continuous;
+};
+
+&i2cmux0p1 {
+    pca6408_camera_p1: pca6408@20 {
+        compatible = "ti,tca6408";
+        gpio-controller;
+        #gpio-cells = <2>;
+        reg = <0x20>;
+        status = "okay";
+    };
+
+    pca6408_fpga_p1: pca6408@21 {
+        compatible = "ti,tca6408";
+        gpio-controller;
+        #gpio-cells = <2>;
+        reg = <0x21>;
+        status = "okay";
+    };
+
+    fpga_p1: fpga@c {
+        compatible = "econ,fpga";
+        reg = <0x0c>;
+        status = "okay";
+        fpga_nprogram-gpios = <&pca6408_fpga_p1 2 0>;
+        fpga_nreset-gpios = <&pca6408_fpga_p1 3 0>;
+        fpga_slaveid_sel0-gpios = <&pca6408_fpga_p1 4 0>;
+        fpga_slaveid_sel1-gpios = <&pca6408_fpga_p1 7 0>;
+		mipi_filter_dt1 = <0x92>;
+		mipi_filter_dt2 = <0x93>;
+		mipi_filter_dt3 = <0xb7>;
+		mipi_filter_dt4 = <0x7f>;
+		mipi_speed = <1188>;
+		mipi_tx_clockmode = <0>; // Discontinuous
+		mipi_rx_clockmode = <0>; // Discontinuous
+    };
+
+    imx568p1: imx568@42 {
+        compatible = "sony,imx568";
+        reg = <0x42>;
+        clocks = <&imx568_clk_1>;
+        clock-names = "xclk";
+        VANA-supply = <&imx568_vana_1>;
+        VDIG-supply = <&imx568_vdig_1>;
+        VDDL-supply = <&imx568_vddl_1>;
+        reset-gpios = <&pca6408_camera_p1 1 0>;
+        boot-gpios  = <&pca6408_camera_p1 0 0>;
+        camera_mipi_lanes = <2>;
+        cam_fw_name = "imx568_cam_fw.bin";
+
+        port@1 {
+            cam20out: endpoint@0 {
+                clock-lanes = <0>;
+                data-lanes = <1 2>;
+                link-frequencies = /bits/ 64 <594000000>;
+                remote-endpoint = <&csi20in>;
+                clock-continuous;
+            };
+        };
+    };
+};

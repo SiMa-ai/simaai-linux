@@ -518,14 +518,12 @@ err_put_rproc:
 	return ret;
 }
 
-static int simaai_rproc_remove(struct platform_device *pdev)
+static void simaai_rproc_remove(struct platform_device *pdev)
 {
 	struct rproc *rproc = platform_get_drvdata(pdev);
 
 	rproc_del(rproc);
 	rproc_free(rproc);
-
-	return 0;
 }
 
 /* TODO: SRIRAM Fix them with power management and ev platform driver

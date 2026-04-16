@@ -13,7 +13,8 @@
 	chosen {
 		bootargs = "earlycon=uart8250,mmio32,0x04006000 console=ttyS0,15625000n8 root=/dev/ram0 rw rootfstype=ramfs";
 		linux,initrd-start = <0x10 0x7D000000>;
-		linux,initrd-end = <0x10 0xA2E00000>;
+		linux,initrd-end   = <0x10 0xA2E00000>;
+
 	};
 
 	aliases {
@@ -28,7 +29,6 @@
 };
 
 &dms0_reserved {
-	// 2.5GiB for DMS0 region
 	reg = <0x00000011 0x20000000 0x00000000 0xA0000000>;
 };
 

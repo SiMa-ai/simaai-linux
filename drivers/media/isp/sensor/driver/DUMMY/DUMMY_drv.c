@@ -37,71 +37,108 @@
 
 #include "DUMMY_config.h"
 
+#include <linux/videodev2.h>
+
+static int bayer_pixelformat_to_rggb_start(uint32_t pixelformat)
+{
+	switch (pixelformat) {
+	case V4L2_PIX_FMT_SRGGB8:
+	case V4L2_PIX_FMT_SRGGB10:
+	case V4L2_PIX_FMT_SRGGB12:
+	case V4L2_PIX_FMT_SRGGB14:
+	case V4L2_PIX_FMT_SRGGB16:
+		return 0; /* RGGB */
+	case V4L2_PIX_FMT_SGRBG8:
+	case V4L2_PIX_FMT_SGRBG10:
+	case V4L2_PIX_FMT_SGRBG12:
+	case V4L2_PIX_FMT_SGRBG14:
+	case V4L2_PIX_FMT_SGRBG16:
+		return 1; /* GRBG */
+	case V4L2_PIX_FMT_SGBRG8:
+	case V4L2_PIX_FMT_SGBRG10:
+	case V4L2_PIX_FMT_SGBRG12:
+	case V4L2_PIX_FMT_SGBRG14:
+	case V4L2_PIX_FMT_SGBRG16:
+		return 2; /* GBRG */
+	case V4L2_PIX_FMT_SBGGR8:
+	case V4L2_PIX_FMT_SBGGR10:
+	case V4L2_PIX_FMT_SBGGR12:
+	case V4L2_PIX_FMT_SBGGR14:
+	case V4L2_PIX_FMT_SBGGR16:
+		return 3; /* BGGR */
+	default:
+		return -1;
+	}
+}
+
 // Formatting tool makes below declaration less readable and structured
 // clang-format off
+
+#define SENSOR_MODE(w, h, bw, p) \
+{ \
+	.fps = 30 * 256, \
+	.wdr_mode = WDR_MODE_LINEAR, \
+	.pixel_format = p, \
+	.resolution.width = w, \
+	.resolution.height = h, \
+	.data_width = bw, \
+	.channel_info = { \
+		.channel_desc = { \
+			{ \
+				.exposure_bit_width = bw, \
+				.data_type = DATA_TYPE_LINEAR, \
+				.cv = CAP_CHANNEL_PASS_THROUGH \
+			} \
+		}, \
+		.exposure_idx_to_channel_map = { \
+			0 \
+		}, \
+		.exposure_max_bit_width = bw, \
+		.locked_exp_info = { \
+			.locked_exp_ratio_flag = false, \
+			.locked_exp_ratio_val = 0, \
+			.locked_exp_ratio_short_flag = false, \
+			.locked_exp_ratio_short_val = 0, \
+			.locked_exp_ratio_medium_flag = false, \
+			.locked_exp_ratio_medium_val = 0, \
+			.locked_exp_ratio_medium2_flag = false, \
+			.locked_exp_ratio_medium2_val = 0 \
+		} \
+	}, \
+	.exposures = 1, \
+	.num_channels = 1 \
+}
+
 static sensor_mode_t supported_modes[] = {
-    {
-        .fps = 30 * 256,
-        .wdr_mode = WDR_MODE_LINEAR,
-        .resolution.width = 1920,
-        .resolution.height = 1080,
-        .channel_info = {
-            .channel_desc = {
-                {
-                    .exposure_bit_width = 12,
-                    .data_type = DATA_TYPE_LINEAR,
-                    .cv = CAP_CHANNEL_PASS_THROUGH
-                }
-            },
-            .exposure_idx_to_channel_map = {
-                0
-            },
-            .exposure_max_bit_width = 12,
-            .locked_exp_info = {
-                .locked_exp_ratio_flag = false,
-                .locked_exp_ratio_val = 0,
-                .locked_exp_ratio_short_flag = false,
-                .locked_exp_ratio_short_val = 0,
-                .locked_exp_ratio_medium_flag = false,
-                .locked_exp_ratio_medium_val = 0,
-                .locked_exp_ratio_medium2_flag = false,
-                .locked_exp_ratio_medium2_val = 0
-            }
-        },
-        .exposures = 1,
-        .num_channels = 1
-    },
-    {   // PWL
-        .fps = 22 * 256,
-        .wdr_mode = WDR_MODE_NATIVE,
-        .resolution.width = 1920,
-        .resolution.height = 1080,
-        .channel_info = {
-            .channel_desc = {
-                {
-                    .exposure_bit_width = 20,
-                    .data_type = DATA_TYPE_WDR_NATIVE,
-                    .cv = CAP_KNEE_POINT_DECOMPAND
-                }
-            },
-            .exposure_idx_to_channel_map = {
-                0
-            },
-            .exposure_max_bit_width = 20,
-            .locked_exp_info = {
-                .locked_exp_ratio_flag = false,
-                .locked_exp_ratio_val = 0,
-                .locked_exp_ratio_short_flag = false,
-                .locked_exp_ratio_short_val = 0,
-                .locked_exp_ratio_medium_flag = false,
-                .locked_exp_ratio_medium_val = 0,
-                .locked_exp_ratio_medium2_flag = false,
-                .locked_exp_ratio_medium2_val = 0
-            }
-        },
-        .exposures = 1,
-        .num_channels = 1
-    }
+	SENSOR_MODE(1920, 1080, 12, V4L2_PIX_FMT_SRGGB12), //1920x1080 SRGGB12
+	SENSOR_MODE(1920, 1080, 12, V4L2_PIX_FMT_SBGGR12), //1920x1080 SBGGR12
+	SENSOR_MODE(1920, 1080, 12, V4L2_PIX_FMT_SGRBG12), //1920x1080 SGRBG12
+	SENSOR_MODE(1920, 1080, 12, V4L2_PIX_FMT_SGBRG12), //1920x1080 SGBRG12
+
+	SENSOR_MODE(1920, 1080, 10, V4L2_PIX_FMT_SRGGB10), //1920x1080 SRGGB10
+	SENSOR_MODE(1920, 1080, 10, V4L2_PIX_FMT_SBGGR10), //1920x1080 SBGGR10
+	SENSOR_MODE(1920, 1080, 10, V4L2_PIX_FMT_SGRBG10), //1920x1080 SGRBG10
+	SENSOR_MODE(1920, 1080, 10, V4L2_PIX_FMT_SGBRG10), //1920x1080 SGBRG10
+
+	SENSOR_MODE(2048, 1080, 12, V4L2_PIX_FMT_SRGGB12), //2048x1080 SRGGB12
+	SENSOR_MODE(2048, 1080, 12, V4L2_PIX_FMT_SBGGR12), //2048x1080 SBGGR12
+	SENSOR_MODE(2048, 1080, 12, V4L2_PIX_FMT_SGRBG12), //2048x1080 SGRBG12
+	SENSOR_MODE(2048, 1080, 12, V4L2_PIX_FMT_SGBRG12), //2048x1080 SGBRG12
+
+	SENSOR_MODE(2048, 1080, 10, V4L2_PIX_FMT_SRGGB10), //2048x1080 SRGGB10
+	SENSOR_MODE(2048, 1080, 10, V4L2_PIX_FMT_SBGGR10), //2048x1080 SBGGR10
+	SENSOR_MODE(2048, 1080, 10, V4L2_PIX_FMT_SGRBG10), //2048x1080 SGRBG10
+	SENSOR_MODE(2048, 1080, 10, V4L2_PIX_FMT_SGBRG10), //2048x1080 SGBRG10
+
+	SENSOR_MODE(2432, 2048, 12, V4L2_PIX_FMT_SRGGB12), //2432x2048 SRGGB12
+	SENSOR_MODE(2432, 2048, 12, V4L2_PIX_FMT_SBGGR12), //2432x2048 SBGGR12
+	SENSOR_MODE(2432, 2048, 12, V4L2_PIX_FMT_SGRBG12), //2432x2048 SGRBG12
+	SENSOR_MODE(2432, 2048, 12, V4L2_PIX_FMT_SGBRG12), //2432x2048 SGBRG12
+
+	SENSOR_MODE(2432, 2048, 10, V4L2_PIX_FMT_SRGGB10), //2432x2048 SRGGB10
+	SENSOR_MODE(2432, 2048, 10, V4L2_PIX_FMT_SGBRG10), //2432x2048 SGBRG10
+	SENSOR_MODE(2432, 2048, 10, V4L2_PIX_FMT_SBGGR10), //2432x2048 SBGGR10
+	SENSOR_MODE(2432, 2048, 10, V4L2_PIX_FMT_SGRBG10), //2432x2048 SGRBG10
 };
 // clang-format on
 
@@ -166,18 +203,21 @@ static void sensor_set_mode( void *sensor_priv, uint8_t mode )
     sensor_private_t *priv = sensor_priv;
     sensor_param_t *cfg = &priv->param;
 
-    cfg->active.width = SENSOR_IMAGE_WIDTH;
-    cfg->active.height = SENSOR_IMAGE_HEIGHT;
-    cfg->total.width = SENSOR_TOTAL_WIDTH;
-    cfg->total.height = SENSOR_TOTAL_HEIGHT;
+    cfg->active.width = supported_modes[mode].resolution.width;
+    cfg->active.height = supported_modes[mode].resolution.height;
+    cfg->data_width = supported_modes[mode].channel_info.channel_desc[0].exposure_bit_width;
+
+    cfg->total.width = supported_modes[mode].resolution.width;
+    cfg->total.height = supported_modes[mode].resolution.height;
     cfg->integration_time_min = SENSOR_MIN_INTEGRATION_TIME;
     cfg->integration_time_max = SENSOR_MAX_INTEGRATION_TIME;
     cfg->integration_time_limit = SENSOR_MAX_INTEGRATION_TIME_LIMIT;
     cfg->preset_mode = mode;
-    cfg->lines_per_second = 0;
+    cfg->lines_per_second = SENSOR_PIXEL_CLOCK / 1100;
 
     cfg->sensor_exp_number = supported_modes[mode].exposures;
     cfg->num_channel = supported_modes[mode].num_channels;
+    cfg->rggb_start = bayer_pixelformat_to_rggb_start(supported_modes[mode].pixel_format);
 }
 
 static uint16_t sensor_get_id( void *sensor_priv )
@@ -239,7 +279,7 @@ void sensor_init_dummy( void **priv_ptr, uint8_t location, sensor_control_t *ctr
     cfg->num_channel = 1;
     cfg->is_remote = options->is_remote;
     cfg->data_width = 12;
-    cfg->rggb_start = 1;
+    cfg->rggb_start = 0;
     cfg->cfa_pattern = 0;
     cfg->shared_vc_clk = 0;
 

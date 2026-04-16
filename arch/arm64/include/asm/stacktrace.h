@@ -57,7 +57,8 @@ static inline bool on_task_stack(const struct task_struct *tsk,
 	return stackinfo_on_stack(&info, sp, size);
 }
 
-#ifdef CONFIG_VMAP_STACK
+#define on_thread_stack()	(on_task_stack(current, current_stack_pointer, 1))
+
 DECLARE_PER_CPU(unsigned long [OVERFLOW_STACK_SIZE/sizeof(long)], overflow_stack);
 
 static inline struct stack_info stackinfo_get_overflow(void)
@@ -70,11 +71,8 @@ static inline struct stack_info stackinfo_get_overflow(void)
 		.high = high,
 	};
 }
-#else
-#define stackinfo_get_overflow()	stackinfo_get_unknown()
-#endif
 
-#if defined(CONFIG_ARM_SDE_INTERFACE) && defined(CONFIG_VMAP_STACK)
+#if defined(CONFIG_ARM_SDE_INTERFACE)
 DECLARE_PER_CPU(unsigned long *, sdei_stack_normal_ptr);
 DECLARE_PER_CPU(unsigned long *, sdei_stack_critical_ptr);
 

@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include "modalix-som-connectech-1CAM.dtsi"
+
+&{/} {
+    ar0234_vana_1: csi1_fixedregulator@0 {
+        compatible = "regulator-fixed";
+        regulator-name = "ar0234_vana_1";
+        regulator-min-microvolt = <2800000>;
+        regulator-max-microvolt = <2800000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+
+    ar0234_vdig_1: csi1_fixedregulator@1 {
+        compatible = "regulator-fixed";
+        regulator-name = "ar0234_vdig_1";
+        regulator-min-microvolt = <1050000>;
+        regulator-max-microvolt = <1050000>;
+        regulator-always-on;
+    };
+
+    ar0234_vddl_1: csi1_fixedregulator@2 {
+        compatible = "regulator-fixed";
+        regulator-name = "ar0234_vddl_1";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+
+    ar0234_clk_1: csi1_camera-clk {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <27000000>;
+    };
+};
+
+&csi10in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <270000000>;
+    remote-endpoint = <&cam10out>;
+    clock-continuous;
+};
+
+&i2c1 {
+        ar0234s1: ar0234@10 {
+                compatible = "onsemi,ar0234";
+                reg = <0x10>;
+
+                clocks = <&ar0234_clk_1>;
+                clock-names = "xclk";
+
+                VANA-supply = <&ar0234_vana_1>;
+                VDIG-supply = <&ar0234_vdig_1>;
+                VDDL-supply = <&ar0234_vddl_1>;
+
+                port@1 {
+                        cam10out: endpoint@0 {
+                                clock-lanes = <0>;
+                                data-lanes = <1 2>;
+                                link-frequencies = /bits/ 64 <270000000>;
+                                remote-endpoint = <&csi10in>;
+                                clock-continuous;
+                        };
+                };
+        };
+};

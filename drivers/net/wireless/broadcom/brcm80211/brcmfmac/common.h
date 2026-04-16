@@ -20,7 +20,7 @@
  */
 
 /**
- * struct brcmf_mp_global_t - Global module paramaters.
+ * struct brcmf_mp_global_t - Global module parameters.
  *
  * @firmware_path: Alternative firmware path.
  */
@@ -31,7 +31,7 @@ struct brcmf_mp_global_t {
 extern struct brcmf_mp_global_t brcmf_mp_global;
 
 /**
- * struct brcmf_mp_device - Device module paramaters.
+ * struct brcmf_mp_device - Device module parameters.
  *
  * @p2p_enable: Legacy P2P0 enable (old wpa_supplicant).
  * @feature_disable: Feature_disable bitmask.
@@ -54,6 +54,8 @@ struct brcmf_mp_device {
 	const char	*board_type;
 	unsigned char	mac[ETH_ALEN];
 	const char	*antenna_sku;
+	const void	*cal_blob;
+	int		cal_size;
 	union {
 		struct brcmfmac_sdio_pd sdio;
 	} bus;
@@ -75,6 +77,15 @@ void brcmf_dmi_probe(struct brcmf_mp_device *settings, u32 chip, u32 chiprev);
 #else
 static inline void
 brcmf_dmi_probe(struct brcmf_mp_device *settings, u32 chip, u32 chiprev) {}
+#endif
+
+#ifdef CONFIG_ACPI
+void brcmf_acpi_probe(struct device *dev, enum brcmf_bus_type bus_type,
+		      struct brcmf_mp_device *settings);
+#else
+static inline void brcmf_acpi_probe(struct device *dev,
+				    enum brcmf_bus_type bus_type,
+				    struct brcmf_mp_device *settings) {}
 #endif
 
 u8 brcmf_map_prio_to_prec(void *cfg, u8 prio);

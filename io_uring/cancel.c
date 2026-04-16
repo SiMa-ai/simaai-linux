@@ -11,10 +11,13 @@
 
 #include <uapi/linux/io_uring.h>
 
+#include "filetable.h"
 #include "io_uring.h"
 #include "tctx.h"
 #include "poll.h"
 #include "timeout.h"
+#include "waitid.h"
+#include "futex.h"
 #include "cancel.h"
 
 struct io_cancel {
@@ -22,33 +25,53 @@ struct io_cancel {
 	u64				addr;
 	u32				flags;
 	s32				fd;
+	u8				opcode;
 };
 
 #define CANCEL_FLAGS	(IORING_ASYNC_CANCEL_ALL | IORING_ASYNC_CANCEL_FD | \
-			 IORING_ASYNC_CANCEL_ANY | IORING_ASYNC_CANCEL_FD_FIXED)
+			 IORING_ASYNC_CANCEL_ANY | IORING_ASYNC_CANCEL_FD_FIXED | \
+			 IORING_ASYNC_CANCEL_USERDATA | IORING_ASYNC_CANCEL_OP)
+
+/*
+ * Returns true if the request matches the criteria outlined by 'cd'.
+ */
+bool io_cancel_req_match(struct io_kiocb *req, struct io_cancel_data *cd)
+{
+	bool match_user_data = cd->flags & IORING_ASYNC_CANCEL_USERDATA;
+
+	if (req->ctx != cd->ctx)
+		return false;
+
+	if (!(cd->flags & (IORING_ASYNC_CANCEL_FD | IORING_ASYNC_CANCEL_OP)))
+		match_user_data = true;
+
+	if (cd->flags & IORING_ASYNC_CANCEL_ANY)
+		goto check_seq;
+	if (cd->flags & IORING_ASYNC_CANCEL_FD) {
+		if (req->file != cd->file)
+			return false;
+	}
+	if (cd->flags & IORING_ASYNC_CANCEL_OP) {
+		if (req->opcode != cd->opcode)
+			return false;
+	}
+	if (match_user_data && req->cqe.user_data != cd->data)
+		return false;
+	if (cd->flags & IORING_ASYNC_CANCEL_ALL) {
+check_seq:
+		if (io_cancel_match_sequence(req, cd->seq))
+			return false;
+	}
+
+	return true;
+}
 
 static bool io_cancel_cb(struct io_wq_work *work, void *data)
 {
 	struct io_kiocb *req = container_of(work, struct io_kiocb, work);
 	struct io_cancel_data *cd = data;
 
-	if (req->ctx != cd->ctx)
-		return false;
-	if (cd->flags & IORING_ASYNC_CANCEL_ANY) {
-		;
-	} else if (cd->flags & IORING_ASYNC_CANCEL_FD) {
-		if (req->file != cd->file)
-			return false;
-	} else {
-		if (req->cqe.user_data != cd->data)
-			return false;
-	}
-	if (cd->flags & (IORING_ASYNC_CANCEL_ALL|IORING_ASYNC_CANCEL_ANY)) {
-		if (cd->seq == req->work.cancel_seq)
-			return false;
-		req->work.cancel_seq = cd->seq;
-	}
-	return true;
+	return io_cancel_req_match(req, cd);
 }
 
 static int io_async_cancel_one(struct io_uring_task *tctx,
@@ -98,6 +121,14 @@ int io_try_cancel(struct io_uring_task *tctx, struct io_cancel_data *cd,
 	if (ret != -ENOENT)
 		return ret;
 
+	ret = io_waitid_cancel(ctx, cd, issue_flags);
+	if (ret != -ENOENT)
+		return ret;
+
+	ret = io_futex_cancel(ctx, cd, issue_flags);
+	if (ret != -ENOENT)
+		return ret;
+
 	spin_lock(&ctx->completion_lock);
 	if (!(cd->flags & IORING_ASYNC_CANCEL_FD))
 		ret = io_timeout_cancel(ctx, cd);
@@ -111,7 +142,7 @@ int io_async_cancel_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 
 	if (unlikely(req->flags & REQ_F_BUFFER_SELECT))
 		return -EINVAL;
-	if (sqe->off || sqe->len || sqe->splice_fd_in)
+	if (sqe->off || sqe->splice_fd_in)
 		return -EINVAL;
 
 	cancel->addr = READ_ONCE(sqe->addr);
@@ -122,6 +153,11 @@ int io_async_cancel_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 		if (cancel->flags & IORING_ASYNC_CANCEL_ANY)
 			return -EINVAL;
 		cancel->fd = READ_ONCE(sqe->fd);
+	}
+	if (cancel->flags & IORING_ASYNC_CANCEL_OP) {
+		if (cancel->flags & IORING_ASYNC_CANCEL_ANY)
+			return -EINVAL;
+		cancel->opcode = READ_ONCE(sqe->len);
 	}
 
 	return 0;
@@ -149,9 +185,7 @@ static int __io_async_cancel(struct io_cancel_data *cd,
 	io_ring_submit_lock(ctx, issue_flags);
 	ret = -ENOENT;
 	list_for_each_entry(node, &ctx->tctx_list, ctx_node) {
-		struct io_uring_task *tctx = node->task->io_uring;
-
-		ret = io_async_cancel_one(tctx, cd);
+		ret = io_async_cancel_one(node->task->io_uring, cd);
 		if (ret != -ENOENT) {
 			if (!all)
 				break;
@@ -169,9 +203,10 @@ int io_async_cancel(struct io_kiocb *req, unsigned int issue_flags)
 		.ctx	= req->ctx,
 		.data	= cancel->addr,
 		.flags	= cancel->flags,
+		.opcode	= cancel->opcode,
 		.seq	= atomic_inc_return(&req->ctx->cancel_seq),
 	};
-	struct io_uring_task *tctx = req->task->io_uring;
+	struct io_uring_task *tctx = req->tctx;
 	int ret;
 
 	if (cd.flags & IORING_ASYNC_CANCEL_FD) {
@@ -195,17 +230,7 @@ done:
 	if (ret < 0)
 		req_set_fail(req);
 	io_req_set_res(req, ret, 0);
-	return IOU_OK;
-}
-
-void init_hash_table(struct io_hash_table *table, unsigned size)
-{
-	unsigned int i;
-
-	for (i = 0; i < size; i++) {
-		spin_lock_init(&table->hbs[i].lock);
-		INIT_HLIST_HEAD(&table->hbs[i].list);
-	}
+	return IOU_COMPLETE;
 }
 
 static int __io_sync_cancel(struct io_uring_task *tctx,
@@ -216,13 +241,12 @@ static int __io_sync_cancel(struct io_uring_task *tctx,
 	/* fixed must be grabbed every time since we drop the uring_lock */
 	if ((cd->flags & IORING_ASYNC_CANCEL_FD) &&
 	    (cd->flags & IORING_ASYNC_CANCEL_FD_FIXED)) {
-		unsigned long file_ptr;
+		struct io_rsrc_node *node;
 
-		if (unlikely(fd >= ctx->nr_user_files))
+		node = io_rsrc_node_lookup(&ctx->file_table.data, fd);
+		if (unlikely(!node))
 			return -EBADF;
-		fd = array_index_nospec(fd, ctx->nr_user_files);
-		file_ptr = io_fixed_file_slot(&ctx->file_table, fd)->file_ptr;
-		cd->file = (struct file *) (file_ptr & FFS_MASK);
+		cd->file = io_slot_file(node);
 		if (!cd->file)
 			return -EBADF;
 	}
@@ -239,27 +263,32 @@ int io_sync_cancel(struct io_ring_ctx *ctx, void __user *arg)
 	};
 	ktime_t timeout = KTIME_MAX;
 	struct io_uring_sync_cancel_reg sc;
-	struct fd f = { };
+	struct file *file = NULL;
 	DEFINE_WAIT(wait);
-	int ret;
+	int ret, i;
 
 	if (copy_from_user(&sc, arg, sizeof(sc)))
 		return -EFAULT;
 	if (sc.flags & ~CANCEL_FLAGS)
 		return -EINVAL;
-	if (sc.pad[0] || sc.pad[1] || sc.pad[2] || sc.pad[3])
-		return -EINVAL;
+	for (i = 0; i < ARRAY_SIZE(sc.pad); i++)
+		if (sc.pad[i])
+			return -EINVAL;
+	for (i = 0; i < ARRAY_SIZE(sc.pad2); i++)
+		if (sc.pad2[i])
+			return -EINVAL;
 
 	cd.data = sc.addr;
 	cd.flags = sc.flags;
+	cd.opcode = sc.opcode;
 
 	/* we can grab a normal file descriptor upfront */
 	if ((cd.flags & IORING_ASYNC_CANCEL_FD) &&
 	   !(cd.flags & IORING_ASYNC_CANCEL_FD_FIXED)) {
-		f = fdget(sc.fd);
-		if (!f.file)
+		file = fget(sc.fd);
+		if (!file)
 			return -EBADF;
-		cd.file = f.file;
+		cd.file = file;
 	}
 
 	ret = __io_sync_cancel(current->io_uring, &cd, sc.fd);
@@ -309,6 +338,49 @@ int io_sync_cancel(struct io_ring_ctx *ctx, void __user *arg)
 	if (ret == -ENOENT || ret > 0)
 		ret = 0;
 out:
-	fdput(f);
+	if (file)
+		fput(file);
 	return ret;
+}
+
+bool io_cancel_remove_all(struct io_ring_ctx *ctx, struct io_uring_task *tctx,
+			  struct hlist_head *list, bool cancel_all,
+			  bool (*cancel)(struct io_kiocb *))
+{
+	struct hlist_node *tmp;
+	struct io_kiocb *req;
+	bool found = false;
+
+	lockdep_assert_held(&ctx->uring_lock);
+
+	hlist_for_each_entry_safe(req, tmp, list, hash_node) {
+		if (!io_match_task_safe(req, tctx, cancel_all))
+			continue;
+		hlist_del_init(&req->hash_node);
+		if (cancel(req))
+			found = true;
+	}
+
+	return found;
+}
+
+int io_cancel_remove(struct io_ring_ctx *ctx, struct io_cancel_data *cd,
+		     unsigned int issue_flags, struct hlist_head *list,
+		     bool (*cancel)(struct io_kiocb *))
+{
+	struct hlist_node *tmp;
+	struct io_kiocb *req;
+	int nr = 0;
+
+	io_ring_submit_lock(ctx, issue_flags);
+	hlist_for_each_entry_safe(req, tmp, list, hash_node) {
+		if (!io_cancel_req_match(req, cd))
+			continue;
+		if (cancel(req))
+			nr++;
+		if (!(cd->flags & IORING_ASYNC_CANCEL_ALL))
+			break;
+	}
+	io_ring_submit_unlock(ctx, issue_flags);
+	return nr ?: -ENOENT;
 }

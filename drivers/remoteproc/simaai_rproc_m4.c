@@ -64,7 +64,9 @@ const char *m4_mem_names[SIMA_MAX_MEM_REGIONS] = {
 
 struct simaai_rproc_config {
 	phys_addr_t		prc_base_addr;
+	phys_addr_t		mla_base_addr;
 	phys_addr_t		m4_sram_base_addr;
+	uint32_t		mla_mem_size;
 	uint32_t		m4_sram_size;
 	uint32_t		prc_mla_ck_rst_offset;
 	uint32_t		mla_clk_en_mask;
@@ -75,7 +77,9 @@ struct simaai_rproc_config {
 
 static const struct simaai_rproc_config davinci_rproc_config = {
 	.prc_base_addr         = 0x30100000,
+	.mla_base_addr         = 0x1c00000,
 	.m4_sram_base_addr     = 0x01d00000,
+	.mla_mem_size          = 0x10000,   /* actual size is 0xfe00 but mmap rounds on page size */
 	.m4_sram_size          = 0x00080000,
 	.prc_mla_ck_rst_offset = 0x00000150,
 	.mla_clk_en_mask       = DAVINCI_MLA_CLK_EN_MASK,
@@ -86,7 +90,9 @@ static const struct simaai_rproc_config davinci_rproc_config = {
 
 static const struct simaai_rproc_config modalix_rproc_config = {
 	.prc_base_addr         = 0x0ff00000,
+	.mla_base_addr         = 0x5000000,
 	.m4_sram_base_addr     = 0x05100000,
+	.mla_mem_size          = 0x10000,   /* actual size is 0xfe00 but mmap rounds on page size */
 	.m4_sram_size          = 0x00080000,
 	.prc_mla_ck_rst_offset = 0x00000594,
 	.mla_clk_en_mask       = MODALIX_MLA_CLK_EN_MASK,
@@ -216,8 +222,12 @@ static bool check_phys_addr_range(struct file *filep, unsigned long pfn, size_t 
 	uint64_t mem_end = mem_start + size - 1;
 	phys_addr_t m4_sram_start = char_dev->dev_data->m4_sram_base_addr;
 	phys_addr_t m4_sram_end = m4_sram_start + char_dev->dev_data->m4_sram_size;
+	phys_addr_t mla_mem_start = char_dev->dev_data->mla_base_addr;
+	phys_addr_t mla_mem_end = mla_mem_start + char_dev->dev_data->mla_mem_size;
 
 	if ((m4_sram_start <= mem_start) && (mem_end < m4_sram_end))
+		return true;
+	if ((mla_mem_start <= mem_start) && (mem_end < mla_mem_end))
 		return true;
 
 	return false;
@@ -289,6 +299,37 @@ static long simaai_ioctl(struct file *filep, unsigned int cmd, unsigned long arg
 	case SIMAAI_IOC_GET_REV:
 		if (copy_to_user(argp, &rargs, sizeof(rargs)))
 			return -EFAULT;
+
+		break;
+	case SIMAAI_IOC_RESET_MLA:
+		uint32_t val = 0;
+		const struct simaai_rproc_config *data = char_dev->dev_data;
+		void __iomem *addr = ioremap(data->prc_base_addr + data->prc_mla_ck_rst_offset, 0x1000);
+
+		val = readl(addr);
+
+		/* Put M4 into reset */
+		val |= data->m4_reset_mask;
+
+		/* Stopping MLA */
+		val &= ~data->mla_reset_mask;
+		val |= BIT(data->reset_bit_pos);
+		writel(val, addr);
+
+		udelay(1);
+
+		/* Enabling MLA clock */
+		val |= data->mla_clk_en_mask;
+		writel(val, addr);
+
+		udelay(1);
+
+		/* Starting MLA */
+		val |= (data->mla_reset_mask);
+		val &= ~(BIT(data->reset_bit_pos));
+		writel(val, addr);
+
+		iounmap(addr);
 
 		break;
 	default:
@@ -611,15 +652,13 @@ err:
 	return ret;
 }
 
-static int sima_rproc_remove(struct platform_device *pdev)
+static void sima_rproc_remove(struct platform_device *pdev)
 {
 	struct rproc *rproc = platform_get_drvdata(pdev);
 
 	chr_dev_exit(rproc);
 	rproc_del(rproc);
 	rproc_free(rproc);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM

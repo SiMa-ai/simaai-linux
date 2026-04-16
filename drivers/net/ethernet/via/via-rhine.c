@@ -94,7 +94,7 @@ static const int multicast_filter_limit = 32;
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
@@ -1568,7 +1568,7 @@ static void init_registers(struct net_device *dev)
 	if (rp->quirks & rqMgmt)
 		rhine_init_cam_filter(dev);
 
-	napi_enable(&rp->napi);
+	napi_enable_locked(&rp->napi);
 
 	iowrite16(RHINE_EVENT & 0xffff, ioaddr + IntrEnable);
 
@@ -1696,7 +1696,10 @@ static int rhine_open(struct net_device *dev)
 	rhine_power_init(dev);
 	rhine_chip_reset(dev);
 	rhine_task_enable(rp);
+
+	netdev_lock(dev);
 	init_registers(dev);
+	netdev_unlock(dev);
 
 	netif_dbg(rp, ifup, dev, "%s() Done - status %04x MII status: %04x\n",
 		  __func__, ioread16(ioaddr + ChipCmd),
@@ -1727,6 +1730,8 @@ static void rhine_reset_task(struct work_struct *work)
 
 	napi_disable(&rp->napi);
 	netif_tx_disable(dev);
+
+	netdev_lock(dev);
 	spin_lock_bh(&rp->lock);
 
 	/* clear all descriptors */
@@ -1740,6 +1745,7 @@ static void rhine_reset_task(struct work_struct *work)
 	init_registers(dev);
 
 	spin_unlock_bh(&rp->lock);
+	netdev_unlock(dev);
 
 	netif_trans_update(dev); /* prevent tx timeout */
 	dev->stats.tx_errors++;
@@ -2217,16 +2223,16 @@ rhine_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 	netdev_stats_to_stats64(stats, &dev->stats);
 
 	do {
-		start = u64_stats_fetch_begin_irq(&rp->rx_stats.syncp);
+		start = u64_stats_fetch_begin(&rp->rx_stats.syncp);
 		stats->rx_packets = rp->rx_stats.packets;
 		stats->rx_bytes = rp->rx_stats.bytes;
-	} while (u64_stats_fetch_retry_irq(&rp->rx_stats.syncp, start));
+	} while (u64_stats_fetch_retry(&rp->rx_stats.syncp, start));
 
 	do {
-		start = u64_stats_fetch_begin_irq(&rp->tx_stats.syncp);
+		start = u64_stats_fetch_begin(&rp->tx_stats.syncp);
 		stats->tx_packets = rp->tx_stats.packets;
 		stats->tx_bytes = rp->tx_stats.bytes;
-	} while (u64_stats_fetch_retry_irq(&rp->tx_stats.syncp, start));
+	} while (u64_stats_fetch_retry(&rp->tx_stats.syncp, start));
 }
 
 static void rhine_set_rx_mode(struct net_device *dev)
@@ -2443,7 +2449,7 @@ static void rhine_remove_one_pci(struct pci_dev *pdev)
 	pci_disable_device(pdev);
 }
 
-static int rhine_remove_one_platform(struct platform_device *pdev)
+static void rhine_remove_one_platform(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
 	struct rhine_private *rp = netdev_priv(dev);
@@ -2453,8 +2459,6 @@ static int rhine_remove_one_platform(struct platform_device *pdev)
 	iounmap(rp->base);
 
 	free_netdev(dev);
-
-	return 0;
 }
 
 static void rhine_shutdown_pci(struct pci_dev *pdev)
@@ -2543,9 +2547,12 @@ static int rhine_resume(struct device *device)
 	alloc_tbufs(dev);
 	rhine_reset_rbufs(rp);
 	rhine_task_enable(rp);
+
+	netdev_lock(dev);
 	spin_lock_bh(&rp->lock);
 	init_registers(dev);
 	spin_unlock_bh(&rp->lock);
+	netdev_unlock(dev);
 
 	netif_device_attach(dev);
 

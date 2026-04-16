@@ -72,7 +72,7 @@ struct simaai_memory_device {
 	/* Character device */
 	struct cdev		cdev;
 	dev_t			dev_no;
-	struct class		*dev_class;
+	struct class		dev_class;
 	bool			exist;
 };
 
@@ -623,14 +623,15 @@ static int simaai_create_char_dev(struct device *memdev)
 		goto err_cdev;
 	}
 
-	simaaimem.dev_class = class_create(THIS_MODULE, SIMAAI_MEMOERY_DEV_NAME);
-	if (IS_ERR(simaaimem.dev_class)) {
+	simaaimem.dev_class.name = SIMAAI_MEMOERY_DEV_NAME;
+
+	ret = class_register(&simaaimem.dev_class);
+	if (ret) {
 		dev_err(memdev, "Failed: class_create\n");
-		ret = PTR_ERR(simaaimem.dev_class);
 		goto err_class;
 	}
 
-	dev = device_create(simaaimem.dev_class,
+	dev = device_create(&simaaimem.dev_class,
 			    NULL,
 			    simaaimem.dev_no,
 			    NULL,
@@ -644,7 +645,7 @@ static int simaai_create_char_dev(struct device *memdev)
 	return 0;
 
 err_device:
-	class_destroy(simaaimem.dev_class);
+	class_unregister(&simaaimem.dev_class);
 err_class:
 	cdev_del(&simaaimem.cdev);
 err_cdev:
@@ -718,15 +719,13 @@ static int simaai_memory_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int simaai_memory_remove(struct platform_device *pdev)
+static void simaai_memory_remove(struct platform_device *pdev)
 {
 	struct simaai_memdev *memdev = (struct simaai_memdev *) platform_get_drvdata(pdev);
 	struct device *dev = &pdev->dev;
 
 	simaai_destroy_buffers(memdev);
 	of_reserved_mem_device_release(dev);
-
-	return 0;
 }
 
 static const struct of_device_id simaai_memory_match[] = {

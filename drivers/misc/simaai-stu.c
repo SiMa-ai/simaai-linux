@@ -35,7 +35,7 @@ struct simaai_stu {
 
 static const struct of_device_id simaai_stu_id_table[] = {
 	{ .compatible = "simaai,stu" },
-	{} /* sentinel */
+	{}, /* sentinel */
 };
 
 MODULE_DEVICE_TABLE(of, simaai_stu_id_table);

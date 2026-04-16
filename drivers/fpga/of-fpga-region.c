@@ -12,7 +12,9 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
@@ -423,15 +425,13 @@ eprobe_mgr_put:
 	return ret;
 }
 
-static int of_fpga_region_remove(struct platform_device *pdev)
+static void of_fpga_region_remove(struct platform_device *pdev)
 {
 	struct fpga_region *region = platform_get_drvdata(pdev);
 	struct fpga_manager *mgr = region->mgr;
 
 	fpga_region_unregister(region);
 	fpga_mgr_put(mgr);
-
-	return 0;
 }
 
 static struct platform_driver of_fpga_region_driver = {

@@ -175,7 +175,7 @@ void acamera_isp_ctx_process_interrupt( acamera_isp_ctx_ptr_t p_ictx, uint8_t ev
         }
 
         // Get the frame sequence. Frame start event is used to ensure that the next slot is not overwriting register value
-        p_ictx->frame_sequence = acamera_frontend_frame_counter_isp_demosaic_frame_count_read( PHY_ADDR_ISP );
+        p_ictx->frame_sequence = acamera_frontend_frame_counter_isp_demosaic_frame_count_read( PHY_ADDR_ISP ) - 1 ;
     }
 
     if ( event == ACAMERA_IRQ_AE_STATS ) {

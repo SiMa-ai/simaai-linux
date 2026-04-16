@@ -538,7 +538,7 @@ static int sbuf_get_item_from_arr( struct sbuf_mgr *p_sbuf_mgr, struct sbuf_item
 
             rc = 0;
         } else {
-            LOG( LOG_ERR, "Failed to get DONE buf [ctx#%02d:/%s], USING: %u, DONE: %u, r_idx: %u, status: %u",
+            LOG( LOG_DEBUG, "Failed to get DONE buf [ctx#%02d:/%s], USING: %u, DONE: %u, r_idx: %u, status: %u",
                  p_sbuf_mgr->ctx_id,
                  sbuf_type_str[item->buf_type],
                  info->item_status_count[SBUF_STATUS_DATA_USING],

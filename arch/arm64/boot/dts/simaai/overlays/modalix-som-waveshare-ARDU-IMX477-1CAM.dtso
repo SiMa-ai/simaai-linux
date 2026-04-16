@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+        xclk10: xclk10 {
+                status = "okay";
+                compatible = "fixed-clock";
+                #clock-cells = <0>;
+                clock-frequency = <24000000>;
+        };
+
+        i2cmux0: i2cmux@0 {
+                compatible = "i2c-mux-gpio";
+                i2c-parent = <&i2c52>;
+                #address-cells = <1>;
+                #size-cells = <0>;
+                /* Set port6 gpio6 to GPIO_ACTIVE_LOW mode */
+                mux-gpios = <&port6 6 0>;
+                i2cmux0p0: i2c@0 {
+                    reg = <0>;
+                    #address-cells = <1>;
+                    #size-cells = <0>;
+                };
+        };
+};
+
+&port5 {
+        cam-hog0 {
+                gpio-hog;
+                /* Set port5 gpio6 to GPIO_ACTIVE_HIGH mode */
+                gpios = <6 0>;
+                output-high;
+                line-name = "cam0_powdn";
+        };
+};
+
+&i2c52 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+};
+
+&csi1 {
+    status = "okay";
+};
+
+&axi_vdma1 {
+    status = "okay";
+};
+
+&mipi_dphy_rx1 {
+    status = "okay";
+};
+
+&v4l2video1 {
+    status = "okay";
+};
+
+&v4l2vdma1 {
+    status = "okay";
+};
+
+&csi10in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <450000000>;
+    remote-endpoint = <&cam10out>;
+    clock-continuous;
+};
+
+&i2cmux0p0 {
+        imx477: imx477@1a {
+                compatible = "sony,imx477";
+                reg = <0x1a>;
+
+                clocks = <&xclk10>;
+                clock-names = "xclk";
+
+                port@1 {
+                        cam10out: endpoint@0 {
+                                clock-lanes = <0>;
+                                data-lanes = <1 2>;
+                                link-frequencies = /bits/ 64 <450000000>;
+                                remote-endpoint = <&csi10in>;
+                                clock-continuous;
+                        };
+                };
+        };
+};

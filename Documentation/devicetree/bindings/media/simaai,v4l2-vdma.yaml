@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/simaai,v4l2-vdma.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SiMa.ai V4L2 Vision DMA
+
+maintainers:
+  - Yurii Konovalenko <yurii.konovalenko@sima.ai>
+
+description: |
+  The SiMa.ai V4L2 VDMA driver acts as a bridge entity in the media graph.
+  It manages DMA channels to write video data to memory. It connects to a
+  upstream video source (CSI-RX) and a downstream video interface.
+
+properties:
+  compatible:
+    const: simaai,v4l2-vdma
+
+  id:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: Instance identifier for the VDMA block.
+
+  dmas:
+    minItems: 1
+    maxItems: 4
+    description: List of DMA channel specs for the video channels.
+
+  dma-names:
+    minItems: 1
+    maxItems: 4
+    items:
+      enum:
+        - channel-0
+        - channel-1
+        - channel-2
+        - channel-3
+
+  ports:
+    $ref: /schemas/graph.yaml#/properties/ports
+
+    properties:
+      port@0:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Input for Channel 0 (connected to Sensor/CSI)
+
+      port@1:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Input for Channel 1 (connected to Sensor/CSI)
+
+      port@2:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Input for Channel 2 (connected to Sensor/CSI)
+
+      port@3:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Input for Channel 3 (connected to Sensor/CSI)
+
+      # Ports 4-7 are technically the source pads in the driver structure,
+      # usually represented as output ports in DT to connect to the video node.
+      port@4:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Output for Channel 0 (connected to csi2-video)
+
+      port@5:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Output for Channel 1 (connected to csi2-video)
+
+      port@6:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Output for Channel 2 (connected to csi2-video)
+
+      port@7:
+        $ref: /schemas/graph.yaml#/properties/port
+        description: Output for Channel 3 (connected to csi2-video)
+
+    required:
+      - port@0
+
+required:
+  - compatible
+  - id
+  - dmas
+  - dma-names
+  - ports
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/dma/simaai-dma.h> /* Hypothetical header */
+
+    v4l2_vdma: vdma {
+        compatible = "simaai,v4l2-vdma";
+        id = <0>;
+
+        dmas = <&axi_dma 0>, <&axi_dma 1>;
+        dma-names = "channel-0", "channel-1";
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            /* Inputs from CSI RX */
+            port@0 {
+                reg = <0>;
+                vdma_in0: endpoint {
+                    remote-endpoint = <&csi_rx_out0>;
+                };
+            };
+
+            port@1 {
+                reg = <1>;
+                vdma_in1: endpoint {
+                    remote-endpoint = <&csi_rx_out1>;
+                };
+            };
+
+            /* Outputs to Video Interface */
+            port@4 {
+                reg = <4>;
+                vdma_out0: endpoint {
+                    remote-endpoint = <&csi2_vid_in0>;
+                };
+            };
+
+            port@5 {
+                reg = <5>;
+                vdma_out1: endpoint {
+                    remote-endpoint = <&csi2_vid_in1>;
+                };
+            };
+        };
+    };

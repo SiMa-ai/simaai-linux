@@ -605,10 +605,25 @@ static void dma_chan_issue_pending(struct dma_chan *dchan)
 {
 	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
 	unsigned long flags;
+	struct virt_dma_desc *vd, *prev_vd = NULL;
+	u8 lms = chan->chip->dw->hdata->lms_axi_master;
 
 	spin_lock_irqsave(&chan->vc.lock, flags);
-	if (vchan_issue_pending(&chan->vc))
-		axi_chan_start_first_queued(chan);
+	if (vchan_issue_pending(&chan->vc)) {
+		if (chan->is_video_mode) {
+			list_for_each_entry(vd, &chan->vc.desc_issued, node) {
+				if (prev_vd) {
+					write_desc_llp(&vd_to_axi_desc(prev_vd)->hw_desc[0],
+							vd_to_axi_desc(vd)->hw_desc[0].llp | lms);
+				}
+				prev_vd = vd;
+			}
+			wmb();
+		}
+
+		if (!axi_chan_is_hw_enable(chan))
+			axi_chan_start_first_queued(chan);
+	}
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
 }
 
@@ -714,15 +729,6 @@ static void set_desc_last(struct axi_dma_hw_desc *desc)
 
 	val = le32_to_cpu(desc->lli->ctl_hi);
 	val |= CH_CTL_H_LLI_LAST;
-	desc->lli->ctl_hi = cpu_to_le32(val);
-}
-
-static void unset_desc_last(struct axi_dma_hw_desc *desc)
-{
-	u32 val;
-
-	val = le32_to_cpu(desc->lli->ctl_hi);
-	val &= ~CH_CTL_H_LLI_LAST;
 	desc->lli->ctl_hi = cpu_to_le32(val);
 }
 
@@ -883,17 +889,9 @@ dw_axi_dma_chan_prep_interleaved(struct dma_chan *dchan,
 	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
 	struct axi_dma_hw_desc *hw_desc = NULL;
 	struct axi_dma_desc *desc = NULL;
-
-	unsigned int i;
-	int status;
 	u64 llp = 0;
-	unsigned int iter = 0;
-
-	dma_addr_t device_addr;
-	size_t axi_block_ts;
 	size_t block_ts;
 	u32 ctllo, ctlhi;
-	u32 burst_len;
 	struct axi_dma_desc *desc_iter = NULL;
 	struct axi_dma_desc *prev_desc = NULL;
 
@@ -931,7 +929,7 @@ dw_axi_dma_chan_prep_interleaved(struct dma_chan *dchan,
 
 	hw_desc->lli = axi_desc_get(chan, &hw_desc->llp);
 	if (unlikely(!hw_desc->lli))
-		return -ENOMEM;
+		return NULL;
 
 	write_desc_sar(hw_desc, (chan->id) * CH_LLI_SRC_START_ADDR);
 	write_desc_dar(hw_desc, xt->dst_start);
@@ -963,15 +961,6 @@ dw_axi_dma_chan_prep_interleaved(struct dma_chan *dchan,
 	desc->length += hw_desc->len;
 
 	//axi_chan_dump_lli(chan, hw_desc);
-	list_add_tail(&desc->node, &chan->desc_list);
-
-	list_for_each_entry(desc_iter, &chan->desc_list, node) {
-		if(prev_desc != NULL) {
-			llp = desc_iter->hw_desc->llp;
-			write_desc_llp(prev_desc->hw_desc, llp);
-		}
-		prev_desc = desc_iter;
-	}
 
 	dw_axi_dma_set_hw_channel(chan, true);
 
@@ -1329,7 +1318,7 @@ static noinline void axi_chan_handle_err(struct axi_dma_chan *chan, u32 status)
 	dev_err(chan2dev(chan),
 		"Bad descriptor submitted for %s, cookie: %d, irq: 0x%08x\n",
 		axi_chan_name(chan), vd->tx.cookie, status);
-	axi_chan_list_dump_lli(chan, vd_to_axi_desc(vd));
+	//axi_chan_list_dump_lli(chan, vd_to_axi_desc(vd));
 
 	vchan_cookie_complete(vd);
 
@@ -1345,10 +1334,15 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 	int count = atomic_read(&chan->descs_allocated);
 	struct axi_dma_hw_desc *hw_desc;
 	struct axi_dma_desc *desc;
+	struct virt_dma_desc *vd_iter = NULL;
+	struct axi_dma_desc *desc_iter;
+	struct axi_dma_desc *prev_desc = NULL;
 	struct virt_dma_desc *vd;
 	unsigned long flags;
 	u64 llp;
+	u32 ctlhi;
 	int i;
+	int issued_count = 0;
 
 	dev_dbg(chan2dev(chan), "DMA XFER complete");
 
@@ -1390,7 +1384,27 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 		if (chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS)
 			mark_hwdesc_done(desc);
 
-		if((chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) ||
+		if (chan->is_video_mode)
+			list_for_each_entry(vd_iter, &chan->vc.desc_issued, node)
+				issued_count++;
+
+		if ((chan->is_video_mode) && issued_count <= DMAC_MIN_DESCS_IN_LIST) {
+			/* If we do not have enough descriptors - return it back to the list */
+			chan->dropped++;
+			ctlhi = le32_to_cpu(desc->hw_desc[0].lli->ctl_hi);
+			desc->hw_desc[0].lli->ctl_hi = cpu_to_le32(ctlhi | CH_CTL_H_LLI_VALID);
+			write_desc_llp(desc->hw_desc, 0);
+			list_move_tail(&vd->node, &chan->vc.desc_issued);
+			list_for_each_entry(vd_iter, &chan->vc.desc_issued, node) {
+				desc_iter = vd_to_axi_desc(vd_iter);
+				if(prev_desc != NULL) {
+					llp = desc_iter->hw_desc->llp;
+					write_desc_llp(prev_desc->hw_desc, llp);
+				}
+				prev_desc = desc_iter;
+			}
+			wmb();
+		} else if((chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) ||
 			((chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) &&
 			(get_next_hwdesc_number(desc) < 0)))
 		{
@@ -1407,11 +1421,26 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 
 out:
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
+
+	if (chan->is_video_mode) {
+		chan->completed++;
+		if ((!(chan->completed % 1000)) && (chan->dropped != chan->reported)) {
+			dev_warn(chan2dev(chan), "Processed %d frames, %d dropped", chan->completed, chan->dropped);
+			chan->reported = chan->dropped;
+		}
+	}
 }
 static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 {
 	struct virt_dma_desc *vd;
 	unsigned long flags;
+	struct axi_dma_desc *desc;
+	struct virt_dma_desc *vd_iter = NULL;
+	struct axi_dma_desc *desc_iter;
+	struct axi_dma_desc *prev_desc = NULL;
+	u64 llp;
+	u32 ctlhi;
+	int issued_count = 0;
 
 	dev_dbg(chan2dev(chan), "block transfer complete\n");
 
@@ -1425,13 +1454,42 @@ static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 		goto out;
 	}
 
-	if(chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) {
+	if (chan->is_video_mode)
+		list_for_each_entry(vd_iter, &chan->vc.desc_issued, node)
+			issued_count++;
+
+	if ((chan->is_video_mode) && issued_count <= DMAC_MIN_DESCS_IN_LIST) {
+		/* If we do not have enough descriptors - return it back to the list */
+		desc = vd_to_axi_desc(vd);
+		chan->dropped++;
+		ctlhi = le32_to_cpu(desc->hw_desc[0].lli->ctl_hi);
+		desc->hw_desc[0].lli->ctl_hi = cpu_to_le32(ctlhi | CH_CTL_H_LLI_VALID);
+		write_desc_llp(desc->hw_desc, 0);
+		list_move_tail(&vd->node, &chan->vc.desc_issued);
+		list_for_each_entry(vd_iter, &chan->vc.desc_issued, node) {
+			desc_iter = vd_to_axi_desc(vd_iter);
+			if(prev_desc != NULL) {
+				llp = desc_iter->hw_desc->llp;
+				write_desc_llp(prev_desc->hw_desc, llp);
+			}
+			prev_desc = desc_iter;
+		}
+		wmb();
+	} else if(chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) {
 		/* Remove the completed descriptor from issued list before completing */
 		list_del(&vd->node);
 		vchan_cookie_complete(vd);
 	}
 out:
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
+
+	if (chan->is_video_mode) {
+		chan->completed++;
+		if ((!(chan->completed % 1000)) && (chan->dropped != chan->reported)) {
+			dev_warn(chan2dev(chan), "Processed %d frames, %d dropped", chan->completed, chan->dropped);
+			chan->reported = chan->dropped;
+		}
+	}
 }
 
 static void dw_axi_dma_process_interrupt(struct axi_dma_chan *chan)
@@ -1444,7 +1502,7 @@ static void dw_axi_dma_process_interrupt(struct axi_dma_chan *chan)
 	if(chan->chip->dw->hdata->rdwr_back_feature)
 	{
                 if (status) {
-                        dev_dbg(chan2dev(chan) ,"size of lli:%d \n", sizeof(struct axi_dma_lli));
+                        dev_dbg(chan2dev(chan) ,"size of lli:%lu \n", sizeof(struct axi_dma_lli));
                         struct axi_dma_hw_desc *cur_hw_desc = NULL;
                         u32 *tmp_hw_desc = NULL;
                         for (int j=0; j<16; j++) {
@@ -1455,7 +1513,7 @@ static void dw_axi_dma_process_interrupt(struct axi_dma_chan *chan)
                                 dev_dbg(chan2dev(chan), "LLI:%d transfer size from writeback reg:0x%x, requested size:0x%x \n",j,
 						(cur_hw_desc->lli->status_lo)&WRITEBACK_MASK, cur_hw_desc->lli->block_ts_lo);
                                 while(k < 16) {
-                                        dev_dbg(chan2dev(chan), "addr:0x%x val:0x%x \n", tmp_hw_desc, *tmp_hw_desc);
+                                        dev_dbg(chan2dev(chan), "addr:%#llx val:0x%x \n", (u64)tmp_hw_desc, *tmp_hw_desc);
                                         k++;
                                         tmp_hw_desc++;
                                 }
@@ -1519,13 +1577,14 @@ static irqreturn_t dw_axi_dma_ch_interrupt(int irq, void *dev_id)
 static int dma_chan_terminate_all(struct dma_chan *dchan)
 {
 	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	struct virt_dma_desc *vd, *_vd;
 	u32 offset = chan->id < 16 ? DMAC_CHEN_L : DMAC_CHEN_H;
 	u32 chan_active = BIT(chan->id & 0xf) << DMAC_CHAN_EN_SHIFT;
 	unsigned long flags;
 	u32 val;
 	int ret;
-
-	LIST_HEAD(head);
+	LIST_HEAD(to_abort);
+	LIST_HEAD(to_free);
 
 	axi_chan_disable(chan);
 
@@ -1542,12 +1601,32 @@ static int dma_chan_terminate_all(struct dma_chan *dchan)
 
 	spin_lock_irqsave(&chan->vc.lock, flags);
 
-	vchan_get_all_descriptors(&chan->vc, &head);
-
 	chan->cyclic = false;
-	spin_unlock_irqrestore(&chan->vc.lock, flags);
 
-	vchan_dma_desc_free_list(&chan->vc, &head);
+	if (chan->chip->dw->hdata->abort_on_cancel) {
+		list_splice_tail_init(&chan->vc.desc_submitted, &to_abort);
+		list_splice_tail_init(&chan->vc.desc_issued, &to_abort);
+
+		list_splice_tail_init(&chan->vc.desc_allocated, &to_free);
+		list_splice_tail_init(&chan->vc.desc_terminated, &to_free);
+
+		list_for_each_entry_safe(vd, _vd, &to_abort, node) {
+			list_del(&vd->node);
+			vd->tx_result.result = DMA_TRANS_ABORTED;
+			vchan_cookie_complete(vd);
+		}
+
+		vchan_dma_desc_free_list(&chan->vc, &to_free);
+	} else {
+		vchan_get_all_descriptors(&chan->vc, &to_abort);
+		vchan_dma_desc_free_list(&chan->vc, &to_abort);
+	}
+
+	chan->completed = 0;
+	chan->dropped = 0;
+	chan->reported = 0;
+
+	spin_unlock_irqrestore(&chan->vc.lock, flags);
 
 	dev_vdbg(dchan2dev(dchan), "terminated: %s\n", axi_chan_name(chan));
 
@@ -1791,6 +1870,9 @@ static int parse_device_properties(struct axi_dma_chip *chip)
 	chip->dw->hdata->hardcoded_handshake =
 		device_property_read_bool(dev, "simaai,hardcoded-handshake");
 
+	chip->dw->hdata->abort_on_cancel =
+		device_property_read_bool(dev, "simaai,abort-on-cancel");
+
 	chip->dw->hdata->perch_irq = device_property_read_bool(dev, "snps,perch_irq");
 	/* lms-axi_master is optional property */
 	ret = device_property_read_u32(dev, "snps,lms-axi-master", &tmp);
@@ -1800,6 +1882,13 @@ static int parse_device_properties(struct axi_dma_chip *chip)
 	}
 	/* read write back feature is optional property */
 	chip->dw->hdata->rdwr_back_feature = device_property_read_bool(dev, "snps,rdwr-back-feature");
+
+	/* irq affinity mask feature is optional property */
+	ret = device_property_read_u32(dev, "simaai,irq-affinity-mask", &tmp);
+	chip->dw->hdata->irq_affinity_mask = 0;
+	if (!ret)
+		chip->dw->hdata->irq_affinity_mask = tmp;
+
 	return 0;
 }
 
@@ -1810,6 +1899,8 @@ static int dw_probe(struct platform_device *pdev)
 	struct resource *mem;
 	struct dw_axi_dma *dw;
 	struct dw_axi_dma_hcfg *hdata;
+	cpumask_var_t mask;
+	unsigned int cpu;
 	u32 i;
 	int ret;
 
@@ -1857,6 +1948,21 @@ static int dw_probe(struct platform_device *pdev)
 	if (!dw->chan)
 		return -ENOMEM;
 
+	if (chip->dw->hdata->irq_affinity_mask) {
+		if (!alloc_cpumask_var(&mask, GFP_KERNEL))
+			return -ENOMEM;
+
+		cpumask_clear(mask);
+
+		for_each_set_bit(cpu, (unsigned long *)&chip->dw->hdata->irq_affinity_mask, 32U) {
+			if (!cpu_online(cpu)) {
+				dev_warn(chip->dev, "simaai,irq-affinity-mask: cpu %u not online, skipping", cpu);
+				continue;
+			}
+			cpumask_set_cpu(cpu, mask);
+		}
+	}
+
 	if (hdata->perch_irq) {
 		for (i = 0; i < hdata->nr_channels; i++) {
 			dw->chan[i].irq = platform_get_irq(pdev, i);
@@ -1869,6 +1975,14 @@ static int dw_probe(struct platform_device *pdev)
 					IRQF_SHARED, KBUILD_MODNAME, &dw->chan[i]);
 			if (ret)
 				return ret;
+
+			if (!cpumask_empty(mask)) {
+				ret = irq_set_affinity_and_hint(dw->chan[i].irq, mask);
+				if (ret) {
+					dev_err(chip->dev, "irq_set_affinity_and_hint failed for irq %u: %d", dw->chan[i].irq, ret);
+					return ret;
+				}
+			}
 		}
 	} else {
 		chip->irq = platform_get_irq(pdev, 0);
@@ -1879,6 +1993,14 @@ static int dw_probe(struct platform_device *pdev)
 			       IRQF_SHARED, KBUILD_MODNAME, chip);
 		if (ret)
 			return ret;
+
+		if (!cpumask_empty(mask)) {
+			ret = irq_set_affinity_and_hint(chip->irq, mask);
+			if (ret) {
+				dev_err(chip->dev, "irq_set_affinity_and_hint failed for irq %u: %d", chip->irq, ret);
+				return ret;
+			}
+		}
 	}
 
 	INIT_LIST_HEAD(&dw->dma.channels);
@@ -1892,7 +2014,6 @@ static int dw_probe(struct platform_device *pdev)
 
 		chan->vc.desc_free = vchan_desc_put;
 		vchan_init(&chan->vc, &dw->dma);
-		INIT_LIST_HEAD(&chan->desc_list);
 	}
 
 	/* Set capabilities */
@@ -1974,7 +2095,7 @@ err_pm_disable:
 	return ret;
 }
 
-static int dw_remove(struct platform_device *pdev)
+static void dw_remove(struct platform_device *pdev)
 {
 	struct axi_dma_chip *chip = platform_get_drvdata(pdev);
 	struct dw_axi_dma *dw = chip->dw;
@@ -2003,8 +2124,6 @@ static int dw_remove(struct platform_device *pdev)
 		list_del(&chan->vc.chan.device_node);
 		tasklet_kill(&chan->vc.task);
 	}
-
-	return 0;
 }
 
 static const struct dev_pm_ops dw_axi_dma_pm_ops = {

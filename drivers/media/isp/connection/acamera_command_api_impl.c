@@ -216,6 +216,7 @@ uint8_t sensor_info_preset( void *instance, uint32_t value, uint8_t direction, u
         override_context_param( p_ictx, SENSOR_INFO_FPS_PARAM, p_sensor_preset_info.fps );
         override_context_param( p_ictx, SENSOR_INFO_CHANNELS_PARAM, p_sensor_preset_info.num_channels );
         override_context_param( p_ictx, SENSOR_INFO_DATA_WIDTH_PARAM, p_sensor_preset_info.data_width );
+        override_context_param( p_ictx, SENSOR_INFO_PIXEL_FORMAT_PARAM, p_sensor_preset_info.pixel_format );
 
         *ret_value = value;
     }
@@ -401,7 +402,7 @@ uint8_t application_command_impl( uint8_t command_type, uint8_t command, uint32_
 {
     const uint32_t ctx_id = get_isp_param( ACTIVE_CONTEXT_PARAM );
     const uint32_t cmd_if_mode = get_context_param( get_ctx_ptr_by_id( ctx_id ), CMD_INTERFACE_MODE_PARAM );
-#if 0
+#if !CONFIG_ARCH_SIMAAI
     // If command interface is in passive mode, ignore all set commands (read-only mode)
     if ( ( cmd_if_mode != CMD_IF_MODE_ACTIVE ) && ( direction == COMMAND_SET ) ) {
         return NOT_PERMITTED;

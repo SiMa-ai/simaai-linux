@@ -12,7 +12,6 @@
 #include <linux/clk/spear.h>
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/of_platform.h>
 #include <linux/spinlock_types.h>
 #include "clk.h"
 
@@ -200,7 +199,7 @@ static struct frac_rate_tbl amba_synth_rtbl[] = {
  * We can program this synthesizer to make cpu run on different clock
  * frequencies.
  * Following table provides configuration values to let cpu run on 200,
- * 250, 332, 400 or 500 MHz considering different possibilites of input
+ * 250, 332, 400 or 500 MHz considering different possibilities of input
  * (vco1div2) clock.
  *
  * --------------------------------------------------------------------

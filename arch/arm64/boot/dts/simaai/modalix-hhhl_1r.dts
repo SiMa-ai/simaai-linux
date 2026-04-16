@@ -37,12 +37,12 @@
 
 			trips {
 				board_alert: board-alert {
-					temperature = <75000>;
+					temperature = <85000>;
 					hysteresis = <3000>;
 					type = "active";
 				};
 				board_crit: board-crit {
-					temperature = <85000>;
+					temperature = <96000>;
 					hysteresis = <2000>;
 					type = "critical";
 				};
@@ -230,23 +230,6 @@
 
 &uart12 {
 	status = "okay";
-};
-
-&csi0 {
-	status = "disabled";
-};
-
-&csi1 {
-	status = "disabled";
-};
-
-&csi2 {
-	status = "disabled";
-};
-
-&csi3 {
-	isp-connected = <0>;
-	status = "disabled";
 };
 
 &pcie0_ep {

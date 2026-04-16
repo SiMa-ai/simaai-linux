@@ -2,25 +2,14 @@
 #ifndef __ASPEED_HACE_H__
 #define __ASPEED_HACE_H__
 
-#include <linux/interrupt.h>
-#include <linux/delay.h>
-#include <linux/err.h>
-#include <linux/fips.h>
-#include <linux/dma-mapping.h>
 #include <crypto/aes.h>
-#include <crypto/des.h>
-#include <crypto/scatterwalk.h>
-#include <crypto/internal/aead.h>
-#include <crypto/internal/akcipher.h>
-#include <crypto/internal/des.h>
-#include <crypto/internal/hash.h>
-#include <crypto/internal/kpp.h>
-#include <crypto/internal/skcipher.h>
-#include <crypto/algapi.h>
 #include <crypto/engine.h>
-#include <crypto/hmac.h>
-#include <crypto/sha1.h>
+#include <crypto/hash.h>
 #include <crypto/sha2.h>
+#include <linux/bits.h>
+#include <linux/compiler_attributes.h>
+#include <linux/interrupt.h>
+#include <linux/types.h>
 
 /*****************************
  *                           *
@@ -130,7 +119,6 @@
 #define SHA_FLAGS_SHA512		BIT(4)
 #define SHA_FLAGS_SHA512_224		BIT(5)
 #define SHA_FLAGS_SHA512_256		BIT(6)
-#define SHA_FLAGS_HMAC			BIT(8)
 #define SHA_FLAGS_FINUP			BIT(9)
 #define SHA_FLAGS_MASK			(0xff)
 
@@ -144,6 +132,7 @@
 					 HACE_CMD_OFB | HACE_CMD_CTR)
 
 struct aspeed_hace_dev;
+struct scatterlist;
 
 typedef int (*aspeed_hace_fn_t)(struct aspeed_hace_dev *);
 
@@ -171,24 +160,18 @@ struct aspeed_engine_hash {
 	aspeed_hace_fn_t		dma_prepare;
 };
 
-struct aspeed_sha_hmac_ctx {
-	struct crypto_shash *shash;
-	u8 ipad[SHA512_BLOCK_SIZE];
-	u8 opad[SHA512_BLOCK_SIZE];
-};
-
 struct aspeed_sham_ctx {
-	struct crypto_engine_ctx	enginectx;
-
 	struct aspeed_hace_dev		*hace_dev;
-	unsigned long			flags;	/* hmac flag */
-
-	struct aspeed_sha_hmac_ctx	base[0];
 };
 
 struct aspeed_sham_reqctx {
+	/* DMA buffer written by hardware */
+	u8			digest[SHA512_DIGEST_SIZE] __aligned(64);
+
+	/* Software state sorted by size. */
+	u64			digcnt[2];
+
 	unsigned long		flags;		/* final update flag should no use*/
-	unsigned long		op;		/* final or update */
 	u32			cmd;		/* trigger cmd */
 
 	/* walk state */
@@ -200,17 +183,12 @@ struct aspeed_sham_reqctx {
 	size_t			digsize;
 	size_t			block_size;
 	size_t			ivsize;
-	const __be32		*sha_iv;
 
-	/* remain data buffer */
-	u8			buffer[SHA512_BLOCK_SIZE * 2];
 	dma_addr_t		buffer_dma_addr;
-	size_t			bufcnt;		/* buffer counter */
-
-	/* output buffer */
-	u8			digest[SHA512_DIGEST_SIZE] __aligned(64);
 	dma_addr_t		digest_dma_addr;
-	u64			digcnt[2];
+
+	/* This is DMA too but read-only for hardware. */
+	u8			buffer[SHA512_BLOCK_SIZE + 16];
 };
 
 struct aspeed_engine_crypto {
@@ -235,8 +213,6 @@ struct aspeed_engine_crypto {
 };
 
 struct aspeed_cipher_ctx {
-	struct crypto_engine_ctx	enginectx;
-
 	struct aspeed_hace_dev		*hace_dev;
 	int				key_len;
 	u8				key[AES_MAX_KEYLENGTH];
@@ -275,8 +251,8 @@ struct aspeed_hace_alg {
 	const char			*alg_base;
 
 	union {
-		struct skcipher_alg	skcipher;
-		struct ahash_alg	ahash;
+		struct skcipher_engine_alg skcipher;
+		struct ahash_engine_alg ahash;
 	} alg;
 };
 

@@ -38,7 +38,6 @@
 #include "fw-interface.h"
 #include "isp-v4l2-common.h"
 #include "isp-v4l2.h"
-
 #include "isp-v4l2-stream.h"
 
 #if defined( ISP_HAS_METADATA_FSM )
@@ -84,16 +83,72 @@ static isp_v4l2_stream_fmt_list_t isp_v4l2_stream_supported_formats[V4L2_STREAM_
 
     [V4L2_STREAM_TYPE_RAW] = {
         .formats = (isp_v4l2_fmt_t[]) {
-            {
-                .description = "RAW 8",
+			{
+                .description = "SRGGB8",
                 .pixelformat = V4L2_PIX_FMT_SRGGB8,
                 .data_width = 8,
                 .num_planes = 1,
                 .is_yuv = 0,
-				.mbus_code = MEDIA_BUS_FMT_SRGGB8_1X8,
+		        .mbus_code = MEDIA_BUS_FMT_SRGGB8_1X8,
             },
             {
-                .description = "RAW 12",
+                .description = "SBGGR8",
+                .pixelformat = V4L2_PIX_FMT_SBGGR8,
+                .data_width = 8,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SBGGR8_1X8,
+            },
+            {
+                .description = "SGBRG8",
+                .pixelformat = V4L2_PIX_FMT_SGBRG8,
+                .data_width = 8,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SGBRG8_1X8,
+            },
+            {
+                .description = "SGRBG8",
+                .pixelformat = V4L2_PIX_FMT_SGRBG8,
+                .data_width = 8,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SGRBG8_1X8,
+            },
+            {
+                .description = "SRGGB10",
+                .pixelformat = V4L2_PIX_FMT_SRGGB10,
+                .data_width = 10,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SRGGB10_1X10,
+            },
+            {
+                .description = "SBGGR10",
+                .pixelformat = V4L2_PIX_FMT_SBGGR10,
+                .data_width = 10,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SBGGR10_1X10,
+            },
+            { 
+                .description = "SGBRG10",
+                .pixelformat = V4L2_PIX_FMT_SGBRG10,
+                .data_width = 10,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SGBRG10_1X10,
+            },
+            {
+                .description = "SGRBG10",
+                .pixelformat = V4L2_PIX_FMT_SGRBG10,
+                .data_width = 10,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SGRBG10_1X10,
+            },
+            {
+                .description = "SRGGB12",
                 .pixelformat = V4L2_PIX_FMT_SRGGB12,
                 .data_width = 12,
                 .num_planes = 1,
@@ -101,15 +156,95 @@ static isp_v4l2_stream_fmt_list_t isp_v4l2_stream_supported_formats[V4L2_STREAM_
 				.mbus_code = MEDIA_BUS_FMT_SRGGB12_1X12,
             },
             {
-                .description = "RAW 16",
+                .description = "SBGGR12",
+                .pixelformat = V4L2_PIX_FMT_SBGGR12,
+                .data_width = 12,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SBGGR12_1X12,
+            },
+            {
+                .description = "SGBRG12",
+                .pixelformat = V4L2_PIX_FMT_SGBRG12,
+                .data_width = 12,
+                .num_planes = 1,
+                .is_yuv = 0,
+                .mbus_code = MEDIA_BUS_FMT_SGBRG12_1X12
+            },
+            {
+                .description = "SGRBG12",
+                .pixelformat = V4L2_PIX_FMT_SGRBG12,
+                .data_width = 12,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SGRBG12_1X12,
+            },
+            {
+                .description = "SRGGB14",
+                .pixelformat = V4L2_PIX_FMT_SRGGB14,
+                .data_width = 14,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SRGGB14_1X14,
+            },
+            {
+                .description = "SBGGR14",
+                .pixelformat = V4L2_PIX_FMT_SBGGR14,
+                .data_width = 14,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SBGGR14_1X14,
+            },
+            {
+                .description = "SGBRG14",
+                .pixelformat = V4L2_PIX_FMT_SGBRG14,
+                .data_width = 14,
+                .num_planes = 1,
+                .is_yuv = 0,
+                .mbus_code = MEDIA_BUS_FMT_SGBRG14_1X14,
+            },
+            {
+                .description = "SGRBG14",
+                .pixelformat = V4L2_PIX_FMT_SGRBG14,
+                .data_width = 14,
+                .num_planes = 1,
+                .is_yuv = 0,
+                .mbus_code = MEDIA_BUS_FMT_SGRBG14_1X14,
+            },
+            {
+                .description = "SRGGB16",
                 .pixelformat = V4L2_PIX_FMT_SRGGB16,
                 .data_width = 16,
                 .num_planes = 1,
                 .is_yuv = 0,
 				.mbus_code = MEDIA_BUS_FMT_SRGGB16_1X16,
-            }
+            },
+            {
+                .description = "SBGGR16",
+                .pixelformat = V4L2_PIX_FMT_SBGGR16,
+                .data_width = 16,
+                .num_planes = 1,
+                .is_yuv = 0,
+				.mbus_code = MEDIA_BUS_FMT_SBGGR16_1X16,
+            },
+            {
+                .description = "SGBRG16",
+                .pixelformat = V4L2_PIX_FMT_SGBRG16,
+                .data_width = 16,
+                .num_planes = 1,
+                .is_yuv = 0,
+                .mbus_code = MEDIA_BUS_FMT_SGBRG16_1X16,
+            },
+            {
+                .description = "SGRBG16",
+                .pixelformat = V4L2_PIX_FMT_SGRBG16,
+                .data_width = 16,
+                .num_planes = 1,
+                .is_yuv = 0,
+                .mbus_code = MEDIA_BUS_FMT_SGRBG16_1X16,
+            },
         },
-        .num_formats = 3
+        .num_formats = 20
     },
     [V4L2_STREAM_TYPE_OUT] = {
         .formats = (isp_v4l2_fmt_t[]) {
@@ -119,7 +254,7 @@ static isp_v4l2_stream_fmt_list_t isp_v4l2_stream_supported_formats[V4L2_STREAM_
                 .data_width = 32,
                 .num_planes = 1,
                 .is_yuv = 0,
-				.mbus_code = 0, //TODO : Add correct code here
+				.mbus_code = MEDIA_BUS_FMT_ARGB8888_1X32
             },
             {
                 .description = "RGB24",
@@ -135,7 +270,7 @@ static isp_v4l2_stream_fmt_list_t isp_v4l2_stream_supported_formats[V4L2_STREAM_
                 .data_width = 8,
                 .num_planes = 2,
                 .is_yuv = 1,
-				.mbus_code = 0, //TODO : Add correct code here.
+				.mbus_code = 0, //TODO : Add correct code here
             }
         },
         .num_formats = 3
@@ -296,7 +431,7 @@ static uint32_t isp_v4l2_stream_get_default_pixelformat( isp_v4l2_stream_t *pstr
         // Check sensor data width for the current sensor preset
         const uint8_t mode = pstream->stream_common->sensor_info.cur_mode;
         const uint8_t sub_mode = pstream->stream_common->sensor_info.mode[mode].cur_sub_mode;
-        const uint8_t data_width = pstream->stream_common->sensor_info.mode[mode].sub_mode[sub_mode].data_width;
+        const uint8_t data_width = pstream->stream_common->sensor_info.mode[mode].data_width;
 
         uint32_t pixelformat = 0, i;
         uint32_t nearest_suitable = isp_v4l2_stream_supported_formats[V4L2_STREAM_TYPE_RAW].num_formats;
@@ -386,12 +521,9 @@ static int isp_v4l2_stream_get_planes( struct vb2_buffer *vb,
                 // so to write original user address as buffer base address we subtract it here
                 frame->planes[i].address.low -= ISPAS_MINUS_SYSPHY;
             }
-#if 0
-			LOG(LOG_INFO, "Buffer phy address : %#llx, bus addr: %#x[%#x], virt : %#llx", phys_addr,
-					frame->planes[i].address.low,
-				bus_addr, frame->planes[i].virt_addr);
-#endif
-
+	    
+	        LOG(LOG_DEBUG, "Buffer phy address : %#llx, bus addr: %#x[%#x], virt : %#llx", phys_addr,
+				frame->planes[i].address.low, bus_addr, frame->planes[i].virt_addr);
         }
 
         // Check if pixel format is NV12 and adjust UV plane resolution according to subsampling
@@ -852,7 +984,9 @@ int isp_v4l2_stream_init( isp_v4l2_stream_t **ppstream, int stream_type, int ctx
 
     // Set new stream format to default ISP settings
     isp_v4l2_stream_try_format( new_stream, V4L2_STREAM_DIRECTION_CAP, &( new_stream->cur_v4l2_fmt[V4L2_STREAM_DIRECTION_CAP] ) );
-
+	if (stream_type == V4L2_STREAM_TYPE_M2M) {
+		isp_v4l2_stream_try_format( new_stream, V4L2_STREAM_DIRECTION_OUT, &( new_stream->cur_v4l2_fmt[V4L2_STREAM_DIRECTION_OUT] ) );
+       }
     int stream_direction;
     for ( stream_direction = 0; stream_direction < V4L2_STREAM_DIRECTION_MAX; stream_direction++ ) {
         /* init list and list size*/
@@ -1136,15 +1270,18 @@ int isp_v4l2_stream_enum_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dir
     /* reset flag */
     f->flags = 0;
 
+	//TODO : Check why is this not working
+#if 0
     /* copy description */
-    strlcpy( f->description, fmt->description, desc_size );
-
+    strncpy( f->description, fmt->description, desc_size );
+#endif
     /* copy format code */
     f->pixelformat = fmt->pixelformat;
 
+#if 0
     LOG( LOG_INFO, "[Stream#%d-%s] index: %d, format: 0x%x, desc: %s.\n",
          pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), f->index, f->pixelformat, f->description );
-
+#endif
     return 0;
 }
 
@@ -1167,13 +1304,13 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 
         const uint8_t mode = pstream->stream_common->sensor_info.cur_mode;
         const uint8_t sub_mode = pstream->stream_common->sensor_info.mode[mode].cur_sub_mode;
-        const uint8_t sensor_data_width = pstream->stream_common->sensor_info.mode[mode].sub_mode[sub_mode].data_width;
+        const uint8_t sensor_data_width = pstream->stream_common->sensor_info.mode[mode].data_width;
 
         // Check current sensor data width against the requested format and reset format to default if there is a mismatch
         if ( sensor_data_width != tfmt->data_width ) {
             LOG( LOG_NOTICE, "[Stream#%d-%s] Requested format: %s data width (%d) does not match the sensor configured data width (%d), default format will be used instead.",
                  pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
-                 isp_v4l2_stream_get_pixelformat_string( f->fmt.pix.pixelformat ), tfmt->data_width, sensor_data_width );
+                 isp_v4l2_stream_get_pixelformat_string( f->fmt.pix_mp.pixelformat ), tfmt->data_width, sensor_data_width );
             tfmt = NULL;
         }
     }
@@ -1184,7 +1321,7 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
         if ( default_pixel_format != 0 ) {
             LOG( LOG_INFO, "[Stream#%d-%s] Requested format: 0x%08x is not supported, setting default format to: 0x%08x (%s)",
                  pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
-                 f->fmt.pix.pixelformat, default_pixel_format, isp_v4l2_stream_get_pixelformat_string( default_pixel_format ) );
+                 f->fmt.pix_mp.pixelformat, default_pixel_format, isp_v4l2_stream_get_pixelformat_string( default_pixel_format ) );
             if ( stream_direction == V4L2_STREAM_DIRECTION_CAP ) {
                 f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
             } else {
@@ -1194,7 +1331,7 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
             tfmt = isp_v4l2_stream_find_format( f->fmt.pix_mp.pixelformat, pstream->stream_type, stream_direction );
         } else {
             LOG( LOG_ERR, "[Stream#%d-%s] Requested format: 0x%08x is not supported. Failed to get default format.",
-                 pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), f->fmt.pix.pixelformat );
+                 pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), f->fmt.pix_mp.pixelformat );
         }
     }
 
@@ -1218,15 +1355,15 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
         f->fmt.pix.width = ISP_V4L2_METADATA_SIZE;
         f->fmt.pix.height = 1;
     } else {
-        if ( f->fmt.pix.width == 0 || f->fmt.pix.height == 0 ) {
+        if ( f->fmt.pix_mp.width == 0 || f->fmt.pix_mp.height == 0 ) {
             const uint8_t mode = pstream->stream_common->sensor_info.cur_mode;
 
-            f->fmt.pix.width = pstream->stream_common->sensor_info.mode[mode].width;
-            f->fmt.pix.height = pstream->stream_common->sensor_info.mode[mode].height;
+            f->fmt.pix_mp.width = pstream->stream_common->sensor_info.mode[mode].width;
+            f->fmt.pix_mp.height = pstream->stream_common->sensor_info.mode[mode].height;
         }
 
-        v4l_bound_align_image( &f->fmt.pix.width, 48, ISP_V4L2_MAX_WIDTH, 1,
-                               &f->fmt.pix.height, 32, ISP_V4L2_MAX_HEIGHT, 1, 1 );
+        v4l_bound_align_image( &f->fmt.pix_mp.width, 48, ISP_V4L2_MAX_WIDTH, 1,
+                               &f->fmt.pix_mp.height, 32, ISP_V4L2_MAX_HEIGHT, 1, 1 );
     }
 
     // All streams are multiplanar
@@ -1235,8 +1372,9 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
     } else {
         f->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
     }
-    f->fmt.pix.field = V4L2_FIELD_NONE;
+    f->fmt.pix_mp.field = V4L2_FIELD_NONE;
     f->fmt.pix_mp.num_planes = tfmt->num_planes;
+    f->fmt.pix_mp.flags |= V4L2_PIX_FMT_FLAG_SET_CSC;
     f->fmt.pix_mp.colorspace = ( tfmt->is_yuv ) ? V4L2_COLORSPACE_SMPTE170M : V4L2_COLORSPACE_SRGB;
 
     uint8_t i;
@@ -1272,15 +1410,13 @@ int isp_v4l2_stream_get_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 
     *f = pstream->cur_v4l2_fmt[stream_direction];
 
-#if 0
-    LOG( LOG_INFO, "[Stream#%d-%s] Get stream format: width: %4u, height: %4u, format: 0x%x (%s)",
+       LOG( LOG_DEBUG, "[Stream#%d-%s] Get stream format: width: %4u, height: %4u, format: 0x%x (%s)",
          pstream->stream_type,
          isp_v4l2_stream_get_direction_string( stream_direction ),
          f->fmt.pix_mp.width,
          f->fmt.pix_mp.height,
          f->fmt.pix_mp.pixelformat,
          isp_v4l2_stream_get_pixelformat_string( f->fmt.pix_mp.pixelformat ) );
-#endif
 
     if ( f->fmt.pix_mp.width == 0 || f->fmt.pix_mp.height == 0 || f->fmt.pix_mp.pixelformat == 0 ) { //not formatted yet
         LOG( LOG_NOTICE, "Compliance error. Uninitialized format" );
@@ -1301,7 +1437,7 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
         return -EINVAL;
     }
 
-    LOG( LOG_NOTICE, "[Stream#%d-%s] Set stream format: width: %4u, height: %4u, format: 0x%x (%s)",
+    LOG( LOG_DEBUG, "[Stream#%d-%s] Set stream format: width: %4u, height: %4u, format: 0x%x (%s)",
          pstream->stream_type,
          isp_v4l2_stream_get_direction_string( stream_direction ),
          f->fmt.pix_mp.width,
@@ -1319,7 +1455,7 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 
     /* update resolution */
     rc = fw_intf_stream_set_resolution( pstream->ctx_id, &pstream->stream_common->sensor_info,
-                                        pstream->stream_type, &( f->fmt.pix_mp.width ), &( f->fmt.pix_mp.height ) );
+                                        pstream->stream_type, &( f->fmt.pix_mp.width ), &( f->fmt.pix_mp.height ), f->fmt.pix_mp.pixelformat );
     if ( rc < 0 ) {
         LOG( LOG_ERR, "[Stream#%d-%s] Function stream_set_resolution call failed, rc: %d",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), rc );
@@ -1343,13 +1479,15 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
     /* update format field */
     pstream->cur_v4l2_fmt[stream_direction] = *f;
 
-    LOG( LOG_NOTICE, "[Stream#%d-%s] Effective stream format: width: %4u, height: %4u, type: %u, format: 0x%x (%s)",
+    LOG( LOG_NOTICE, "[Stream#%d-%s] Effective stream format: width: %4u, height: %4u, type: %u, format: 0x%x (%s), cp: %d, bpl: %d",
          pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
          pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.width,
          pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.height,
          pstream->cur_v4l2_fmt[stream_direction].type,
          pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.pixelformat,
-         isp_v4l2_stream_get_pixelformat_string( pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.pixelformat ) );
+         isp_v4l2_stream_get_pixelformat_string( pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.pixelformat ),
+         pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.colorspace,
+         pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.plane_fmt[0].bytesperline);
 
     return 0;
 }

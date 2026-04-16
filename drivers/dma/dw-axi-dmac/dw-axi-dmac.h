@@ -21,6 +21,7 @@
 #define DMAC_MAX_CHANNELS	32
 #define DMAC_MAX_MASTERS	2
 #define DMAC_MAX_BLK_SIZE	0x400000
+#define DMAC_MIN_DESCS_IN_LIST	4
 
 #define DMAC_DESC_SUBMITTED (1)
 #define DMAC_DESC_ISSUED    (2)
@@ -39,7 +40,9 @@ struct dw_axi_dma_hcfg {
 	bool	reg_map_8_channels;
 	bool	restrict_axi_burst_len;
 	bool	hardcoded_handshake;
+	bool	abort_on_cancel;
 	u64	dev_addr_mask;
+	u32	irq_affinity_mask;
 	u32 xfer_mode;
 	bool perch_irq;
 	u32  lms_axi_master;
@@ -67,7 +70,9 @@ struct axi_dma_chan {
 	**	SiMa.ai specfic for video transfer
 	*/
 	bool 				is_video_mode;
-	struct list_head 	desc_list;
+	u64				completed;
+	u64				dropped;
+	u64				reported;
 	
 };
 
@@ -251,7 +256,7 @@ static inline struct axi_dma_chan *dchan_to_axi_dma_chan(struct dma_chan *dchan)
 
 /* Below constants are Sima.ai Modalix MLSoC Board */
 #define CH_LLI_SRC_START_ADDR		0x1000
-#define FRAME_METADATA_SIZE			32
+#define FRAME_METADATA_SIZE			0
 #define CH_SSTATAR_START_ADDR		0x100
 #define CH_CFG_H_DST_OST_LIMIT_VAL	15
 #define CH_CFG_L_WR_UID_VAL			15

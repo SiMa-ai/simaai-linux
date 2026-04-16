@@ -1,10 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#ifdef CONFIG_PPC64
-#define PROVIDE32(x)	PROVIDE(__unused__##x)
-#else
-#define PROVIDE32(x)	PROVIDE(x)
-#endif
-
 #define BSS_FIRST_SECTIONS *(.bss.prominit)
 #define EMITS_PT_NOTE
 #define RO_EXCEPTION_TABLE_ALIGN	0
@@ -107,12 +101,9 @@ SECTIONS
 #endif
 		/* careful! __ftr_alt_* sections need to be close to .text */
 		*(.text.hot .text.hot.* TEXT_MAIN .text.fixup .text.unlikely .text.unlikely.* .fixup __ftr_alt_* .ref.text);
-#ifdef CONFIG_PPC64
 		*(.tramp.ftrace.text);
-#endif
 		NOINSTR_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		IRQENTRY_TEXT
@@ -125,13 +116,11 @@ SECTIONS
 		 * included with the main text sections, so put it by itself.
 		 */
 		*(.sfpr);
-		MEM_KEEP(init.text)
-		MEM_KEEP(exit.text)
+		*(.text.asan.* .text.tsan.*)
 	} :text
 
 	. = ALIGN(PAGE_SIZE);
 	_etext = .;
-	PROVIDE32 (etext = .);
 
 	/* Read-only data */
 	RO_DATA(PAGE_SIZE)
@@ -169,12 +158,18 @@ SECTIONS
 	}
 
 #else /* CONFIG_PPC32 */
+#ifndef CONFIG_PPC_KERNEL_PCREL
 	.toc1 : AT(ADDR(.toc1) - LOAD_OFFSET) {
 		*(.toc1)
 	}
+#endif
 
 	.got : AT(ADDR(.got) - LOAD_OFFSET) ALIGN(256) {
+#ifdef CONFIG_PPC_KERNEL_PCREL
+		*(.got)
+#else
 		*(.got .toc)
+#endif
 	}
 
 	SOFT_MASK_TABLE(8)
@@ -263,23 +258,22 @@ SECTIONS
 	.init.text : AT(ADDR(.init.text) - LOAD_OFFSET) {
 		_sinittext = .;
 		INIT_TEXT
-
+		*(.tramp.ftrace.init);
 		/*
 		 *.init.text might be RO so we must ensure this section ends on
 		 * a page boundary.
 		 */
 		. = ALIGN(PAGE_SIZE);
 		_einittext = .;
-#ifdef CONFIG_PPC64
-		*(.tramp.ftrace.init);
-#endif
 	} :text
 
 	/* .exit.text is discarded at runtime, not link time,
 	 * to deal with references from __bug_table
 	 */
 	.exit.text : AT(ADDR(.exit.text) - LOAD_OFFSET) {
+		__exittext_begin = .;
 		EXIT_TEXT
+		__exittext_end = .;
 	}
 
 	. = ALIGN(PAGE_SIZE);
@@ -393,7 +387,6 @@ SECTIONS
 
 	. = ALIGN(PAGE_SIZE);
 	_edata  =  .;
-	PROVIDE32 (edata = .);
 
 /*
  * And finally the bss
@@ -403,7 +396,6 @@ SECTIONS
 
 	. = ALIGN(PAGE_SIZE);
 	_end = . ;
-	PROVIDE32 (end = .);
 
 	DWARF_DEBUG
 	ELF_DETAILS
@@ -411,7 +403,7 @@ SECTIONS
 	DISCARDS
 	/DISCARD/ : {
 		*(*.EMB.apuinfo)
-		*(.glink .iplt .plt .comment)
+		*(.glink .iplt .plt)
 		*(.gnu.version*)
 		*(.gnu.attributes)
 		*(.eh_frame)

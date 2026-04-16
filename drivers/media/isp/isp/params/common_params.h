@@ -27,7 +27,7 @@
 // CONTEXT PARAMETERS CLASS
 // ------------------------------------------------------------------------------ //
 #define CONTEXT_PARAM_CLASS_MASK 0x00000080
-#define CONTEXT_PARAM_CLASS_MAX 0x0000005F
+#define CONTEXT_PARAM_CLASS_MAX 0x00000060
 
 
 // ------------------------------------------------------------------------------ //

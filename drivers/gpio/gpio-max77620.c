@@ -223,20 +223,17 @@ static int max77620_gpio_set_debounce(struct max77620_gpio *mgpio,
 	return ret;
 }
 
-static void max77620_gpio_set(struct gpio_chip *gc, unsigned int offset,
-			      int value)
+static int max77620_gpio_set(struct gpio_chip *gc, unsigned int offset,
+			     int value)
 {
 	struct max77620_gpio *mgpio = gpiochip_get_data(gc);
 	u8 val;
-	int ret;
 
 	val = (value) ? MAX77620_CNFG_GPIO_OUTPUT_VAL_HIGH :
 				MAX77620_CNFG_GPIO_OUTPUT_VAL_LOW;
 
-	ret = regmap_update_bits(mgpio->rmap, GPIO_REG_ADDR(offset),
-				 MAX77620_CNFG_GPIO_OUTPUT_VAL_MASK, val);
-	if (ret < 0)
-		dev_err(mgpio->dev, "CNFG_GPIO_OUT update failed: %d\n", ret);
+	return regmap_update_bits(mgpio->rmap, GPIO_REG_ADDR(offset),
+				  MAX77620_CNFG_GPIO_OUTPUT_VAL_MASK, val);
 }
 
 static int max77620_gpio_set_config(struct gpio_chip *gc, unsigned int offset,
@@ -330,8 +327,6 @@ static int max77620_gpio_probe(struct platform_device *pdev)
 	girq->handler = handle_edge_irq;
 	girq->init_hw = max77620_gpio_irq_init_hw;
 	girq->threaded = true;
-
-	platform_set_drvdata(pdev, mgpio);
 
 	ret = devm_gpiochip_add_data(&pdev->dev, &mgpio->gpio_chip, mgpio);
 	if (ret < 0) {

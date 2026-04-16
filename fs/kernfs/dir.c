@@ -17,7 +17,6 @@
 
 #include "kernfs-internal.h"
 
-static DEFINE_SPINLOCK(kernfs_rename_lock);	/* kn->parent and ->name */
 /*
  * Don't use rename_lock to piggy back on pr_cont_buf. We don't want to
  * call pr_cont() while holding rename_lock. Because sometimes pr_cont()
@@ -27,7 +26,6 @@ static DEFINE_SPINLOCK(kernfs_rename_lock);	/* kn->parent and ->name */
  */
 static DEFINE_SPINLOCK(kernfs_pr_cont_lock);
 static char kernfs_pr_cont_buf[PATH_MAX];	/* protected by pr_cont_lock */
-static DEFINE_SPINLOCK(kernfs_idr_lock);	/* root->ino_idr */
 
 #define rb_to_kn(X) rb_entry((X), struct kernfs_node, rb)
 
@@ -51,22 +49,14 @@ static bool kernfs_lockdep(struct kernfs_node *kn)
 #endif
 }
 
-static int kernfs_name_locked(struct kernfs_node *kn, char *buf, size_t buflen)
-{
-	if (!kn)
-		return strlcpy(buf, "(null)", buflen);
-
-	return strlcpy(buf, kn->parent ? kn->name : "/", buflen);
-}
-
 /* kernfs_node_depth - compute depth from @from to @to */
 static size_t kernfs_depth(struct kernfs_node *from, struct kernfs_node *to)
 {
 	size_t depth = 0;
 
-	while (to->parent && to != from) {
+	while (rcu_dereference(to->__parent) && to != from) {
 		depth++;
-		to = to->parent;
+		to = rcu_dereference(to->__parent);
 	}
 	return depth;
 }
@@ -84,18 +74,18 @@ static struct kernfs_node *kernfs_common_ancestor(struct kernfs_node *a,
 	db = kernfs_depth(rb->kn, b);
 
 	while (da > db) {
-		a = a->parent;
+		a = rcu_dereference(a->__parent);
 		da--;
 	}
 	while (db > da) {
-		b = b->parent;
+		b = rcu_dereference(b->__parent);
 		db--;
 	}
 
 	/* worst case b and a will be the same at root */
 	while (b != a) {
-		b = b->parent;
-		a = a->parent;
+		b = rcu_dereference(b->__parent);
+		a = rcu_dereference(a->__parent);
 	}
 
 	return a;
@@ -125,9 +115,9 @@ static struct kernfs_node *kernfs_common_ancestor(struct kernfs_node *a,
  * kn_to:   /n1/n2/n3         [depth=3]
  * result:  /../..
  *
- * [3] when @kn_to is NULL result will be "(null)"
+ * [3] when @kn_to is %NULL result will be "(null)"
  *
- * Returns the length of the full path.  If the full length is equal to or
+ * Return: the length of the constructed path.  If the path would have been
  * greater than @buflen, @buf contains the truncated path with the trailing
  * '\0'.  On error, -errno is returned.
  */
@@ -138,19 +128,17 @@ static int kernfs_path_from_node_locked(struct kernfs_node *kn_to,
 	struct kernfs_node *kn, *common;
 	const char parent_str[] = "/..";
 	size_t depth_from, depth_to, len = 0;
+	ssize_t copied;
 	int i, j;
 
 	if (!kn_to)
-		return strlcpy(buf, "(null)", buflen);
+		return strscpy(buf, "(null)", buflen);
 
 	if (!kn_from)
 		kn_from = kernfs_root(kn_to)->kn;
 
 	if (kn_from == kn_to)
-		return strlcpy(buf, "/", buflen);
-
-	if (!buf)
-		return -EINVAL;
+		return strscpy(buf, "/", buflen);
 
 	common = kernfs_common_ancestor(kn_from, kn_to);
 	if (WARN_ON(!common))
@@ -161,18 +149,22 @@ static int kernfs_path_from_node_locked(struct kernfs_node *kn_to,
 
 	buf[0] = '\0';
 
-	for (i = 0; i < depth_from; i++)
-		len += strlcpy(buf + len, parent_str,
-			       len < buflen ? buflen - len : 0);
+	for (i = 0; i < depth_from; i++) {
+		copied = strscpy(buf + len, parent_str, buflen - len);
+		if (copied < 0)
+			return copied;
+		len += copied;
+	}
 
 	/* Calculate how many bytes we need for the rest */
 	for (i = depth_to - 1; i >= 0; i--) {
+		const char *name;
+
 		for (kn = kn_to, j = 0; j < i; j++)
-			kn = kn->parent;
-		len += strlcpy(buf + len, "/",
-			       len < buflen ? buflen - len : 0);
-		len += strlcpy(buf + len, kn->name,
-			       len < buflen ? buflen - len : 0);
+			kn = rcu_dereference(kn->__parent);
+
+		name = rcu_dereference(kn->name);
+		len += scnprintf(buf + len, buflen - len, "/%s", name);
 	}
 
 	return len;
@@ -185,22 +177,29 @@ static int kernfs_path_from_node_locked(struct kernfs_node *kn_to,
  * @buflen: size of @buf
  *
  * Copies the name of @kn into @buf of @buflen bytes.  The behavior is
- * similar to strlcpy().  It returns the length of @kn's name and if @buf
- * isn't long enough, it's filled upto @buflen-1 and nul terminated.
+ * similar to strscpy().
  *
- * Fills buffer with "(null)" if @kn is NULL.
+ * Fills buffer with "(null)" if @kn is %NULL.
+ *
+ * Return: the resulting length of @buf. If @buf isn't long enough,
+ * it's filled up to @buflen-1 and nul terminated, and returns -E2BIG.
  *
  * This function can be called from any context.
  */
 int kernfs_name(struct kernfs_node *kn, char *buf, size_t buflen)
 {
-	unsigned long flags;
-	int ret;
+	struct kernfs_node *kn_parent;
 
-	spin_lock_irqsave(&kernfs_rename_lock, flags);
-	ret = kernfs_name_locked(kn, buf, buflen);
-	spin_unlock_irqrestore(&kernfs_rename_lock, flags);
-	return ret;
+	if (!kn)
+		return strscpy(buf, "(null)", buflen);
+
+	guard(rcu)();
+	/*
+	 * KERNFS_ROOT_INVARIANT_PARENT is ignored here. The name is RCU freed and
+	 * the parent is either existing or not.
+	 */
+	kn_parent = rcu_dereference(kn->__parent);
+	return strscpy(buf, kn_parent ? rcu_dereference(kn->name) : "/", buflen);
 }
 
 /**
@@ -215,20 +214,24 @@ int kernfs_name(struct kernfs_node *kn, char *buf, size_t buflen)
  * path (which includes '..'s) as needed to reach from @from to @to is
  * returned.
  *
- * Returns the length of the full path.  If the full length is equal to or
+ * Return: the length of the constructed path.  If the path would have been
  * greater than @buflen, @buf contains the truncated path with the trailing
  * '\0'.  On error, -errno is returned.
  */
 int kernfs_path_from_node(struct kernfs_node *to, struct kernfs_node *from,
 			  char *buf, size_t buflen)
 {
-	unsigned long flags;
-	int ret;
+	struct kernfs_root *root;
 
-	spin_lock_irqsave(&kernfs_rename_lock, flags);
-	ret = kernfs_path_from_node_locked(to, from, buf, buflen);
-	spin_unlock_irqrestore(&kernfs_rename_lock, flags);
-	return ret;
+	guard(rcu)();
+	if (to) {
+		root = kernfs_root(to);
+		if (!(root->flags & KERNFS_ROOT_INVARIANT_PARENT)) {
+			guard(read_lock_irqsave)(&root->kernfs_rename_lock);
+			return kernfs_path_from_node_locked(to, from, buf, buflen);
+		}
+	}
+	return kernfs_path_from_node_locked(to, from, buf, buflen);
 }
 EXPORT_SYMBOL_GPL(kernfs_path_from_node);
 
@@ -266,12 +269,10 @@ void pr_cont_kernfs_path(struct kernfs_node *kn)
 	sz = kernfs_path_from_node(kn, NULL, kernfs_pr_cont_buf,
 				   sizeof(kernfs_pr_cont_buf));
 	if (sz < 0) {
-		pr_cont("(error)");
-		goto out;
-	}
-
-	if (sz >= sizeof(kernfs_pr_cont_buf)) {
-		pr_cont("(name too long)");
+		if (sz == -E2BIG)
+			pr_cont("(name too long)");
+		else
+			pr_cont("(error)");
 		goto out;
 	}
 
@@ -287,26 +288,30 @@ out:
  *
  * Determines @kn's parent, pins and returns it.  This function can be
  * called from any context.
+ *
+ * Return: parent node of @kn
  */
 struct kernfs_node *kernfs_get_parent(struct kernfs_node *kn)
 {
 	struct kernfs_node *parent;
+	struct kernfs_root *root;
 	unsigned long flags;
 
-	spin_lock_irqsave(&kernfs_rename_lock, flags);
-	parent = kn->parent;
+	root = kernfs_root(kn);
+	read_lock_irqsave(&root->kernfs_rename_lock, flags);
+	parent = kernfs_parent(kn);
 	kernfs_get(parent);
-	spin_unlock_irqrestore(&kernfs_rename_lock, flags);
+	read_unlock_irqrestore(&root->kernfs_rename_lock, flags);
 
 	return parent;
 }
 
 /**
- *	kernfs_name_hash
+ *	kernfs_name_hash - calculate hash of @ns + @name
  *	@name: Null terminated string to hash
  *	@ns:   Namespace tag to hash
  *
- *	Returns 31 bit hash of ns + name (so it fits in an off_t )
+ *	Return: 31-bit hash of ns + name (so it fits in an off_t)
  */
 static unsigned int kernfs_name_hash(const char *name, const void *ns)
 {
@@ -335,13 +340,13 @@ static int kernfs_name_compare(unsigned int hash, const char *name,
 		return -1;
 	if (ns > kn->ns)
 		return 1;
-	return strcmp(name, kn->name);
+	return strcmp(name, kernfs_rcu_name(kn));
 }
 
 static int kernfs_sd_compare(const struct kernfs_node *left,
 			     const struct kernfs_node *right)
 {
-	return kernfs_name_compare(left->hash, left->name, left->ns, right);
+	return kernfs_name_compare(left->hash, kernfs_rcu_name(left), left->ns, right);
 }
 
 /**
@@ -354,13 +359,17 @@ static int kernfs_sd_compare(const struct kernfs_node *left,
  *	Locking:
  *	kernfs_rwsem held exclusive
  *
- *	RETURNS:
- *	0 on susccess -EEXIST on failure.
+ *	Return:
+ *	%0 on success, -EEXIST on failure.
  */
 static int kernfs_link_sibling(struct kernfs_node *kn)
 {
-	struct rb_node **node = &kn->parent->dir.children.rb_node;
 	struct rb_node *parent = NULL;
+	struct kernfs_node *kn_parent;
+	struct rb_node **node;
+
+	kn_parent = kernfs_parent(kn);
+	node = &kn_parent->dir.children.rb_node;
 
 	while (*node) {
 		struct kernfs_node *pos;
@@ -379,12 +388,14 @@ static int kernfs_link_sibling(struct kernfs_node *kn)
 
 	/* add new node and rebalance the tree */
 	rb_link_node(&kn->rb, parent, node);
-	rb_insert_color(&kn->rb, &kn->parent->dir.children);
+	rb_insert_color(&kn->rb, &kn_parent->dir.children);
 
 	/* successfully added, account subdir number */
+	down_write(&kernfs_root(kn)->kernfs_iattr_rwsem);
 	if (kernfs_type(kn) == KERNFS_DIR)
-		kn->parent->dir.subdirs++;
-	kernfs_inc_rev(kn->parent);
+		kn_parent->dir.subdirs++;
+	kernfs_inc_rev(kn_parent);
+	up_write(&kernfs_root(kn)->kernfs_iattr_rwsem);
 
 	return 0;
 }
@@ -394,22 +405,29 @@ static int kernfs_link_sibling(struct kernfs_node *kn)
  *	@kn: kernfs_node of interest
  *
  *	Try to unlink @kn from its sibling rbtree which starts from
- *	kn->parent->dir.children.  Returns %true if @kn was actually
- *	removed, %false if @kn wasn't on the rbtree.
+ *	kn->parent->dir.children.
+ *
+ *	Return: %true if @kn was actually removed,
+ *	%false if @kn wasn't on the rbtree.
  *
  *	Locking:
  *	kernfs_rwsem held exclusive
  */
 static bool kernfs_unlink_sibling(struct kernfs_node *kn)
 {
+	struct kernfs_node *kn_parent;
+
 	if (RB_EMPTY_NODE(&kn->rb))
 		return false;
 
+	kn_parent = kernfs_parent(kn);
+	down_write(&kernfs_root(kn)->kernfs_iattr_rwsem);
 	if (kernfs_type(kn) == KERNFS_DIR)
-		kn->parent->dir.subdirs--;
-	kernfs_inc_rev(kn->parent);
+		kn_parent->dir.subdirs--;
+	kernfs_inc_rev(kn_parent);
+	up_write(&kernfs_root(kn)->kernfs_iattr_rwsem);
 
-	rb_erase(&kn->rb, &kn->parent->dir.children);
+	rb_erase(&kn->rb, &kn_parent->dir.children);
 	RB_CLEAR_NODE(&kn->rb);
 	return true;
 }
@@ -419,10 +437,10 @@ static bool kernfs_unlink_sibling(struct kernfs_node *kn)
  *	@kn: kernfs_node to get an active reference to
  *
  *	Get an active reference of @kn.  This function is noop if @kn
- *	is NULL.
+ *	is %NULL.
  *
- *	RETURNS:
- *	Pointer to @kn on success, NULL on failure.
+ *	Return:
+ *	Pointer to @kn on success, %NULL on failure.
  */
 struct kernfs_node *kernfs_get_active(struct kernfs_node *kn)
 {
@@ -442,7 +460,7 @@ struct kernfs_node *kernfs_get_active(struct kernfs_node *kn)
  *	@kn: kernfs_node to put an active reference to
  *
  *	Put an active reference to @kn.  This function is noop if @kn
- *	is NULL.
+ *	is %NULL.
  */
 void kernfs_put_active(struct kernfs_node *kn)
 {
@@ -464,7 +482,7 @@ void kernfs_put_active(struct kernfs_node *kn)
  * kernfs_drain - drain kernfs_node
  * @kn: kernfs_node to drain
  *
- * Drain existing usages and nuke all existing mmaps of @kn.  Mutiple
+ * Drain existing usages and nuke all existing mmaps of @kn.  Multiple
  * removers may invoke this function concurrently on @kn and all will
  * return after draining is complete.
  */
@@ -522,6 +540,21 @@ void kernfs_get(struct kernfs_node *kn)
 }
 EXPORT_SYMBOL_GPL(kernfs_get);
 
+static void kernfs_free_rcu(struct rcu_head *rcu)
+{
+	struct kernfs_node *kn = container_of(rcu, struct kernfs_node, rcu);
+
+	/* If the whole node goes away, then name can't be used outside */
+	kfree_const(rcu_access_pointer(kn->name));
+
+	if (kn->iattr) {
+		simple_xattrs_free(&kn->iattr->xattrs, NULL);
+		kmem_cache_free(kernfs_iattrs_cache, kn->iattr);
+	}
+
+	kmem_cache_free(kernfs_node_cache, kn);
+}
+
 /**
  * kernfs_put - put a reference count on a kernfs_node
  * @kn: the target kernfs_node
@@ -541,25 +574,21 @@ void kernfs_put(struct kernfs_node *kn)
 	 * Moving/renaming is always done while holding reference.
 	 * kn->parent won't change beneath us.
 	 */
-	parent = kn->parent;
+	parent = kernfs_parent(kn);
 
 	WARN_ONCE(atomic_read(&kn->active) != KN_DEACTIVATED_BIAS,
 		  "kernfs_put: %s/%s: released with incorrect active_ref %d\n",
-		  parent ? parent->name : "", kn->name, atomic_read(&kn->active));
+		  parent ? rcu_dereference(parent->name) : "",
+		  rcu_dereference(kn->name), atomic_read(&kn->active));
 
 	if (kernfs_type(kn) == KERNFS_LINK)
 		kernfs_put(kn->symlink.target_kn);
 
-	kfree_const(kn->name);
-
-	if (kn->iattr) {
-		simple_xattrs_free(&kn->iattr->xattrs);
-		kmem_cache_free(kernfs_iattrs_cache, kn->iattr);
-	}
-	spin_lock(&kernfs_idr_lock);
+	spin_lock(&root->kernfs_idr_lock);
 	idr_remove(&root->ino_idr, (u32)kernfs_ino(kn));
-	spin_unlock(&kernfs_idr_lock);
-	kmem_cache_free(kernfs_node_cache, kn);
+	spin_unlock(&root->kernfs_idr_lock);
+
+	call_rcu(&kn->rcu, kernfs_free_rcu);
 
 	kn = parent;
 	if (kn) {
@@ -568,7 +597,7 @@ void kernfs_put(struct kernfs_node *kn)
 	} else {
 		/* just released the root kn, free @root too */
 		idr_destroy(&root->ino_idr);
-		kfree(root);
+		kfree_rcu(root, rcu);
 	}
 }
 EXPORT_SYMBOL_GPL(kernfs_put);
@@ -577,7 +606,7 @@ EXPORT_SYMBOL_GPL(kernfs_put);
  * kernfs_node_from_dentry - determine kernfs_node associated with a dentry
  * @dentry: the dentry in question
  *
- * Return the kernfs_node associated with @dentry.  If @dentry is not a
+ * Return: the kernfs_node associated with @dentry.  If @dentry is not a
  * kernfs one, %NULL is returned.
  *
  * While the returned kernfs_node will stay accessible as long as @dentry
@@ -610,13 +639,13 @@ static struct kernfs_node *__kernfs_new_node(struct kernfs_root *root,
 		goto err_out1;
 
 	idr_preload(GFP_KERNEL);
-	spin_lock(&kernfs_idr_lock);
+	spin_lock(&root->kernfs_idr_lock);
 	ret = idr_alloc_cyclic(&root->ino_idr, kn, 1, 0, GFP_ATOMIC);
 	if (ret >= 0 && ret < root->last_id_lowbits)
 		root->id_highbits++;
 	id_highbits = root->id_highbits;
 	root->last_id_lowbits = ret;
-	spin_unlock(&kernfs_idr_lock);
+	spin_unlock(&root->kernfs_idr_lock);
 	idr_preload_end();
 	if (ret < 0)
 		goto err_out2;
@@ -627,7 +656,7 @@ static struct kernfs_node *__kernfs_new_node(struct kernfs_root *root,
 	atomic_set(&kn->active, KN_DEACTIVATED_BIAS);
 	RB_CLEAR_NODE(&kn->rb);
 
-	kn->name = name;
+	rcu_assign_pointer(kn->name, name);
 	kn->mode = mode;
 	kn->flags = flags;
 
@@ -652,7 +681,9 @@ static struct kernfs_node *__kernfs_new_node(struct kernfs_root *root,
 	return kn;
 
  err_out3:
+	spin_lock(&root->kernfs_idr_lock);
 	idr_remove(&root->ino_idr, (u32)kernfs_ino(kn));
+	spin_unlock(&root->kernfs_idr_lock);
  err_out2:
 	kmem_cache_free(kernfs_node_cache, kn);
  err_out1:
@@ -667,11 +698,23 @@ struct kernfs_node *kernfs_new_node(struct kernfs_node *parent,
 {
 	struct kernfs_node *kn;
 
+	if (parent->mode & S_ISGID) {
+		/* this code block imitates inode_init_owner() for
+		 * kernfs
+		 */
+
+		if (parent->iattr)
+			gid = parent->iattr->ia_gid;
+
+		if (flags & KERNFS_DIR)
+			mode |= S_ISGID;
+	}
+
 	kn = __kernfs_new_node(kernfs_root(parent), parent,
 			       name, mode, uid, gid, flags);
 	if (kn) {
 		kernfs_get(parent);
-		kn->parent = parent;
+		rcu_assign_pointer(kn->__parent, parent);
 	}
 	return kn;
 }
@@ -684,8 +727,8 @@ struct kernfs_node *kernfs_new_node(struct kernfs_node *parent,
  * @id's lower 32bits encode ino and upper gen.  If the gen portion is
  * zero, all generations are matched.
  *
- * RETURNS:
- * NULL on failure. Return a kernfs node with reference counter incremented
+ * Return: %NULL on failure,
+ * otherwise a kernfs node with reference counter incremented.
  */
 struct kernfs_node *kernfs_find_and_get_node_by_id(struct kernfs_root *root,
 						   u64 id)
@@ -694,7 +737,7 @@ struct kernfs_node *kernfs_find_and_get_node_by_id(struct kernfs_root *root,
 	ino_t ino = kernfs_id_ino(id);
 	u32 gen = kernfs_id_gen(id);
 
-	spin_lock(&kernfs_idr_lock);
+	rcu_read_lock();
 
 	kn = idr_find(&root->ino_idr, (u32)ino);
 	if (!kn)
@@ -718,10 +761,10 @@ struct kernfs_node *kernfs_find_and_get_node_by_id(struct kernfs_root *root,
 	if (unlikely(!__kernfs_active(kn) || !atomic_inc_not_zero(&kn->count)))
 		goto err_unlock;
 
-	spin_unlock(&kernfs_idr_lock);
+	rcu_read_unlock();
 	return kn;
 err_unlock:
-	spin_unlock(&kernfs_idr_lock);
+	rcu_read_unlock();
 	return NULL;
 }
 
@@ -733,24 +776,26 @@ err_unlock:
  *	function increments nlink of the parent's inode if @kn is a
  *	directory and link into the children list of the parent.
  *
- *	RETURNS:
- *	0 on success, -EEXIST if entry with the given name already
+ *	Return:
+ *	%0 on success, -EEXIST if entry with the given name already
  *	exists.
  */
 int kernfs_add_one(struct kernfs_node *kn)
 {
-	struct kernfs_node *parent = kn->parent;
-	struct kernfs_root *root = kernfs_root(parent);
+	struct kernfs_root *root = kernfs_root(kn);
 	struct kernfs_iattrs *ps_iattr;
+	struct kernfs_node *parent;
 	bool has_ns;
 	int ret;
 
 	down_write(&root->kernfs_rwsem);
+	parent = kernfs_parent(kn);
 
 	ret = -EINVAL;
 	has_ns = kernfs_ns_enabled(parent);
 	if (WARN(has_ns != (bool)kn->ns, KERN_WARNING "kernfs: ns %s in '%s' for '%s'\n",
-		 has_ns ? "required" : "invalid", parent->name, kn->name))
+		 has_ns ? "required" : "invalid",
+		 kernfs_rcu_name(parent), kernfs_rcu_name(kn)))
 		goto out_unlock;
 
 	if (kernfs_type(parent) != KERNFS_DIR)
@@ -760,19 +805,22 @@ int kernfs_add_one(struct kernfs_node *kn)
 	if (parent->flags & (KERNFS_REMOVING | KERNFS_EMPTY_DIR))
 		goto out_unlock;
 
-	kn->hash = kernfs_name_hash(kn->name, kn->ns);
+	kn->hash = kernfs_name_hash(kernfs_rcu_name(kn), kn->ns);
 
 	ret = kernfs_link_sibling(kn);
 	if (ret)
 		goto out_unlock;
 
 	/* Update timestamps on the parent */
+	down_write(&root->kernfs_iattr_rwsem);
+
 	ps_iattr = parent->iattr;
 	if (ps_iattr) {
 		ktime_get_real_ts64(&ps_iattr->ia_ctime);
 		ps_iattr->ia_mtime = ps_iattr->ia_ctime;
 	}
 
+	up_write(&root->kernfs_iattr_rwsem);
 	up_write(&root->kernfs_rwsem);
 
 	/*
@@ -797,8 +845,9 @@ out_unlock:
  * @name: name to look for
  * @ns: the namespace tag to use
  *
- * Look for kernfs_node with name @name under @parent.  Returns pointer to
- * the found kernfs_node on success, %NULL on failure.
+ * Look for kernfs_node with name @name under @parent.
+ *
+ * Return: pointer to the found kernfs_node on success, %NULL on failure.
  */
 static struct kernfs_node *kernfs_find_ns(struct kernfs_node *parent,
 					  const unsigned char *name,
@@ -812,7 +861,7 @@ static struct kernfs_node *kernfs_find_ns(struct kernfs_node *parent,
 
 	if (has_ns != (bool)ns) {
 		WARN(1, KERN_WARNING "kernfs: ns %s in '%s' for '%s'\n",
-		     has_ns ? "required" : "invalid", parent->name, name);
+		     has_ns ? "required" : "invalid", kernfs_rcu_name(parent), name);
 		return NULL;
 	}
 
@@ -837,16 +886,16 @@ static struct kernfs_node *kernfs_walk_ns(struct kernfs_node *parent,
 					  const unsigned char *path,
 					  const void *ns)
 {
-	size_t len;
+	ssize_t len;
 	char *p, *name;
 
 	lockdep_assert_held_read(&kernfs_root(parent)->kernfs_rwsem);
 
 	spin_lock_irq(&kernfs_pr_cont_lock);
 
-	len = strlcpy(kernfs_pr_cont_buf, path, sizeof(kernfs_pr_cont_buf));
+	len = strscpy(kernfs_pr_cont_buf, path, sizeof(kernfs_pr_cont_buf));
 
-	if (len >= sizeof(kernfs_pr_cont_buf)) {
+	if (len < 0) {
 		spin_unlock_irq(&kernfs_pr_cont_lock);
 		return NULL;
 	}
@@ -871,8 +920,9 @@ static struct kernfs_node *kernfs_walk_ns(struct kernfs_node *parent,
  * @ns: the namespace tag to use
  *
  * Look for kernfs_node with name @name under @parent and get a reference
- * if found.  This function may sleep and returns pointer to the found
- * kernfs_node on success, %NULL on failure.
+ * if found.  This function may sleep.
+ *
+ * Return: pointer to the found kernfs_node on success, %NULL on failure.
  */
 struct kernfs_node *kernfs_find_and_get_ns(struct kernfs_node *parent,
 					   const char *name, const void *ns)
@@ -896,8 +946,9 @@ EXPORT_SYMBOL_GPL(kernfs_find_and_get_ns);
  * @ns: the namespace tag to use
  *
  * Look for kernfs_node with path @path under @parent and get a reference
- * if found.  This function may sleep and returns pointer to the found
- * kernfs_node on success, %NULL on failure.
+ * if found.  This function may sleep.
+ *
+ * Return: pointer to the found kernfs_node on success, %NULL on failure.
  */
 struct kernfs_node *kernfs_walk_and_get_ns(struct kernfs_node *parent,
 					   const char *path, const void *ns)
@@ -913,13 +964,18 @@ struct kernfs_node *kernfs_walk_and_get_ns(struct kernfs_node *parent,
 	return kn;
 }
 
+unsigned int kernfs_root_flags(struct kernfs_node *kn)
+{
+	return kernfs_root(kn)->flags;
+}
+
 /**
  * kernfs_create_root - create a new kernfs hierarchy
  * @scops: optional syscall operations for the hierarchy
  * @flags: KERNFS_ROOT_* flags
  * @priv: opaque data associated with the new directory
  *
- * Returns the root of the new hierarchy on success, ERR_PTR() value on
+ * Return: the root of the new hierarchy on success, ERR_PTR() value on
  * failure.
  */
 struct kernfs_root *kernfs_create_root(struct kernfs_syscall_ops *scops,
@@ -933,8 +989,12 @@ struct kernfs_root *kernfs_create_root(struct kernfs_syscall_ops *scops,
 		return ERR_PTR(-ENOMEM);
 
 	idr_init(&root->ino_idr);
+	spin_lock_init(&root->kernfs_idr_lock);
 	init_rwsem(&root->kernfs_rwsem);
+	init_rwsem(&root->kernfs_iattr_rwsem);
+	init_rwsem(&root->kernfs_supers_rwsem);
 	INIT_LIST_HEAD(&root->supers);
+	rwlock_init(&root->kernfs_rename_lock);
 
 	/*
 	 * On 64bit ino setups, id is ino.  On 32bit, low 32bits are ino.
@@ -991,6 +1051,8 @@ void kernfs_destroy_root(struct kernfs_root *root)
 /**
  * kernfs_root_to_node - return the kernfs_node associated with a kernfs_root
  * @root: root to use to lookup
+ *
+ * Return: @root's kernfs_node
  */
 struct kernfs_node *kernfs_root_to_node(struct kernfs_root *root)
 {
@@ -1007,7 +1069,7 @@ struct kernfs_node *kernfs_root_to_node(struct kernfs_root *root)
  * @priv: opaque data associated with the new directory
  * @ns: optional namespace tag of the directory
  *
- * Returns the created node on success, ERR_PTR() value on failure.
+ * Return: the created node on success, ERR_PTR() value on failure.
  */
 struct kernfs_node *kernfs_create_dir_ns(struct kernfs_node *parent,
 					 const char *name, umode_t mode,
@@ -1041,7 +1103,7 @@ struct kernfs_node *kernfs_create_dir_ns(struct kernfs_node *parent,
  * @parent: parent in which to create a new directory
  * @name: name of the new directory
  *
- * Returns the created node on success, ERR_PTR() value on failure.
+ * Return: the created node on success, ERR_PTR() value on failure.
  */
 struct kernfs_node *kernfs_create_empty_dir(struct kernfs_node *parent,
 					    const char *name)
@@ -1069,9 +1131,10 @@ struct kernfs_node *kernfs_create_empty_dir(struct kernfs_node *parent,
 	return ERR_PTR(rc);
 }
 
-static int kernfs_dop_revalidate(struct dentry *dentry, unsigned int flags)
+static int kernfs_dop_revalidate(struct inode *dir, const struct qstr *name,
+				 struct dentry *dentry, unsigned int flags)
 {
-	struct kernfs_node *kn;
+	struct kernfs_node *kn, *parent;
 	struct kernfs_root *root;
 
 	if (flags & LOOKUP_RCU)
@@ -1079,24 +1142,32 @@ static int kernfs_dop_revalidate(struct dentry *dentry, unsigned int flags)
 
 	/* Negative hashed dentry? */
 	if (d_really_is_negative(dentry)) {
-		struct kernfs_node *parent;
-
 		/* If the kernfs parent node has changed discard and
 		 * proceed to ->lookup.
+		 *
+		 * There's nothing special needed here when getting the
+		 * dentry parent, even if a concurrent rename is in
+		 * progress. That's because the dentry is negative so
+		 * it can only be the target of the rename and it will
+		 * be doing a d_move() not a replace. Consequently the
+		 * dentry d_parent won't change over the d_move().
+		 *
+		 * Also kernfs negative dentries transitioning from
+		 * negative to positive during revalidate won't happen
+		 * because they are invalidated on containing directory
+		 * changes and the lookup re-done so that a new positive
+		 * dentry can be properly created.
 		 */
-		spin_lock(&dentry->d_lock);
+		root = kernfs_root_from_sb(dentry->d_sb);
+		down_read(&root->kernfs_rwsem);
 		parent = kernfs_dentry_node(dentry->d_parent);
 		if (parent) {
-			spin_unlock(&dentry->d_lock);
-			root = kernfs_root(parent);
-			down_read(&root->kernfs_rwsem);
 			if (kernfs_dir_changed(parent, dentry)) {
 				up_read(&root->kernfs_rwsem);
 				return 0;
 			}
-			up_read(&root->kernfs_rwsem);
-		} else
-			spin_unlock(&dentry->d_lock);
+		}
+		up_read(&root->kernfs_rwsem);
 
 		/* The kernfs parent node hasn't changed, leave the
 		 * dentry negative and return success.
@@ -1112,16 +1183,17 @@ static int kernfs_dop_revalidate(struct dentry *dentry, unsigned int flags)
 	if (!kernfs_active(kn))
 		goto out_bad;
 
+	parent = kernfs_parent(kn);
 	/* The kernfs node has been moved? */
-	if (kernfs_dentry_node(dentry->d_parent) != kn->parent)
+	if (kernfs_dentry_node(dentry->d_parent) != parent)
 		goto out_bad;
 
 	/* The kernfs node has been renamed */
-	if (strcmp(dentry->d_name.name, kn->name) != 0)
+	if (strcmp(dentry->d_name.name, kernfs_rcu_name(kn)) != 0)
 		goto out_bad;
 
 	/* The kernfs node has been moved to a different namespace */
-	if (kn->parent && kernfs_ns_enabled(kn->parent) &&
+	if (parent && kernfs_ns_enabled(parent) &&
 	    kernfs_info(dentry->d_sb)->ns != kn->ns)
 		goto out_bad;
 
@@ -1179,24 +1251,24 @@ static struct dentry *kernfs_iop_lookup(struct inode *dir,
 	return d_splice_alias(inode, dentry);
 }
 
-static int kernfs_iop_mkdir(struct user_namespace *mnt_userns,
-			    struct inode *dir, struct dentry *dentry,
-			    umode_t mode)
+static struct dentry *kernfs_iop_mkdir(struct mnt_idmap *idmap,
+				       struct inode *dir, struct dentry *dentry,
+				       umode_t mode)
 {
 	struct kernfs_node *parent = dir->i_private;
 	struct kernfs_syscall_ops *scops = kernfs_root(parent)->syscall_ops;
 	int ret;
 
 	if (!scops || !scops->mkdir)
-		return -EPERM;
+		return ERR_PTR(-EPERM);
 
 	if (!kernfs_get_active(parent))
-		return -ENODEV;
+		return ERR_PTR(-ENODEV);
 
 	ret = scops->mkdir(parent, dentry->d_name.name, mode);
 
 	kernfs_put_active(parent);
-	return ret;
+	return ERR_PTR(ret);
 }
 
 static int kernfs_iop_rmdir(struct inode *dir, struct dentry *dentry)
@@ -1217,7 +1289,7 @@ static int kernfs_iop_rmdir(struct inode *dir, struct dentry *dentry)
 	return ret;
 }
 
-static int kernfs_iop_rename(struct user_namespace *mnt_userns,
+static int kernfs_iop_rename(struct mnt_idmap *idmap,
 			     struct inode *old_dir, struct dentry *old_dentry,
 			     struct inode *new_dir, struct dentry *new_dentry,
 			     unsigned int flags)
@@ -1290,6 +1362,8 @@ static struct kernfs_node *kernfs_leftmost_descendant(struct kernfs_node *pos)
  * Find the next descendant to visit for post-order traversal of @root's
  * descendants.  @root is included in the iteration and the last node to be
  * visited.
+ *
+ * Return: the next descendant to visit or %NULL when done.
  */
 static struct kernfs_node *kernfs_next_descendant_post(struct kernfs_node *pos,
 						       struct kernfs_node *root)
@@ -1312,7 +1386,7 @@ static struct kernfs_node *kernfs_next_descendant_post(struct kernfs_node *pos,
 		return kernfs_leftmost_descendant(rb_to_kn(rbn));
 
 	/* no sibling left, visit parent */
-	return pos->parent;
+	return kernfs_parent(pos);
 }
 
 static void kernfs_activate_one(struct kernfs_node *kn)
@@ -1324,7 +1398,7 @@ static void kernfs_activate_one(struct kernfs_node *kn)
 	if (kernfs_active(kn) || (kn->flags & (KERNFS_HIDDEN | KERNFS_REMOVING)))
 		return;
 
-	WARN_ON_ONCE(kn->parent && RB_EMPTY_NODE(&kn->rb));
+	WARN_ON_ONCE(rcu_access_pointer(kn->__parent) && RB_EMPTY_NODE(&kn->rb));
 	WARN_ON_ONCE(atomic_read(&kn->active) != KN_DEACTIVATED_BIAS);
 
 	atomic_sub(KN_DEACTIVATED_BIAS, &kn->active);
@@ -1394,7 +1468,7 @@ void kernfs_show(struct kernfs_node *kn, bool show)
 
 static void __kernfs_remove(struct kernfs_node *kn)
 {
-	struct kernfs_node *pos;
+	struct kernfs_node *pos, *parent;
 
 	/* Short-circuit if non-root @kn has already finished removal. */
 	if (!kn)
@@ -1406,10 +1480,10 @@ static void __kernfs_remove(struct kernfs_node *kn)
 	 * This is for kernfs_remove_self() which plays with active ref
 	 * after removal.
 	 */
-	if (kn->parent && RB_EMPTY_NODE(&kn->rb))
+	if (kernfs_parent(kn) && RB_EMPTY_NODE(&kn->rb))
 		return;
 
-	pr_debug("kernfs %s: removing\n", kn->name);
+	pr_debug("kernfs %s: removing\n", kernfs_rcu_name(kn));
 
 	/* prevent new usage by marking all nodes removing and deactivating */
 	pos = NULL;
@@ -1432,21 +1506,24 @@ static void __kernfs_remove(struct kernfs_node *kn)
 		kernfs_get(pos);
 
 		kernfs_drain(pos);
-
+		parent = kernfs_parent(pos);
 		/*
 		 * kernfs_unlink_sibling() succeeds once per node.  Use it
 		 * to decide who's responsible for cleanups.
 		 */
-		if (!pos->parent || kernfs_unlink_sibling(pos)) {
+		if (!parent || kernfs_unlink_sibling(pos)) {
 			struct kernfs_iattrs *ps_iattr =
-				pos->parent ? pos->parent->iattr : NULL;
+				parent ? parent->iattr : NULL;
 
 			/* update timestamps on the parent */
+			down_write(&kernfs_root(kn)->kernfs_iattr_rwsem);
+
 			if (ps_iattr) {
 				ktime_get_real_ts64(&ps_iattr->ia_ctime);
 				ps_iattr->ia_mtime = ps_iattr->ia_ctime;
 			}
 
+			up_write(&kernfs_root(kn)->kernfs_iattr_rwsem);
 			kernfs_put(pos);
 		}
 
@@ -1505,8 +1582,9 @@ void kernfs_break_active_protection(struct kernfs_node *kn)
  * invoked before finishing the kernfs operation.  Note that while this
  * function restores the active reference, it doesn't and can't actually
  * restore the active protection - @kn may already or be in the process of
- * being removed.  Once kernfs_break_active_protection() is invoked, that
- * protection is irreversibly gone for the kernfs operation instance.
+ * being drained and removed.  Once kernfs_break_active_protection() is
+ * invoked, that protection is irreversibly gone for the kernfs operation
+ * instance.
  *
  * While this function may be called at any point after
  * kernfs_break_active_protection() is invoked, its most useful location
@@ -1553,6 +1631,8 @@ void kernfs_unbreak_active_protection(struct kernfs_node *kn)
  * the whole kernfs_ops which won the arbitration.  This can be used to
  * guarantee, for example, all concurrent writes to a "delete" file to
  * finish only after the whole operation is complete.
+ *
+ * Return: %true if @kn is removed by this call, otherwise %false.
  */
 bool kernfs_remove_self(struct kernfs_node *kn)
 {
@@ -1613,7 +1693,8 @@ bool kernfs_remove_self(struct kernfs_node *kn)
  * @ns: namespace tag of the kernfs_node to remove
  *
  * Look for the kernfs_node with @name and @ns under @parent and remove it.
- * Returns 0 on success, -ENOENT if such entry doesn't exist.
+ *
+ * Return: %0 on success, -ENOENT if such entry doesn't exist.
  */
 int kernfs_remove_by_name_ns(struct kernfs_node *parent, const char *name,
 			     const void *ns)
@@ -1651,17 +1732,19 @@ int kernfs_remove_by_name_ns(struct kernfs_node *parent, const char *name,
  * @new_parent: new parent to put @sd under
  * @new_name: new name
  * @new_ns: new namespace tag
+ *
+ * Return: %0 on success, -errno on failure.
  */
 int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 		     const char *new_name, const void *new_ns)
 {
 	struct kernfs_node *old_parent;
 	struct kernfs_root *root;
-	const char *old_name = NULL;
+	const char *old_name;
 	int error;
 
 	/* can't move or rename root */
-	if (!kn->parent)
+	if (!rcu_access_pointer(kn->__parent))
 		return -EINVAL;
 
 	root = kernfs_root(kn);
@@ -1672,9 +1755,19 @@ int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 	    (new_parent->flags & KERNFS_EMPTY_DIR))
 		goto out;
 
+	old_parent = kernfs_parent(kn);
+	if (root->flags & KERNFS_ROOT_INVARIANT_PARENT) {
+		error = -EINVAL;
+		if (WARN_ON_ONCE(old_parent != new_parent))
+			goto out;
+	}
+
 	error = 0;
-	if ((kn->parent == new_parent) && (kn->ns == new_ns) &&
-	    (strcmp(kn->name, new_name) == 0))
+	old_name = kernfs_rcu_name(kn);
+	if (!new_name)
+		new_name = old_name;
+	if ((old_parent == new_parent) && (kn->ns == new_ns) &&
+	    (strcmp(old_name, new_name) == 0))
 		goto out;	/* nothing to rename */
 
 	error = -EEXIST;
@@ -1682,7 +1775,7 @@ int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 		goto out;
 
 	/* rename kernfs_node */
-	if (strcmp(kn->name, new_name) != 0) {
+	if (strcmp(old_name, new_name) != 0) {
 		error = -ENOMEM;
 		new_name = kstrdup_const(new_name, GFP_KERNEL);
 		if (!new_name)
@@ -1695,38 +1788,37 @@ int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 	 * Move to the appropriate place in the appropriate directories rbtree.
 	 */
 	kernfs_unlink_sibling(kn);
-	kernfs_get(new_parent);
 
-	/* rename_lock protects ->parent and ->name accessors */
-	spin_lock_irq(&kernfs_rename_lock);
+	/* rename_lock protects ->parent accessors */
+	if (old_parent != new_parent) {
+		kernfs_get(new_parent);
+		write_lock_irq(&root->kernfs_rename_lock);
 
-	old_parent = kn->parent;
-	kn->parent = new_parent;
+		rcu_assign_pointer(kn->__parent, new_parent);
 
-	kn->ns = new_ns;
-	if (new_name) {
-		old_name = kn->name;
-		kn->name = new_name;
+		kn->ns = new_ns;
+		if (new_name)
+			rcu_assign_pointer(kn->name, new_name);
+
+		write_unlock_irq(&root->kernfs_rename_lock);
+		kernfs_put(old_parent);
+	} else {
+		/* name assignment is RCU protected, parent is the same */
+		kn->ns = new_ns;
+		if (new_name)
+			rcu_assign_pointer(kn->name, new_name);
 	}
 
-	spin_unlock_irq(&kernfs_rename_lock);
-
-	kn->hash = kernfs_name_hash(kn->name, kn->ns);
+	kn->hash = kernfs_name_hash(new_name ?: old_name, kn->ns);
 	kernfs_link_sibling(kn);
 
-	kernfs_put(old_parent);
-	kfree_const(old_name);
+	if (new_name && !is_kernel_rodata((unsigned long)old_name))
+		kfree_rcu_mightsleep(old_name);
 
 	error = 0;
  out:
 	up_write(&root->kernfs_rwsem);
 	return error;
-}
-
-/* Relationship between mode and the DT_xxx types */
-static inline unsigned char dt_type(struct kernfs_node *kn)
-{
-	return (kn->mode >> 12) & 15;
 }
 
 static int kernfs_dir_fop_release(struct inode *inode, struct file *filp)
@@ -1740,7 +1832,8 @@ static struct kernfs_node *kernfs_dir_pos(const void *ns,
 {
 	if (pos) {
 		int valid = kernfs_active(pos) &&
-			pos->parent == parent && hash == pos->hash;
+			rcu_access_pointer(pos->__parent) == parent &&
+			hash == pos->hash;
 		kernfs_put(pos);
 		if (!valid)
 			pos = NULL;
@@ -1805,8 +1898,8 @@ static int kernfs_fop_readdir(struct file *file, struct dir_context *ctx)
 	for (pos = kernfs_dir_pos(ns, parent, ctx->pos, pos);
 	     pos;
 	     pos = kernfs_dir_next_pos(ns, parent, ctx->pos, pos)) {
-		const char *name = pos->name;
-		unsigned int type = dt_type(pos);
+		const char *name = kernfs_rcu_name(pos);
+		unsigned int type = fs_umode_to_dtype(pos->mode);
 		int len = strlen(name);
 		ino_t ino = kernfs_ino(pos);
 
@@ -1814,10 +1907,10 @@ static int kernfs_fop_readdir(struct file *file, struct dir_context *ctx)
 		file->private_data = pos;
 		kernfs_get(pos);
 
-		up_read(&root->kernfs_rwsem);
-		if (!dir_emit(ctx, name, len, ino, type))
+		if (!dir_emit(ctx, name, len, ino, type)) {
+			up_read(&root->kernfs_rwsem);
 			return 0;
-		down_read(&root->kernfs_rwsem);
+		}
 	}
 	up_read(&root->kernfs_rwsem);
 	file->private_data = NULL;

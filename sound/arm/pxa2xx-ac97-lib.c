@@ -33,8 +33,6 @@ static struct clk *ac97conf_clk;
 static int reset_gpio;
 static void __iomem *ac97_reg_base;
 
-extern void pxa27x_configure_ac97reset(int reset_gpio, bool to_gpio);
-
 /*
  * Beware PXA27x bugs:
  *
@@ -53,7 +51,7 @@ int pxa2xx_ac97_read(int slot, unsigned short reg)
 	if (slot > 0)
 		return -ENODEV;
 
-	mutex_lock(&car_mutex);
+	guard(mutex)(&car_mutex);
 
 	/* set up primary or secondary codec space */
 	if (cpu_is_pxa25x() && reg == AC97_GPIO_STATUS)
@@ -69,13 +67,12 @@ int pxa2xx_ac97_read(int slot, unsigned short reg)
 	gsr_bits = 0;
 	val = (readl(reg_addr) & 0xffff);
 	if (reg == AC97_GPIO_STATUS)
-		goto out;
+		return val;
 	if (wait_event_timeout(gsr_wq, (readl(ac97_reg_base + GSR) | gsr_bits) & GSR_SDONE, 1) <= 0 &&
 	    !((readl(ac97_reg_base + GSR) | gsr_bits) & GSR_SDONE)) {
 		printk(KERN_ERR "%s: read error (ac97_reg=%d GSR=%#lx)\n",
 				__func__, reg, readl(ac97_reg_base + GSR) | gsr_bits);
-		val = -ETIMEDOUT;
-		goto out;
+		return -ETIMEDOUT;
 	}
 
 	/* valid data now */
@@ -84,8 +81,6 @@ int pxa2xx_ac97_read(int slot, unsigned short reg)
 	val = (readl(reg_addr) & 0xffff);
 	/* but we've just started another cycle... */
 	wait_event_timeout(gsr_wq, (readl(ac97_reg_base + GSR) | gsr_bits) & GSR_SDONE, 1);
-
-out:	mutex_unlock(&car_mutex);
 	return val;
 }
 EXPORT_SYMBOL_GPL(pxa2xx_ac97_read);
@@ -95,7 +90,7 @@ int pxa2xx_ac97_write(int slot, unsigned short reg, unsigned short val)
 	u32 __iomem *reg_addr;
 	int ret = 0;
 
-	mutex_lock(&car_mutex);
+	guard(mutex)(&car_mutex);
 
 	/* set up primary or secondary codec space */
 	if (cpu_is_pxa25x() && reg == AC97_GPIO_STATUS)
@@ -116,7 +111,6 @@ int pxa2xx_ac97_write(int slot, unsigned short reg, unsigned short val)
 		ret = -EIO;
 	}
 
-	mutex_unlock(&car_mutex);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(pxa2xx_ac97_write);

@@ -29,13 +29,11 @@
 	};
 };
 
-
 &sio10_clk {
         simaai,ignore-unused = <0x100>;
 };
 
 &dms0_reserved {
-	// 2.5GiB for DMS0 region
 	reg = <0x00000011 0x20000000 0x00000000 0xA0000000>;
 };
 
@@ -166,6 +164,11 @@
 &i2c23 {
 	status = "okay";
 	clock-frequency = <400000>;
+
+	board_sensor: temp@4c {
+		compatible = "national,lm96163";
+		reg = <0x4c>;
+	};
 
 	eeprom@50 {
 		compatible = "atmel,24c128";

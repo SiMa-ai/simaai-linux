@@ -75,6 +75,12 @@
  * 	the currently visible vertical area of the &drm_crtc.
  * FB_ID:
  * 	Mode object ID of the &drm_framebuffer this plane should scan out.
+ *
+ *	When a KMS client is performing front-buffer rendering, it should set
+ *	FB_ID to the same front-buffer FB on each atomic commit. This implies
+ *	to the driver that it needs to re-read the same FB again. Otherwise
+ *	drivers which do not employ continuously repeated scanout cycles might
+ *	not update the screen.
  * CRTC_ID:
  * 	Mode object ID of the &drm_crtc this plane should be connected to.
  *
@@ -450,8 +456,8 @@ static int drm_atomic_helper_crtc_normalize_zpos(struct drm_crtc *crtc,
 	int i, n = 0;
 	int ret = 0;
 
-	DRM_DEBUG_ATOMIC("[CRTC:%d:%s] calculating normalized zpos values\n",
-			 crtc->base.id, crtc->name);
+	drm_dbg_atomic(dev, "[CRTC:%d:%s] calculating normalized zpos values\n",
+		       crtc->base.id, crtc->name);
 
 	states = kmalloc_array(total_planes, sizeof(*states), GFP_KERNEL);
 	if (!states)
@@ -469,9 +475,8 @@ static int drm_atomic_helper_crtc_normalize_zpos(struct drm_crtc *crtc,
 			goto done;
 		}
 		states[n++] = plane_state;
-		DRM_DEBUG_ATOMIC("[PLANE:%d:%s] processing zpos value %d\n",
-				 plane->base.id, plane->name,
-				 plane_state->zpos);
+		drm_dbg_atomic(dev, "[PLANE:%d:%s] processing zpos value %d\n",
+			       plane->base.id, plane->name, plane_state->zpos);
 	}
 
 	sort(states, n, sizeof(*states), drm_atomic_state_zpos_cmp, NULL);
@@ -480,8 +485,8 @@ static int drm_atomic_helper_crtc_normalize_zpos(struct drm_crtc *crtc,
 		plane = states[i]->plane;
 
 		states[i]->normalized_zpos = i;
-		DRM_DEBUG_ATOMIC("[PLANE:%d:%s] normalized zpos value %d\n",
-				 plane->base.id, plane->name, i);
+		drm_dbg_atomic(dev, "[PLANE:%d:%s] normalized zpos value %d\n",
+			       plane->base.id, plane->name, i);
 	}
 	crtc_state->zpos_changed = true;
 

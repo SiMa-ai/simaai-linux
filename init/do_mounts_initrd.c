@@ -21,7 +21,7 @@ phys_addr_t phys_initrd_start __initdata;
 unsigned long phys_initrd_size __initdata;
 
 #ifdef CONFIG_SYSCTL
-static struct ctl_table kern_do_mounts_initrd_table[] = {
+static const struct ctl_table kern_do_mounts_initrd_table[] = {
 	{
 		.procname       = "real-root-dev",
 		.data           = &real_root_dev,
@@ -29,7 +29,6 @@ static struct ctl_table kern_do_mounts_initrd_table[] = {
 		.mode           = 0644,
 		.proc_handler   = proc_dointvec,
 	},
-	{ }
 };
 
 static __init int kernel_do_mounts_initrd_sysctls_init(void)
@@ -83,19 +82,20 @@ static int __init init_linuxrc(struct subprocess_info *info, struct cred *new)
 	return 0;
 }
 
-static void __init handle_initrd(void)
+static void __init handle_initrd(char *root_device_name)
 {
 	struct subprocess_info *info;
 	static char *argv[] = { "linuxrc", NULL, };
 	extern char *envp_init[];
 	int error;
 
-	pr_warn("using deprecated initrd support, will be removed in 2021.\n");
+	pr_warn("using deprecated initrd support, will be removed soon.\n");
 
 	real_root_dev = new_encode_dev(ROOT_DEV);
 	create_dev("/dev/root.old", Root_RAM0);
 	/* mount initrd on rootfs' /root */
-	mount_block_root("/dev/root.old", root_mountflags & ~MS_RDONLY);
+	mount_root_generic("/dev/root.old", root_device_name,
+			   root_mountflags & ~MS_RDONLY);
 	init_mkdir("/old", 0700);
 	init_chdir("/old");
 
@@ -117,7 +117,7 @@ static void __init handle_initrd(void)
 
 	init_chdir("/");
 	ROOT_DEV = new_decode_dev(real_root_dev);
-	mount_root();
+	mount_root(root_device_name);
 
 	printk(KERN_NOTICE "Trying to move old root to /initrd ... ");
 	error = init_mount("/old", "/root/initrd", NULL, MS_MOVE, NULL);
@@ -133,7 +133,7 @@ static void __init handle_initrd(void)
 	}
 }
 
-bool __init initrd_load(void)
+bool __init initrd_load(char *root_device_name)
 {
 	if (mount_initrd) {
 		create_dev("/dev/ram", Root_RAM0);
@@ -145,7 +145,7 @@ bool __init initrd_load(void)
 		 */
 		if (rd_load_image("/initrd.image") && ROOT_DEV != Root_RAM0) {
 			init_unlink("/initrd.image");
-			handle_initrd();
+			handle_initrd(root_device_name);
 			return true;
 		}
 	}

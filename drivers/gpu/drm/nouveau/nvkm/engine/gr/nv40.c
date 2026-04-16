@@ -145,7 +145,7 @@ nv40_gr_chan = {
 };
 
 int
-nv40_gr_chan_new(struct nvkm_gr *base, struct nvkm_fifo_chan *fifoch,
+nv40_gr_chan_new(struct nvkm_gr *base, struct nvkm_chan *fifoch,
 		 const struct nvkm_oclass *oclass, struct nvkm_object **pobject)
 {
 	struct nv40_gr *gr = nv40_gr(base);
@@ -275,8 +275,8 @@ nv40_gr_intr(struct nvkm_gr *base)
 				   "nstatus %08x [%s] ch %d [%08x %s] subc %d "
 				   "class %04x mthd %04x data %08x\n",
 			   show, msg, nsource, src, nstatus, sta,
-			   chan ? chan->fifo->chid : -1, inst << 4,
-			   chan ? chan->fifo->object.client->name : "unknown",
+			   chan ? chan->fifo->id : -1, inst << 4,
+			   chan ? chan->fifo->name : "unknown",
 			   subc, class, mthd, data);
 	}
 
@@ -386,7 +386,7 @@ nv40_gr_init(struct nvkm_gr *base)
 	}
 
 	/* begin RAM config */
-	vramsz = device->func->resource_size(device, 1) - 1;
+	vramsz = device->func->resource_size(device, NVKM_BAR1_FB) - 1;
 	switch (device->chipset) {
 	case 0x40:
 		nvkm_wr32(device, 0x4009A4, nvkm_rd32(device, 0x100200));

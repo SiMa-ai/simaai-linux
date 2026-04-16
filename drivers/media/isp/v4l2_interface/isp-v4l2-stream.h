@@ -38,6 +38,7 @@ typedef struct _isp_v4l2_buffer {
 #else
     struct vb2_buffer vb;
 #endif
+
     struct aframe_t frame;
     struct list_head list;
 } isp_v4l2_buffer_t;

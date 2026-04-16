@@ -7,13 +7,12 @@
 
 #include <subcmd/parse-options.h>
 
-extern const struct option check_options[];
-
 struct opts {
 	/* actions: */
 	bool dump_orc;
 	bool hack_jump_label;
 	bool hack_noinstr;
+	bool hack_skylake;
 	bool ibt;
 	bool mcount;
 	bool noinstr;
@@ -25,22 +24,30 @@ struct opts {
 	bool stackval;
 	bool static_call;
 	bool uaccess;
+	int prefix;
+	bool cfi;
+	bool noabs;
 
 	/* options: */
 	bool backtrace;
-	bool backup;
 	bool dryrun;
 	bool link;
+	bool mnop;
 	bool module;
 	bool no_unreachable;
+	const char *output;
 	bool sec_address;
 	bool stats;
+	bool verbose;
+	bool werror;
 };
 
 extern struct opts opts;
 
-extern int cmd_parse_options(int argc, const char **argv, const char * const usage[]);
+int cmd_parse_options(int argc, const char **argv, const char * const usage[]);
 
-extern int objtool_run(int argc, const char **argv);
+int objtool_run(int argc, const char **argv);
+
+void print_args(void);
 
 #endif /* _BUILTIN_H */

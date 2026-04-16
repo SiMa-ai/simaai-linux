@@ -2,7 +2,7 @@
 /*
  * EHT handling
  *
- * Copyright(c) 2021-2022 Intel Corporation
+ * Copyright(c) 2021-2025 Intel Corporation
  */
 
 #include "ieee80211_i.h"
@@ -25,8 +25,7 @@ ieee80211_eht_cap_ie_to_sta_eht_cap(struct ieee80211_sub_if_data *sdata,
 	memset(eht_cap, 0, sizeof(*eht_cap));
 
 	if (!eht_cap_ie_elem ||
-	    !ieee80211_get_eht_iftype_cap(sband,
-					 ieee80211_vif_type_p2p(&sdata->vif)))
+	    !ieee80211_get_eht_iftype_cap_vif(sband, &sdata->vif))
 		return;
 
 	mcs_nss_size = ieee80211_eht_mcs_nss_size(he_cap_ie_elem,
@@ -76,4 +75,30 @@ ieee80211_eht_cap_ie_to_sta_eht_cap(struct ieee80211_sub_if_data *sdata,
 
 	link_sta->cur_max_bandwidth = ieee80211_sta_cap_rx_bw(link_sta);
 	link_sta->pub->bandwidth = ieee80211_sta_cur_vht_bw(link_sta);
+
+	/*
+	 * The MPDU length bits are reserved on all but 2.4 GHz and get set via
+	 * VHT (5 GHz) or HE (6 GHz) capabilities.
+	 */
+	if (sband->band != NL80211_BAND_2GHZ)
+		return;
+
+	switch (u8_get_bits(eht_cap->eht_cap_elem.mac_cap_info[0],
+			    IEEE80211_EHT_MAC_CAP0_MAX_MPDU_LEN_MASK)) {
+	case IEEE80211_EHT_MAC_CAP0_MAX_MPDU_LEN_11454:
+		link_sta->pub->agg.max_amsdu_len =
+			IEEE80211_MAX_MPDU_LEN_VHT_11454;
+		break;
+	case IEEE80211_EHT_MAC_CAP0_MAX_MPDU_LEN_7991:
+		link_sta->pub->agg.max_amsdu_len =
+			IEEE80211_MAX_MPDU_LEN_VHT_7991;
+		break;
+	case IEEE80211_EHT_MAC_CAP0_MAX_MPDU_LEN_3895:
+	default:
+		link_sta->pub->agg.max_amsdu_len =
+			IEEE80211_MAX_MPDU_LEN_VHT_3895;
+		break;
+	}
+
+	ieee80211_sta_recalc_aggregates(&link_sta->sta->sta);
 }

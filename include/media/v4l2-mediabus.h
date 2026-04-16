@@ -54,39 +54,66 @@
 #define V4L2_MBUS_VSYNC_ACTIVE_LOW		BIT(5)
 #define V4L2_MBUS_PCLK_SAMPLE_RISING		BIT(6)
 #define V4L2_MBUS_PCLK_SAMPLE_FALLING		BIT(7)
-#define V4L2_MBUS_DATA_ACTIVE_HIGH		BIT(8)
-#define V4L2_MBUS_DATA_ACTIVE_LOW		BIT(9)
+#define V4L2_MBUS_PCLK_SAMPLE_DUALEDGE		BIT(8)
+#define V4L2_MBUS_DATA_ACTIVE_HIGH		BIT(9)
+#define V4L2_MBUS_DATA_ACTIVE_LOW		BIT(10)
 /* FIELD = 0/1 - Field1 (odd)/Field2 (even) */
-#define V4L2_MBUS_FIELD_EVEN_HIGH		BIT(10)
+#define V4L2_MBUS_FIELD_EVEN_HIGH		BIT(11)
 /* FIELD = 1/0 - Field1 (odd)/Field2 (even) */
-#define V4L2_MBUS_FIELD_EVEN_LOW		BIT(11)
+#define V4L2_MBUS_FIELD_EVEN_LOW		BIT(12)
 /* Active state of Sync-on-green (SoG) signal, 0/1 for LOW/HIGH respectively. */
-#define V4L2_MBUS_VIDEO_SOG_ACTIVE_HIGH		BIT(12)
-#define V4L2_MBUS_VIDEO_SOG_ACTIVE_LOW		BIT(13)
-#define V4L2_MBUS_DATA_ENABLE_HIGH		BIT(14)
-#define V4L2_MBUS_DATA_ENABLE_LOW		BIT(15)
+#define V4L2_MBUS_VIDEO_SOG_ACTIVE_HIGH		BIT(13)
+#define V4L2_MBUS_VIDEO_SOG_ACTIVE_LOW		BIT(14)
+#define V4L2_MBUS_DATA_ENABLE_HIGH		BIT(15)
+#define V4L2_MBUS_DATA_ENABLE_LOW		BIT(16)
 
 /* Serial flags */
 /* Clock non-continuous mode support. */
 #define V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK	BIT(0)
 
 #define V4L2_MBUS_CSI2_MAX_DATA_LANES		8
+#define V4L2_MBUS_CSI2_MAX_VC_IDS		4
+
+/**
+ * enum v4l2_mbus_csi2_cphy_line_orders_type - CSI-2 C-PHY line order
+ * @V4L2_MBUS_CSI2_CPHY_LINE_ORDER_ABC: C-PHY line order ABC (default)
+ * @V4L2_MBUS_CSI2_CPHY_LINE_ORDER_ACB: C-PHY line order ACB
+ * @V4L2_MBUS_CSI2_CPHY_LINE_ORDER_BAC: C-PHY line order BAC
+ * @V4L2_MBUS_CSI2_CPHY_LINE_ORDER_BCA: C-PHY line order BCA
+ * @V4L2_MBUS_CSI2_CPHY_LINE_ORDER_CAB: C-PHY line order CAB
+ * @V4L2_MBUS_CSI2_CPHY_LINE_ORDER_CBA: C-PHY line order CBA
+ */
+enum v4l2_mbus_csi2_cphy_line_orders_type {
+	V4L2_MBUS_CSI2_CPHY_LINE_ORDER_ABC,
+	V4L2_MBUS_CSI2_CPHY_LINE_ORDER_ACB,
+	V4L2_MBUS_CSI2_CPHY_LINE_ORDER_BAC,
+	V4L2_MBUS_CSI2_CPHY_LINE_ORDER_BCA,
+	V4L2_MBUS_CSI2_CPHY_LINE_ORDER_CAB,
+	V4L2_MBUS_CSI2_CPHY_LINE_ORDER_CBA,
+};
 
 /**
  * struct v4l2_mbus_config_mipi_csi2 - MIPI CSI-2 data bus configuration
  * @flags: media bus (V4L2_MBUS_*) flags
+ * @vc_ids: an array of Virtual Channel IDs
  * @data_lanes: an array of physical data lane indexes
  * @clock_lane: physical lane index of the clock lane
+ * @num_vc_ids: number of Virtual Channel IDs
  * @num_data_lanes: number of data lanes
  * @lane_polarities: polarity of the lanes. The order is the same of
  *		   the physical lanes.
+ * @line_orders: line order of the data lanes. The order is the same of the
+ *		   physical lanes.
  */
 struct v4l2_mbus_config_mipi_csi2 {
 	unsigned int flags;
+	unsigned char vc_ids[V4L2_MBUS_CSI2_MAX_VC_IDS];
 	unsigned char data_lanes[V4L2_MBUS_CSI2_MAX_DATA_LANES];
 	unsigned char clock_lane;
+	unsigned char num_vc_ids;
 	unsigned char num_data_lanes;
 	bool lane_polarities[1 + V4L2_MBUS_CSI2_MAX_DATA_LANES];
+	enum v4l2_mbus_csi2_cphy_line_orders_type line_orders[V4L2_MBUS_CSI2_MAX_DATA_LANES];
 };
 
 /**
@@ -147,6 +174,7 @@ enum v4l2_mbus_type {
 /**
  * struct v4l2_mbus_config - media bus configuration
  * @type: interface type
+ * @link_freq: The link frequency. See also V4L2_CID_LINK_FREQ control.
  * @bus: bus configuration data structure
  * @bus.parallel: embedded &struct v4l2_mbus_config_parallel.
  *		  Used if the bus is parallel or BT.656.
@@ -161,6 +189,7 @@ enum v4l2_mbus_type {
  */
 struct v4l2_mbus_config {
 	enum v4l2_mbus_type type;
+	u64 link_freq;
 	union {
 		struct v4l2_mbus_config_parallel parallel;
 		struct v4l2_mbus_config_mipi_csi1 mipi_csi1;

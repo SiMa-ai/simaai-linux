@@ -258,6 +258,7 @@ typedef struct acamera_cmd_sensor_preset_info_t {
     uint8_t exposures;    // How many exposures this preset supports
     uint8_t num_channels; // How many channels this preset uses
     uint8_t data_width;   // Sensor data width
+    uint32_t pixel_format; // Sensor pixel format (bayer pattern for raw sensors)
 } acamera_cmd_sensor_preset_info_t;
 
 typedef struct {

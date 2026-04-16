@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <linux/sysctl.h>
 #include <linux/notifier.h>
+#include <linux/string_choices.h>
 #include <generated/utsrelease.h>
 
 int fips_enabled;
@@ -24,8 +25,7 @@ EXPORT_SYMBOL_GPL(fips_fail_notif_chain);
 static int fips_enable(char *str)
 {
 	fips_enabled = !!simple_strtol(str, NULL, 0);
-	printk(KERN_INFO "fips mode: %s\n",
-		fips_enabled ? "enabled" : "disabled");
+	pr_info("fips mode: %s\n", str_enabled_disabled(fips_enabled));
 	return 1;
 }
 
@@ -41,7 +41,7 @@ __setup("fips=", fips_enable);
 static char fips_name[] = FIPS_MODULE_NAME;
 static char fips_version[] = FIPS_MODULE_VERSION;
 
-static struct ctl_table crypto_sysctl_table[] = {
+static const struct ctl_table crypto_sysctl_table[] = {
 	{
 		.procname	= "fips_enabled",
 		.data		= &fips_enabled,
@@ -63,23 +63,13 @@ static struct ctl_table crypto_sysctl_table[] = {
 		.mode		= 0444,
 		.proc_handler	= proc_dostring
 	},
-	{}
-};
-
-static struct ctl_table crypto_dir_table[] = {
-	{
-		.procname       = "crypto",
-		.mode           = 0555,
-		.child          = crypto_sysctl_table
-	},
-	{}
 };
 
 static struct ctl_table_header *crypto_sysctls;
 
 static void crypto_proc_fips_init(void)
 {
-	crypto_sysctls = register_sysctl_table(crypto_dir_table);
+	crypto_sysctls = register_sysctl("crypto", crypto_sysctl_table);
 }
 
 static void crypto_proc_fips_exit(void)
@@ -105,5 +95,5 @@ static void __exit fips_exit(void)
 	crypto_proc_fips_exit();
 }
 
-subsys_initcall(fips_init);
+module_init(fips_init);
 module_exit(fips_exit);

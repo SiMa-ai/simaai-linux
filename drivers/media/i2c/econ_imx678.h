@@ -25,6 +25,40 @@
 #define CR 13                   /*   Carriage return */
 #define LF 10                   /*   Line feed */
 
+#define EXPOSURE_CTRL_ID	0x009A200A
+#define GAIN_CTRL_ID 		0x009A2009
+#define FRAMERATE_CTRL_ID 	0x009A200B
+#define EXPOSURE_FACTOR 	1000000
+#define SENSOR_PIXEL_CLOCK 	74250000
+#define GAIN_FACTOR 		10
+#define LOG2_GAIN_SHIFT 	18
+
+#define IMX678_VBLANK_MIN       48
+
+#define SENSOR_MAX_INTEGRATION_TIME (11249) // Number of lines per frame - 1
+#define SENSOR_MIN_INTEGRATION_TIME (3)
+
+/* Exposure control */
+#define IMX678_EXPOSURE_MIN			SENSOR_MIN_INTEGRATION_TIME
+#define IMX678_EXPOSURE_MAX			SENSOR_MAX_INTEGRATION_TIME
+#define IMX678_EXPOSURE_STEP        (1)
+#define IMX678_EXPOSURE_DEFAULT     (2250)
+
+/* Analog gain control  0 to 30DB*/ 
+#define IMX678_ANA_GAIN_MAX_DB		(5)
+#define IMX678_ANA_GAIN_MIN			(0 << LOG2_GAIN_SHIFT)
+#define IMX678_ANA_GAIN_MAX			(IMX678_ANA_GAIN_MAX_DB << LOG2_GAIN_SHIFT)
+#define IMX678_ANA_GAIN_DEFAULT		IMX678_ANA_GAIN_MIN
+#define IMX678_ANA_GAIN_STEP		(1)
+
+/* Digital gain control  30dB to 72dB*/
+#define IMX678_DGTL_GAIN_MAX_DB		(3)
+#define IMX678_DGTL_GAIN_MIN		(0 << LOG2_GAIN_SHIFT)
+#define IMX678_DGTL_GAIN_MAX		(IMX678_DGTL_GAIN_MAX_DB << LOG2_GAIN_SHIFT)
+#define IMX678_DGTL_GAIN_DEFAULT 	IMX678_DGTL_GAIN_MIN
+#define IMX678_DGTL_GAIN_STEP		(1)
+
+
 /* Only necessary commands added */
 enum _i2c_cmds
 {
@@ -87,6 +121,8 @@ unsigned char g_bload_buf[MAX_BUF_LEN] = { 0 };
 
 #define IMX678_XCLK_FREQ		24000000
 #define IMX678_DEFAULT_LINK_FREQ	450000000
+#define IMX678_2LANE_1080P_LINK_FREQ	720000000
+#define IMX678_2LANE_4K_LINK_FREQ	1040000000
 
 /* Embedded metadata stream structure - Not Implemented */
 #define IMX678_EMBEDDED_LINE_WIDTH 16384
@@ -131,6 +167,8 @@ enum pad_types {
 
 static const s64 imx678_link_freq_menu[] = {
 	IMX678_DEFAULT_LINK_FREQ,
+	IMX678_2LANE_1080P_LINK_FREQ,
+	IMX678_2LANE_4K_LINK_FREQ,
 };
 
 struct camera_common_frmfmt {
@@ -139,6 +177,8 @@ struct camera_common_frmfmt {
         int     num_framerates;
         bool    hdr_en;
         int     mode;
+		int hmax;
+		int vmax;
 };
 
 /* BS: Added Minimum camera_common_data structure
@@ -371,6 +411,13 @@ struct imx678 {
 
 	unsigned int fmt_code;
 
+	struct v4l2_ctrl *pixel_rate;
+	struct v4l2_ctrl *link_freq;
+	struct v4l2_ctrl *vblank;
+	struct v4l2_ctrl *hblank;
+	struct v4l2_ctrl *exposure;
+	u64 link_freq_value;
+
 	struct clk *xclk;
 	u32 xclk_freq;
 
@@ -387,6 +434,10 @@ struct imx678 {
 
 	/* Rewrite common registers on stream on? */
 	bool common_regs_written;
+	int again;
+	int dgain;
+	uint32_t integration_time;
+	u32 nr_supported_formats;
 };
 
 // Added to load MCU firmware bin along with package

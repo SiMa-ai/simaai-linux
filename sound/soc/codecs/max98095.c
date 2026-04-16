@@ -2115,7 +2115,6 @@ static int max98095_i2c_probe(struct i2c_client *i2c)
 {
 	struct max98095_priv *max98095;
 	int ret;
-	const struct i2c_device_id *id;
 
 	max98095 = devm_kzalloc(&i2c->dev, sizeof(struct max98095_priv),
 				GFP_KERNEL);
@@ -2131,8 +2130,7 @@ static int max98095_i2c_probe(struct i2c_client *i2c)
 		return ret;
 	}
 
-	id = i2c_match_id(max98095_i2c_id, i2c);
-	max98095->devtype = id->driver_data;
+	max98095->devtype = (uintptr_t)i2c_get_match_data(i2c);
 	i2c_set_clientdata(i2c, max98095);
 	max98095->pdata = i2c->dev.platform_data;
 
@@ -2155,7 +2153,7 @@ static struct i2c_driver max98095_i2c_driver = {
 		.name = "max98095",
 		.of_match_table = of_match_ptr(max98095_of_match),
 	},
-	.probe_new = max98095_i2c_probe,
+	.probe = max98095_i2c_probe,
 	.id_table = max98095_i2c_id,
 };
 

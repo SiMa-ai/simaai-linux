@@ -8,33 +8,110 @@
 	#size-cells = <2>;
 	ranges;
 
+	cam_dummy_reg: cam_dummy_reg {
+		regulator-name = "cam-dummy-reg";
+		compatible = "regulator-fixed";
+	};
+
+	axi_vdma0: dma-controller@40c1000 {
+		compatible = "snps,axi-dma-1.01a";
+		#dma-cells = <1>;
+		reg = <0x0 0x40c1000 0x0 0x1000>;
+		clocks = <&sys_clk>, <&sys_clk>;
+		clock-names = "core-clk", "cfgr-clk";
+		interrupts =    <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+
+		dma-channels = <4>;
+		snps,dma-masters = <2>;
+		snps,data-width = <3>;
+		snps,block-size = <4096 4096 4096 4096>;
+		snps,priority = <0 0 0 0>;
+		snps,axi-max-burst-len = <16>;
+		simaai,abort-on-cancel;
+		simaai,irq-affinity-mask= <0x300>;
+		status = "disabled";
+		snps,perch_irq = "true";
+	};
+
+	axi_vdma1: dma-controller@40c4000 {
+		compatible = "snps,axi-dma-1.01a";
+		#dma-cells = <1>;
+		reg = <0x0 0x40c4000 0x0 0x1000>;
+		clocks = <&sys_clk>, <&sys_clk>;
+		clock-names = "core-clk", "cfgr-clk";
+		interrupts =    <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 62 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
+
+		dma-channels = <4>;
+		snps,dma-masters = <2>;
+		snps,data-width = <4>;
+		snps,block-size = <4096 4096 4096 4096>;
+		snps,priority = <0 0 0 0>;
+		snps,axi-max-burst-len = <16>;
+		simaai,abort-on-cancel;
+		simaai,irq-affinity-mask= <0xc00>;
+		status = "disabled";
+		snps,perch_irq = "true";
+	};
+
+	axi_vdma2: dma-controller@40c7000 {
+		compatible = "snps,axi-dma-1.01a";
+		#dma-cells = <1>;
+		reg = <0x0 0x40c7000 0x0 0x1000>;
+		clocks = <&sys_clk>, <&sys_clk>;
+		clock-names = "core-clk", "cfgr-clk";
+		interrupts =    <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 67 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
+
+		dma-channels = <4>;
+		snps,dma-masters = <2>;
+		snps,data-width = <4>;
+		snps,block-size = <4096 4096 4096 4096>;
+		snps,priority = <0 0 0 0>;
+		snps,axi-max-burst-len = <16>;
+		simaai,abort-on-cancel;
+		simaai,irq-affinity-mask= <0x3000>;
+		status = "disabled";
+		snps,perch_irq = "true";
+	};
+
+	axi_vdma3: dma-controller@40ca000 {
+		compatible = "snps,axi-dma-1.01a";
+		#dma-cells = <1>;
+		reg = <0x0 0x40ca000 0x0 0x1000>;
+		clocks = <&sys_clk>, <&sys_clk>;
+		clock-names = "core-clk", "cfgr-clk";
+		interrupts =    <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
+
+		dma-channels = <4>;
+		snps,dma-masters = <2>;
+		snps,data-width = <4>;
+		snps,block-size = <4096 4096 4096 4096>;
+		snps,priority = <0 0 0 0>;
+		snps,axi-max-burst-len = <16>;
+		simaai,abort-on-cancel;
+		simaai,irq-affinity-mask= <0xc000>;
+		status = "disabled";
+		snps,perch_irq = "true";
+	};
+
 	mipi_dphy_rx0: dphy@40c0040 {
 		compatible = "snps,dphy-rx";
 		#phy-cells = <1>;
 		reg = < 0x00 0x40c0040 0x0 0x18
-			0x0 0x40c2020 0x0 0x14>;
-		snps,dphy-frequency = <33000000>;
+			0x0 0x40c2020 0x0 0x14 >;
 		snps,dphy-te-len = <12>;
-		simaai,mipi-generator = <0>;
-	};
-
-	csi0: csi0@40c0000 {
-		compatible = "snps,dw-mipi-csi";
-		reg = <0x0 0x40c0000 0x0 0x40
-				0x0 0x40c0058 0x0 0xFA8
-				0x0 0x40c2000 0x0 0x20
-				0x0 0x40c2034 0x0 0xFCC>;
-		reg-names = "csi-reg0", "csi-reg1", "glue-reg0", "glue-reg1";
-		interrupts = <GIC_SPI 77 IRQ_TYPE_LEVEL_HIGH>;
-		phys = <&mipi_dphy_rx0 0>;
-		phy-names = "snps-dphy-rx";
 		status = "disabled";
-		isp-connected = <0>;
-		output-type = <2>;
-		ipi-mode = <0>;
-		ipi-color-mode = <0>;
-		ipi-auto-flush = <1>;
-		virtual-channel = <1>;
 	};
 
 	mipi_dphy_rx1: dphy@40c3040 {
@@ -42,28 +119,8 @@
 		#phy-cells = <1>;
 		reg = < 0x00 0x40c3040 0x0 0x18
 			0x0 0x40c5020 0x0 0x14>;
-		snps,dphy-frequency = <33000000>;
 		snps,dphy-te-len = <12>;
-		simaai,mipi-generator = <0>;
-	};
-
-	csi1: csi1@40c3000 {
-		compatible = "snps,dw-mipi-csi";
-		reg = < 0x0 0x40c3000 0x0 0x40
-			0x0 0x40c3058 0x0 0xFA8
-			0x0 0x40c5000 0x0 0x20
-			0x0 0x40c5034 0x0 0xFCC>;
-		reg-names = "csi-reg0", "csi-reg1", "glue-reg0", "glue-reg1";
-		interrupts = <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
-		phys = <&mipi_dphy_rx1 0>;
-		phy-names = "snps-dphy-rx";
 		status = "disabled";
-		isp-connected = <0>;
-		output-type = <2>;
-		ipi-mode = <0>;
-		ipi-color-mode = <0>;
-		ipi-auto-flush = <1>;
-		virtual-channel = <1>;
 	};
 
 	mipi_dphy_rx2: dphy@40c6040 {
@@ -71,28 +128,8 @@
 		#phy-cells = <1>;
 		reg = < 0x00 0x40c6040 0x0 0x18
 			0x0 0x40c8020 0x0 0x14>;
-		snps,dphy-frequency = <33000000>;
 		snps,dphy-te-len = <12>;
-		simaai,mipi-generator = <0>;
-	};
-
-	csi2: csi2@40c6000 {
-		compatible = "snps,dw-mipi-csi";
-		reg = < 0x0 0x40c6000 0x0 0x40
-			0x0 0x40c6058 0x0 0xFA8
-			0x0 0x40c8000 0x0 0x20
-			0x0 0x40c8034 0x0 0xFCC>;
-		reg-names = "csi-reg0", "csi-reg1", "glue-reg0", "glue-reg1";
-		interrupts = <GIC_SPI 79 IRQ_TYPE_LEVEL_HIGH>;
-		phys = <&mipi_dphy_rx2 0>;
-		phy-names = "snps-dphy-rx";
 		status = "disabled";
-		isp-connected = <0>;
-		output-type = <2>;
-		ipi-mode = <0>;
-		ipi-color-mode = <0>;
-		ipi-auto-flush = <1>;
-		virtual-channel = <1>;
 	};
 
 	mipi_dphy_rx3: dphy@40c9040 {
@@ -100,27 +137,803 @@
 		#phy-cells = <1>;
 		reg = < 0x00 0x40c9040 0x0 0x18
 			0x0 0x40cb020 0x0 0x14>;
-		snps,dphy-frequency = <33000000>;
 		snps,dphy-te-len = <12>;
-		simaai,mipi-generator = <0>;
+		status = "disabled";
 	};
 
-	csi3: csi3@40c9000 {
-		compatible = "snps,dw-mipi-csi";
-		reg = < 0x0 0x40c9000 0x0 0x40
-			0x0 0x40c9058 0x0 0xFA8
-			0x0 0x40cb000 0x0 0x20
-			0x0 0x40cb034 0x0 0xFCC>;
-		reg-names = "csi-reg0", "csi-reg1", "glue-reg0", "glue-reg1";
+	csi0: csi@40c0000 {
+		compatible = "snps,dw-mipi-csi2-v150";
+		reg = < 0x0 0x40c0000 0x0 0x1000
+			0x0 0x40c2000 0x0 0x1000 >;
+		reg-names = "csi", "glue";
+		interrupts = <GIC_SPI 77 IRQ_TYPE_LEVEL_HIGH>;
+		phys = <&mipi_dphy_rx0 0>;
+		phy-names = "rx";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi00in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi00out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma00in>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi01in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi01out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma01in>;
+			};
+		};
+		port@4 {
+			reg = <4>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi02in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@5 {
+			reg = <5>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi02out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma02in>;
+			};
+		};
+		port@6 {
+			reg = <6>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi03in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@7 {
+			reg = <7>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi03out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma03in>;
+			};
+		};
+	};
+
+	csi1: csi@40c3000 {
+		compatible = "snps,dw-mipi-csi2-v150";
+		reg = < 0x0 0x40c3000 0x0 0x1000
+			0x0 0x40c5000 0x0 0x1000 >;
+		reg-names = "csi", "glue";
+		interrupts = <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
+		phys = <&mipi_dphy_rx1 0>;
+		phy-names = "rx";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi10in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi10out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma10in>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi11in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi11out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma11in>;
+			};
+		};
+		port@4 {
+			reg = <4>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi12in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@5 {
+			reg = <5>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi12out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma12in>;
+			};
+		};
+		port@6 {
+			reg = <6>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi13in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@7 {
+			reg = <7>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi13out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma13in>;
+			};
+		};
+	};
+
+	csi2: csi@40c6000 {
+		compatible = "snps,dw-mipi-csi2-v150";
+		reg = < 0x0 0x40c6000 0x0 0x1000
+			0x0 0x40c8000 0x0 0x1000 >;
+		reg-names = "csi", "glue";
+		interrupts = <GIC_SPI 79 IRQ_TYPE_LEVEL_HIGH>;
+		phys = <&mipi_dphy_rx2 0>;
+		phy-names = "rx";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi20in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi20out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma20in>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi21in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi21out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma21in>;
+			};
+		};
+		port@4 {
+			reg = <4>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi22in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@5 {
+			reg = <5>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi22out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma22in>;
+			};
+		};
+		port@6 {
+			reg = <6>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi23in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@7 {
+			reg = <7>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi23out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma23in>;
+			};
+		};
+	};
+
+	csi3: csi@40c9000 {
+		compatible = "snps,dw-mipi-csi2-v150";
+		reg = < 0x0 0x40c9000 0x0 0x1000
+			0x0 0x40cb000 0x0 0x1000 >;
+		reg-names = "csi", "glue";
 		interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>;
 		phys = <&mipi_dphy_rx3 0>;
-		phy-names = "snps-dphy-rx";
+		phy-names = "rx";
 		status = "disabled";
-		isp-connected = <0>;
-		output-type = <2>;
-		ipi-mode = <0>;
-		ipi-color-mode = <0>;
-		ipi-auto-flush = <1>;
-		virtual-channel = <1>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi30in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi30out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma30in>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi31in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi31out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma31in>;
+			};
+		};
+		port@4 {
+			reg = <4>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi32in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@5 {
+			reg = <5>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi32out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma32in>;
+			};
+		};
+		port@6 {
+			reg = <6>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi33in: endpoint@0 {
+				reg = <0>;
+			};
+		};
+		port@7 {
+			reg = <7>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi33out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vdma33in>;
+			};
+		};
+	};
+
+	v4l2video0: csi2video@0 {
+		compatible = "simaai,v4l2-video";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw00in: endpoint@0 {
+				reg = <0>;
+				label = "raw-capture.0.0";
+				remote-endpoint = <&vdma00out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw01in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.0.1";
+				remote-endpoint = <&vdma01out>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw02in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.0.2";
+				remote-endpoint = <&vdma02out>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw03in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.0.3";
+				remote-endpoint = <&vdma03out>;
+			};
+		};
+	};
+
+	v4l2video1: csi2video@1 {
+		compatible = "simaai,v4l2-video";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw10in: endpoint@0 {
+				reg = <0>;
+				label = "raw-capture.1.0";
+				remote-endpoint = <&vdma10out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw11in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.1.1";
+				remote-endpoint = <&vdma11out>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw12in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.1.2";
+				remote-endpoint = <&vdma12out>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw13in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.1.3";
+				remote-endpoint = <&vdma13out>;
+			};
+		};
+	};
+
+	v4l2video2: csi2video@2 {
+		compatible = "simaai,v4l2-video";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw20in: endpoint@0 {
+				reg = <0>;
+				label = "raw-capture.2.0";
+				remote-endpoint = <&vdma20out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw21in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.2.1";
+				remote-endpoint = <&vdma21out>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw22in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.2.2";
+				remote-endpoint = <&vdma22out>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw23in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.2.3";
+				remote-endpoint = <&vdma23out>;
+			};
+		};
+	};
+
+	v4l2video3: csi2video@3 {
+		compatible = "simaai,v4l2-video";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw30in: endpoint@0 {
+				reg = <0>;
+				label = "raw-capture.3.0";
+				remote-endpoint = <&vdma30out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw31in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.3.1";
+				remote-endpoint = <&vdma31out>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw32in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.3.2";
+				remote-endpoint = <&vdma32out>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			raw33in: endpoint@0 {
+				reg = <0>;
+				status = "disabled";
+				label = "raw-capture.3.3";
+				remote-endpoint = <&vdma33out>;
+			};
+		};
+	};
+
+	v4l2vdma0: vdma@0 {
+		compatible = "simaai,v4l2-vdma";
+		id = <0x0>;
+		dmas = <&axi_vdma0 0>, <&axi_vdma0 1>, <&axi_vdma0 2>, <&axi_vdma0 3>;
+		dma-names = "channel-0", "channel-1", "channel-2", "channel-3";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma00in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi00out>;
+			};
+			vdma00out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw00in>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma01in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi01out>;
+			};
+			vdma01out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw01in>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma02in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi02out>;
+			};
+			vdma02out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw02in>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma03in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi03out>;
+			};
+			vdma03out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw03in>;
+			};
+		};
+	};
+
+	v4l2vdma1: vdma@1 {
+		compatible = "simaai,v4l2-vdma";
+		id = <0x1>;
+		dmas = <&axi_vdma1 0>, <&axi_vdma1 1>, <&axi_vdma1 2>, <&axi_vdma1 3>;
+		dma-names = "channel-0", "channel-1", "channel-2", "channel-3";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma10in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi10out>;
+			};
+			vdma10out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw10in>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma11in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi11out>;
+			};
+			vdma11out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw11in>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma12in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi12out>;
+			};
+			vdma12out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw12in>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma13in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi13out>;
+			};
+			vdma13out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw13in>;
+			};
+		};
+	};
+
+	v4l2vdma2: vdma@2 {
+		compatible = "simaai,v4l2-vdma";
+		id = <0x2>;
+		dmas = <&axi_vdma2 0>, <&axi_vdma2 1>, <&axi_vdma2 2>, <&axi_vdma2 3>;
+		dma-names = "channel-0", "channel-1", "channel-2", "channel-3";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma20in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi20out>;
+			};
+			vdma20out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw20in>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma21in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi21out>;
+			};
+			vdma21out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw21in>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma22in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi22out>;
+			};
+			vdma22out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw22in>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma23in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi23out>;
+			};
+			vdma23out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw23in>;
+			};
+		};
+	};
+
+	v4l2vdma3: vdma@3 {
+		compatible = "simaai,v4l2-vdma";
+		id = <0x3>;
+		dmas = <&axi_vdma3 0>, <&axi_vdma3 1>, <&axi_vdma3 2>, <&axi_vdma3 3>;
+		dma-names = "channel-0", "channel-1", "channel-2", "channel-3";
+		status = "disabled";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma30in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi30out>;
+			};
+			vdma30out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw30in>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma31in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi31out>;
+			};
+			vdma31out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw31in>;
+			};
+		};
+		port@2 {
+			reg = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma32in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi32out>;
+			};
+			vdma32out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw32in>;
+			};
+		};
+		port@3 {
+			reg = <3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vdma33in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi33out>;
+			};
+			vdma33out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&raw33in>;
+			};
+		};
 	};
 };

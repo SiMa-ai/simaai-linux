@@ -120,7 +120,7 @@ static const struct of_device_id simaai_sio_reset_dt_ids[] = {
 	{ .compatible = "simaai,reset-sio", },
 	{ },
 };
-MODULE_DEVICE_TABLE(of, lantiq_rcu_reset_dt_ids);
+MODULE_DEVICE_TABLE(of, simaai_sio_reset_dt_ids);
 
 static struct platform_driver simaai_sio_reset_driver = {
 	.probe	= simaai_sio_reset_probe,

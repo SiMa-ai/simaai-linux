@@ -52,6 +52,7 @@ struct venc_t {
 	u32 ready_count;
 	u32 enable;
 	u32 stopped;
+	u32 memory_resource_configured;
 
 	u32 skipped_count;
 	u32 skipped_bytes;
@@ -69,13 +70,24 @@ struct venc_frame_t {
 static const struct vpu_format venc_formats[] = {
 	{
 		.pixfmt = V4L2_PIX_FMT_NV12M,
-		.num_planes = 2,
+		.mem_planes = 2,
+		.comp_planes = 2,
 		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+		.sibling = V4L2_PIX_FMT_NV12,
+	},
+	{
+		.pixfmt = V4L2_PIX_FMT_NV12,
+		.mem_planes = 1,
+		.comp_planes = 2,
+		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+		.sibling = V4L2_PIX_FMT_NV12M,
 	},
 	{
 		.pixfmt = V4L2_PIX_FMT_H264,
-		.num_planes = 1,
+		.mem_planes = 1,
+		.comp_planes = 1,
 		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+		.flags = V4L2_FMT_FLAG_COMPRESSED
 	},
 	{0, 0, 0, 0},
 };
@@ -173,14 +185,14 @@ static int venc_g_fmt(struct file *file, void *fh, struct v4l2_format *f)
 	cur_fmt = vpu_get_format(inst, f->type);
 
 	pixmp->pixelformat = cur_fmt->pixfmt;
-	pixmp->num_planes = cur_fmt->num_planes;
+	pixmp->num_planes = cur_fmt->mem_planes;
 	pixmp->width = cur_fmt->width;
 	pixmp->height = cur_fmt->height;
 	pixmp->field = cur_fmt->field;
 	pixmp->flags = cur_fmt->flags;
 	for (i = 0; i < pixmp->num_planes; i++) {
 		pixmp->plane_fmt[i].bytesperline = cur_fmt->bytesperline[i];
-		pixmp->plane_fmt[i].sizeimage = cur_fmt->sizeimage[i];
+		pixmp->plane_fmt[i].sizeimage = vpu_get_fmt_plane_size(cur_fmt, i);
 	}
 
 	f->fmt.pix_mp.colorspace = venc->params.color.primaries;
@@ -194,8 +206,9 @@ static int venc_g_fmt(struct file *file, void *fh, struct v4l2_format *f)
 static int venc_try_fmt(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct vpu_inst *inst = to_inst(file);
+	struct vpu_format fmt;
 
-	vpu_try_fmt_common(inst, f);
+	vpu_try_fmt_common(inst, f, &fmt);
 
 	return 0;
 }
@@ -203,12 +216,11 @@ static int venc_try_fmt(struct file *file, void *fh, struct v4l2_format *f)
 static int venc_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct vpu_inst *inst = to_inst(file);
-	const struct vpu_format *fmt;
+	struct vpu_format fmt;
 	struct vpu_format *cur_fmt;
 	struct vb2_queue *q;
 	struct venc_t *venc = inst->priv;
 	struct v4l2_pix_format_mplane *pix_mp = &f->fmt.pix_mp;
-	int i;
 
 	q = v4l2_m2m_get_vq(inst->fh.m2m_ctx, f->type);
 	if (!q)
@@ -216,24 +228,12 @@ static int venc_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
 	if (vb2_is_busy(q))
 		return -EBUSY;
 
-	fmt = vpu_try_fmt_common(inst, f);
-	if (!fmt)
+	if (vpu_try_fmt_common(inst, f, &fmt))
 		return -EINVAL;
 
 	cur_fmt = vpu_get_format(inst, f->type);
 
-	cur_fmt->pixfmt = fmt->pixfmt;
-	cur_fmt->num_planes = fmt->num_planes;
-	cur_fmt->flags = fmt->flags;
-	cur_fmt->width = pix_mp->width;
-	cur_fmt->height = pix_mp->height;
-	for (i = 0; i < fmt->num_planes; i++) {
-		cur_fmt->sizeimage[i] = pix_mp->plane_fmt[i].sizeimage;
-		cur_fmt->bytesperline[i] = pix_mp->plane_fmt[i].bytesperline;
-	}
-
-	if (pix_mp->field != V4L2_FIELD_ANY)
-		cur_fmt->field = pix_mp->field;
+	memcpy(cur_fmt, &fmt, sizeof(*cur_fmt));
 
 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
 		venc->params.input_format = cur_fmt->pixfmt;
@@ -251,19 +251,10 @@ static int venc_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
 	}
 
 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
-		if (!vpu_color_check_primaries(pix_mp->colorspace)) {
-			venc->params.color.primaries = pix_mp->colorspace;
-			vpu_color_get_default(venc->params.color.primaries,
-					      &venc->params.color.transfer,
-					      &venc->params.color.matrix,
-					      &venc->params.color.full_range);
-		}
-		if (!vpu_color_check_transfers(pix_mp->xfer_func))
-			venc->params.color.transfer = pix_mp->xfer_func;
-		if (!vpu_color_check_matrix(pix_mp->ycbcr_enc))
-			venc->params.color.matrix = pix_mp->ycbcr_enc;
-		if (!vpu_color_check_full_range(pix_mp->quantization))
-			venc->params.color.full_range = pix_mp->quantization;
+		venc->params.color.primaries = pix_mp->colorspace;
+		venc->params.color.transfer = pix_mp->xfer_func;
+		venc->params.color.matrix = pix_mp->ycbcr_enc;
+		venc->params.color.full_range = pix_mp->quantization;
 	}
 
 	pix_mp->colorspace = venc->params.color.primaries;
@@ -278,7 +269,7 @@ static int venc_g_parm(struct file *file, void *fh, struct v4l2_streamparm *parm
 {
 	struct vpu_inst *inst = to_inst(file);
 	struct venc_t *venc = inst->priv;
-	struct v4l2_fract *timeperframe = &parm->parm.capture.timeperframe;
+	struct v4l2_fract *timeperframe;
 
 	if (!parm)
 		return -EINVAL;
@@ -289,6 +280,7 @@ static int venc_g_parm(struct file *file, void *fh, struct v4l2_streamparm *parm
 	if (!vpu_helper_check_type(inst, parm->type))
 		return -EINVAL;
 
+	timeperframe = &parm->parm.capture.timeperframe;
 	parm->parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
 	parm->parm.capture.readbuffers = 0;
 	timeperframe->numerator = venc->params.frame_rate.numerator;
@@ -301,7 +293,7 @@ static int venc_s_parm(struct file *file, void *fh, struct v4l2_streamparm *parm
 {
 	struct vpu_inst *inst = to_inst(file);
 	struct venc_t *venc = inst->priv;
-	struct v4l2_fract *timeperframe = &parm->parm.capture.timeperframe;
+	struct v4l2_fract *timeperframe;
 	unsigned long n, d;
 
 	if (!parm)
@@ -313,6 +305,7 @@ static int venc_s_parm(struct file *file, void *fh, struct v4l2_streamparm *parm
 	if (!vpu_helper_check_type(inst, parm->type))
 		return -EINVAL;
 
+	timeperframe = &parm->parm.capture.timeperframe;
 	if (!timeperframe->numerator)
 		timeperframe->numerator = venc->params.frame_rate.numerator;
 	if (!timeperframe->denominator)
@@ -468,7 +461,7 @@ static int venc_encoder_cmd(struct file *file, void *fh, struct v4l2_encoder_cmd
 	vpu_inst_lock(inst);
 	if (cmd->cmd == V4L2_ENC_CMD_STOP) {
 		if (inst->state == VPU_CODEC_STATE_DEINIT)
-			vpu_set_last_buffer_dequeued(inst);
+			vpu_set_last_buffer_dequeued(inst, true);
 		else
 			venc_request_eos(inst);
 	}
@@ -526,7 +519,6 @@ static int venc_op_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct venc_t *venc = inst->priv;
 	int ret = 0;
 
-	vpu_inst_lock(inst);
 	switch (ctrl->id) {
 	case V4L2_CID_MPEG_VIDEO_H264_PROFILE:
 		venc->params.profile = ctrl->val;
@@ -587,7 +579,6 @@ static int venc_op_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = -EINVAL;
 		break;
 	}
-	vpu_inst_unlock(inst);
 
 	return ret;
 }
@@ -687,6 +678,9 @@ static int venc_ctrl_init(struct vpu_inst *inst)
 			       V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME,
 			       ~(1 << V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME),
 			       V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME);
+
+	v4l2_ctrl_new_std(&inst->ctrl_handler, NULL,
+			  V4L2_CID_MPEG_VIDEO_AVERAGE_QP, 0, 51, 1, 0);
 
 	if (inst->ctrl_handler.error) {
 		ret = inst->ctrl_handler.error;
@@ -827,6 +821,7 @@ static int venc_get_one_encoded_frame(struct vpu_inst *inst,
 	vbuf->field = inst->cap_format.field;
 	vbuf->flags |= frame->info.pic_type;
 	vpu_set_buffer_state(vbuf, VPU_BUF_STATE_IDLE);
+	vpu_set_buffer_average_qp(vbuf, frame->info.average_qp);
 	dev_dbg(inst->dev, "[%d][OUTPUT TS]%32lld\n", inst->id, vbuf->vb2_buf.timestamp);
 	v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
 	venc->ready_count++;
@@ -888,7 +883,7 @@ static void venc_set_last_buffer_dequeued(struct vpu_inst *inst)
 	struct venc_t *venc = inst->priv;
 
 	if (venc->stopped && list_empty(&venc->frames))
-		vpu_set_last_buffer_dequeued(inst);
+		vpu_set_last_buffer_dequeued(inst, true);
 }
 
 static void venc_stop_done(struct vpu_inst *inst)
@@ -949,9 +944,18 @@ static int venc_start_session(struct vpu_inst *inst, u32 type)
 	ret = vpu_iface_set_encode_params(inst, &venc->params, 0);
 	if (ret)
 		goto error;
+
+	venc->memory_resource_configured = false;
 	ret = vpu_session_configure_codec(inst);
 	if (ret)
 		goto error;
+
+	if (!venc->memory_resource_configured) {
+		vb2_queue_error(v4l2_m2m_get_src_vq(inst->fh.m2m_ctx));
+		vb2_queue_error(v4l2_m2m_get_dst_vq(inst->fh.m2m_ctx));
+		ret = -ENOMEM;
+		goto error;
+	}
 
 	inst->state = VPU_CODEC_STATE_CONFIGURED;
 	/*vpu_iface_config_memory_resource*/
@@ -991,6 +995,7 @@ static void venc_cleanup_mem_resource(struct vpu_inst *inst)
 	u32 i;
 
 	venc = inst->priv;
+	venc->memory_resource_configured = false;
 
 	for (i = 0; i < ARRAY_SIZE(venc->enc); i++)
 		vpu_free_dma(&venc->enc[i]);
@@ -1054,6 +1059,7 @@ static void venc_request_mem_resource(struct vpu_inst *inst,
 		vpu_iface_config_memory_resource(inst, MEM_RES_REF, i, &venc->ref[i]);
 	for (i = 0; i < act_frame_num; i++)
 		vpu_iface_config_memory_resource(inst, MEM_RES_ACT, i, &venc->act[i]);
+	venc->memory_resource_configured = true;
 }
 
 static void venc_cleanup_frames(struct venc_t *venc)
@@ -1282,7 +1288,6 @@ static void venc_init(struct file *file)
 	f.fmt.pix_mp.width = 1280;
 	f.fmt.pix_mp.height = 720;
 	f.fmt.pix_mp.field = V4L2_FIELD_NONE;
-	f.fmt.pix_mp.colorspace = V4L2_COLORSPACE_REC709;
 	venc_s_fmt(file, &inst->fh, &f);
 
 	memset(&f, 0, sizeof(f));

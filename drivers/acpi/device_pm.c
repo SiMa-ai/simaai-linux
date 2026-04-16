@@ -397,6 +397,19 @@ void acpi_device_fix_up_power_extended(struct acpi_device *adev)
 }
 EXPORT_SYMBOL_GPL(acpi_device_fix_up_power_extended);
 
+/**
+ * acpi_device_fix_up_power_children - Force a device's children into D0.
+ * @adev: Parent device object whose children's power state is to be fixed up.
+ *
+ * Call acpi_device_fix_up_power() for @adev's children so long as they
+ * are reported as present and enabled.
+ */
+void acpi_device_fix_up_power_children(struct acpi_device *adev)
+{
+	acpi_dev_for_each_child(adev, fix_up_power_if_applicable, NULL);
+}
+EXPORT_SYMBOL_GPL(acpi_device_fix_up_power_children);
+
 int acpi_device_update_power(struct acpi_device *device, int *state_p)
 {
 	int state;
@@ -1106,6 +1119,8 @@ int acpi_subsys_prepare(struct device *dev)
 {
 	struct acpi_device *adev = ACPI_COMPANION(dev);
 
+	dev_pm_set_strict_midlayer(dev, true);
+
 	if (dev->driver && dev->driver->pm && dev->driver->pm->prepare) {
 		int ret = dev->driver->pm->prepare(dev);
 
@@ -1134,6 +1149,8 @@ void acpi_subsys_complete(struct device *dev)
 	 */
 	if (pm_runtime_suspended(dev) && pm_resume_via_firmware())
 		pm_request_resume(dev);
+
+	dev_pm_set_strict_midlayer(dev, false);
 }
 EXPORT_SYMBOL_GPL(acpi_subsys_complete);
 
@@ -1148,7 +1165,7 @@ EXPORT_SYMBOL_GPL(acpi_subsys_complete);
  */
 int acpi_subsys_suspend(struct device *dev)
 {
-	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND) ||
+	if (!dev_pm_smart_suspend(dev) ||
 	    acpi_dev_needs_resume(dev, ACPI_COMPANION(dev)))
 		pm_runtime_resume(dev);
 
@@ -1307,7 +1324,7 @@ EXPORT_SYMBOL_GPL(acpi_subsys_restore_early);
  */
 int acpi_subsys_poweroff(struct device *dev)
 {
-	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND) ||
+	if (!dev_pm_smart_suspend(dev) ||
 	    acpi_dev_needs_resume(dev, ACPI_COMPANION(dev)))
 		pm_runtime_resume(dev);
 
@@ -1349,6 +1366,8 @@ static int acpi_subsys_poweroff_noirq(struct device *dev)
 }
 #endif /* CONFIG_PM_SLEEP */
 
+static void acpi_dev_pm_detach(struct device *dev, bool power_off);
+
 static struct dev_pm_domain acpi_general_pm_domain = {
 	.ops = {
 		.runtime_suspend = acpi_subsys_runtime_suspend,
@@ -1369,6 +1388,7 @@ static struct dev_pm_domain acpi_general_pm_domain = {
 		.restore_early = acpi_subsys_restore_early,
 #endif
 	},
+	.detach = acpi_dev_pm_detach,
 };
 
 /**
@@ -1452,7 +1472,6 @@ int acpi_dev_pm_attach(struct device *dev, bool power_on)
 		acpi_device_wakeup_disable(adev);
 	}
 
-	dev->pm_domain->detach = acpi_dev_pm_detach;
 	return 1;
 }
 EXPORT_SYMBOL_GPL(acpi_dev_pm_attach);

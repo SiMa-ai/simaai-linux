@@ -4,7 +4,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
-extern bool CONFIG_PREEMPT __kconfig __weak;
+extern bool CONFIG_PREEMPTION __kconfig __weak;
 extern const int bpf_task_storage_busy __ksym;
 
 char _license[] SEC("license") = "GPL";
@@ -23,9 +23,8 @@ SEC("raw_tp/sys_enter")
 int BPF_PROG(read_bpf_task_storage_busy)
 {
 	int *value;
-	int key;
 
-	if (!CONFIG_PREEMPT)
+	if (!CONFIG_PREEMPTION)
 		return 0;
 
 	if (bpf_get_current_pid_tgid() >> 32 != pid)

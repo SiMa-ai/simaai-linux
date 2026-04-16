@@ -8,6 +8,8 @@
 / {
 	nvs: nvs@0 {
 		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
 		ranges;
 
 		nvs_pinmux_spi: pinmux@0x0408c000 {
