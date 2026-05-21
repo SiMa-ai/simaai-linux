@@ -28,6 +28,11 @@
 #include <linux/reboot.h>
 #include <linux/timekeeping.h>
 #include <linux/circ_buf.h>
+#include <linux/if.h>
+#include <linux/sockios.h>
+#include <linux/inetdevice.h>
+#include <linux/netdevice.h>
+#include <net/net_namespace.h>
 
 #include <linux/simaai_pcie_api.h>
 #include "simaai_pcie_drv.h"
@@ -1302,33 +1307,6 @@ static int si_pep_handle_setup_soc_cmd(struct si_pep_dev *pep,
 	return SI_RES_SUCCESS;
 }
 
-char * const prog = "/bin/sh";
-char * const arg1 = "-c";
-char *envp[] = {
-	"HOME=/",
-	"LANG=C",
-	"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-	NULL,
-};
-
-static void si_pep_teardown_netintf(struct si_pep_dev *pep)
-{
-	char intfname[IFNAMSIZ];
-	char command[256];
-	char *argv[] = {prog, arg1, command, NULL};
-
-	if (pep->net_dev.created == 0)
-		return;
-
-	strncpy(&intfname[0], pep->net_dev.ndev->name, IFNAMSIZ);
-	snprintf(command, sizeof(command), "ifconfig %s down", intfname);
-	call_usermodehelper(prog, argv, envp, UMH_WAIT_PROC | UMH_KILLABLE);
-	si_pep_net_cleanup(pep);
-	pep->net_dev.net_addr = cpu_to_be32(0);
-	pep->net_dev.net_mask = cpu_to_be32(0);
-	pep->net_dev.created = 0;
-}
-
 static int si_pep_setup_neintf(struct si_pep_dev *pep)
 {
 	int ret;
@@ -1355,43 +1333,145 @@ static int si_pep_setup_neintf(struct si_pep_dev *pep)
 	return 0;
 }
 
+static int si_pep_clear_veth_ifaddr(struct si_pep_dev *pep,
+		struct net_device *ndev)
+{
+	int ret;
+	struct ifreq ifr;
+	struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+
+	memset(&ifr, 0, sizeof(ifr));
+	strscpy(ifr.ifr_name, ndev->name, IFNAMSIZ);
+	sin->sin_family = AF_INET;
+	sin->sin_addr.s_addr = htonl(INADDR_ANY);
+
+	ret = devinet_ioctl(dev_net(ndev), SIOCSIFADDR, &ifr);
+	if (ret == -EADDRNOTAVAIL)
+		ret = 0;
+
+	return ret;
+}
+
+static int si_pep_set_veth_ifaddr(struct si_pep_dev *pep,
+		struct net_device *ndev, __be32 ip, __be32 mask)
+{
+	int ret;
+	struct ifreq ifr;
+	struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+
+	/* Set IP address */
+	memset(&ifr, 0, sizeof(ifr));
+	strscpy(ifr.ifr_name, ndev->name, IFNAMSIZ);
+	sin->sin_family = AF_INET;
+	sin->sin_addr.s_addr = ip;
+	ret = devinet_ioctl(dev_net(ndev), SIOCSIFADDR, &ifr);
+	if (ret) {
+		si_err(pep, "Failed to set IPv4 address for %s, to %pI4, %d",
+				ndev->name, &ip, ret);
+		return ret;
+	}
+
+	/* Set Netmask */
+	memset(&ifr, 0, sizeof(ifr));
+	strscpy(ifr.ifr_name, ndev->name, IFNAMSIZ);
+	sin->sin_family = AF_INET;
+	sin->sin_addr.s_addr = mask;
+	ret = devinet_ioctl(dev_net(ndev), SIOCSIFNETMASK, &ifr);
+	if (ret) {
+		si_err(pep, "Failed to set IPv4 netmask for %s, to %pI4, %d",
+				ndev->name, &ip, ret);
+		return ret;
+	}
+
+	/* Bring interface up */
+	rtnl_lock();
+	ret = dev_change_flags(ndev, ndev->flags | IFF_UP, NULL);
+	rtnl_unlock();
+	if (ret) {
+		si_err(pep, "Failed to bring interface %s up, %d", ndev->name,
+				ret);
+	}
+
+	return ret;
+}
+
 static int si_pep_set_neintf_ifaddr(struct si_pep_dev *pep,
 		struct si_mcmd_set_ipaddr_params *ifaddr)
 {
 	int ret;
+	__be32 cur_ip = 0;
+	__be32 cur_mask = 0;
+	struct in_device *in_dev;
 	struct si_pep_net_dev *netdev = &pep->net_dev;
-	char addr[16] = { 0 };
-	char mask[16] = { 0 };
-	char intfname[IFNAMSIZ] = { 0 };
-	char command[256];
-	char *argv[] = {prog, arg1, command, NULL};
+	struct net_device *ndev = netdev->ndev;
 
 	if (pep->net_dev.created == 0) {
 		si_err(pep, "Ethernet Interface not created");
 		return -ENODEV;
 	}
 
-	if (ifaddr->net_addr == netdev->net_addr &&
-			ifaddr->net_mask == netdev->net_mask)
-		return -EEXIST;
+	rcu_read_lock();
+	in_dev = __in_dev_get_rcu(ndev);
+	if (in_dev) {
+		const struct in_ifaddr *ifa = rcu_dereference(in_dev->ifa_list);
+		if (ifa) {
+			cur_ip   = ifa->ifa_local;
+			cur_mask = ifa->ifa_mask;
+		}
+	}
+	rcu_read_unlock();
 
-	strncpy(&intfname[0], pep->net_dev.ndev->name, IFNAMSIZ);
-	netdev->net_addr = ifaddr->net_addr;
-	netdev->net_mask = ifaddr->net_mask;
-	snprintf(&addr[0], sizeof(addr), "%pI4", &ifaddr->net_addr);
-	snprintf(&mask[0], sizeof(mask), "%pI4", &ifaddr->net_mask);
-	snprintf(command, sizeof(command), "ifconfig %s %s netmask %s up",
-			intfname, addr, mask);
-	ret = call_usermodehelper(prog, argv, envp, UMH_WAIT_PROC|UMH_KILLABLE);
+	if (cur_ip == ifaddr->net_addr && cur_mask == ifaddr->net_mask) {
+		si_err(pep, "Ignoring duplicate IP assignement request on %s",
+				ndev->name);
+		return 0;
+	}
+
+	if (cur_ip)
+		si_pep_clear_veth_ifaddr(pep, ndev);
+
+	if (ifaddr->net_addr == 0)
+		return 0;
+
+	ret = si_pep_set_veth_ifaddr(pep, ndev, ifaddr->net_addr,
+			ifaddr->net_mask);
 	if (ret) {
 		si_err(pep, "Failed to set IPv4 address for interface '%s'",
 				pep->net_dev.ndev->name);
 		si_err(pep, "Set Interface IP to %pI4/%pI4", &netdev->net_addr,
 				&netdev->net_mask);
-		return -EIO;
+		return ret;
 	}
 
 	return 0;
+}
+
+static void si_pep_teardown_netintf(struct si_pep_dev *pep)
+{
+	int ret;
+	struct net_device *ndev = pep->net_dev.ndev;
+
+	if (pep->net_dev.created == 0)
+		return;
+
+	ret = si_pep_clear_veth_ifaddr(pep, ndev);
+	if (ret && ret != -EADDRNOTAVAIL) {
+		si_err(pep, "Failed to clear IPv4 address from %s. %d",
+				ndev->name, ret);
+	}
+
+	rtnl_lock();
+	ret = dev_change_flags(ndev, ndev->flags & ~IFF_UP, NULL);
+	rtnl_unlock();
+	if (ret) {
+		si_err(pep, "Failed to bring interface %s down. %d",
+				ndev->name, ret);
+	}
+
+	si_pep_net_cleanup(pep);
+	pep->net_dev.net_addr = cpu_to_be32(0);
+	pep->net_dev.net_mask = cpu_to_be32(0);
+	pep->net_dev.created = 0;
 }
 
 void si_pep_handle_mcmd(struct si_pep_dev *pep, struct si_mcmd *mcmd_in)

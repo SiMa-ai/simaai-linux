@@ -45,7 +45,7 @@
 &csi10in {
     clock-lanes = <0>;
     data-lanes = <1 2>;
-    link-frequencies = /bits/ 64 <450000000>;
+    link-frequencies = /bits/ 64 <594000000>;
     remote-endpoint = <&cam10out>;
     clock-continuous;
 };
@@ -59,30 +59,22 @@
         status = "okay";
     };
 
-    pca6408_fpga1: pca6408@21 {
-        compatible = "ti,tca6408";
-        gpio-controller;
-        #gpio-cells = <2>;
-        reg = <0x21>;
+    fpga1: fpga@c {
+        compatible = "econ,kobe1_fpga";
+        reg = <0x0c>;
         status = "okay";
+        fpga_nprogram-gpios = <&pca6408_camera1 2 0>;
+        fpga_nreset-gpios = <&pca6408_camera1 3 0>;
+        fpga_slaveid_sel0-gpios = <&pca6408_camera1 4 0>;
+        fpga_slaveid_sel1-gpios = <&pca6408_camera1 7 0>;
+        mipi_filter_dt1 = <0x92>;
+        mipi_filter_dt2 = <0x93>;
+        mipi_filter_dt3 = <0xb7>;
+        mipi_filter_dt4 = <0x7f>;
+        mipi_speed = <1188>;
+        mipi_tx_clockmode = <0>; // Discontinuous
+        mipi_rx_clockmode = <0>; // Discontinuous
     };
-
-	fpga1: fpga@c {
-		compatible = "econ,fpga";
-		reg = <0x0c>;
-		status = "okay";
-		fpga_nprogram-gpios = <&pca6408_fpga1 2 0>;
-		fpga_nreset-gpios = <&pca6408_fpga1 3 0>;
-		fpga_slaveid_sel0-gpios = <&pca6408_fpga1 4 0>;
-		fpga_slaveid_sel1-gpios = <&pca6408_fpga1 7 0>;
-		mipi_filter_dt1 = <0x92>;
-		mipi_filter_dt2 = <0x93>;
-		mipi_filter_dt3 = <0xb7>;
-		mipi_filter_dt4 = <0x7f>;
-		mipi_speed = <1188>;
-		mipi_tx_clockmode = <0>; // Discontinuous
-		mipi_rx_clockmode = <0>; // Discontinuous
-	};
 
     imx568s1: imx568@42 {
         compatible = "sony,imx568";

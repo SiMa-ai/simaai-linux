@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * Copyright (c) 2026 SiMa ai
+ * Copyright (c) 2024 SiMa ai
  */
 
 /dts-v1/;
 /plugin/;
-
-#include "modalix-som-connectech-2CAM.dtsi"
 
 &{/} {
     imx568_vana_2: csi2_fixedregulator@0 {
@@ -18,7 +16,6 @@
         startup-delay-us = <300000>;
         regulator-always-on;
     };
-
     imx568_vdig_2: csi2_fixedregulator@1 {
         compatible = "regulator-fixed";
         regulator-name = "imx568_vdig_2";
@@ -26,7 +23,6 @@
         regulator-max-microvolt = <110000>;
         regulator-always-on;
     };
-
     imx568_vddl_2: csi2_fixedregulator@2 {
         compatible = "regulator-fixed";
         regulator-name = "imx568_vddl_2";
@@ -34,7 +30,6 @@
         regulator-max-microvolt = <1800000>;
         regulator-always-on;
     };
-
     imx568_clk_2: csi2_camera-clk {
         compatible = "fixed-clock";
         #clock-cells = <0>;
@@ -42,39 +37,56 @@
     };
 };
 
+&csi2 {
+    status = "okay";
+};
+
+&axi_vdma2 {
+    status = "okay";
+};
+
+&mipi_dphy_rx2 {
+    status = "okay";
+};
+
+&v4l2video2 {
+    status = "okay";
+};
+
+&v4l2vdma2 {
+    status = "okay";
+};
+
 &csi20in {
     clock-lanes = <0>;
     data-lanes = <1 2>;
-    link-frequencies = /bits/ 64 <450000000>;
+    link-frequencies = /bits/ 64 <594000000>;
     remote-endpoint = <&cam20out>;
     clock-continuous;
 };
 
-&i2c2 {
-    pca6408_camera2: pca6408@20 {
-        compatible = "ti,tca6408";
-        gpio-controller;
-        #gpio-cells = <2>;
-        reg = <0x20>;
-        status = "okay";
-    };
+&i2c02 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
 
-    pca6408_fpga2: pca6408@21 {
-        compatible = "ti,tca6408";
-        gpio-controller;
-        #gpio-cells = <2>;
-        reg = <0x21>;
-        status = "okay";
-    };
+   pca6408_camera_2: pca6408@20 {
+		compatible = "ti,tca6408";
+		gpio-controller;
+		#gpio-cells = <2>;
+		reg = <0x20>;
+		status = "okay";
+	};
 
-	fpga2: fpga@c {
-		compatible = "econ,fpga";
+    fpga: fpga@c {
+		compatible = "econ,kobe1_fpga";
 		reg = <0x0c>;
 		status = "okay";
-		fpga_nprogram-gpios = <&pca6408_fpga2 2 0>;
-		fpga_nreset-gpios = <&pca6408_fpga2 3 0>;
-		fpga_slaveid_sel0-gpios = <&pca6408_fpga2 4 0>;
-		fpga_slaveid_sel1-gpios = <&pca6408_fpga2 7 0>;
+		fpga_nprogram-gpios = <&pca6408_camera_2 2 0>;
+        fpga_nreset-gpios = <&pca6408_camera_2 3 0>;
+        fpga_slaveid_sel0-gpios = <&pca6408_camera_2 4 0>;
+        fpga_slaveid_sel1-gpios = <&pca6408_camera_2 7 0>;
 		mipi_filter_dt1 = <0x92>;
 		mipi_filter_dt2 = <0x93>;
 		mipi_filter_dt3 = <0xb7>;
@@ -84,16 +96,18 @@
 		mipi_rx_clockmode = <0>; // Discontinuous
 	};
 
-    imx568s2: imx568@42 {
+    imx568: imx568@42 {
         compatible = "sony,imx568";
         reg = <0x42>;
+
         clocks = <&imx568_clk_2>;
         clock-names = "xclk";
+
         VANA-supply = <&imx568_vana_2>;
         VDIG-supply = <&imx568_vdig_2>;
         VDDL-supply = <&imx568_vddl_2>;
-        reset-gpios = <&pca6408_camera2 1 0>;
-        boot-gpios  = <&pca6408_camera2 0 0>;
+        reset-gpios = <&pca6408_camera_2 1 0>;
+        boot-gpios = <&pca6408_camera_2 0 0>;
         camera_mipi_lanes = <2>;
         cam_fw_name = "imx568_cam_fw.bin";
 

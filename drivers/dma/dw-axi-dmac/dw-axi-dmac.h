@@ -22,6 +22,7 @@
 #define DMAC_MAX_MASTERS	2
 #define DMAC_MAX_BLK_SIZE	0x400000
 #define DMAC_MIN_DESCS_IN_LIST	4
+#define DMAC_DROP_TOUT		3
 
 #define DMAC_DESC_SUBMITTED (1)
 #define DMAC_DESC_ISSUED    (2)
@@ -69,6 +70,7 @@ struct axi_dma_chan {
 	/* 
 	**	SiMa.ai specfic for video transfer
 	*/
+	unsigned long			last_buffer;
 	bool 				is_video_mode;
 	u64				completed;
 	u64				dropped;

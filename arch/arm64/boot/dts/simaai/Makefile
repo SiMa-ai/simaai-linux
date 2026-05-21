@@ -16,6 +16,7 @@ dtb-$(CONFIG_ARCH_SIMAAI) += modalix-hhhl_1r.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += modalix-hhhl_v2.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += modalix-som.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += modalix-som_8g.dtb
+dtb-$(CONFIG_ARCH_SIMAAI) += modalix-som_8g_x64.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += modalix-som_16g.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += modalix-vdk.dtb
 dtb-$(CONFIG_ARCH_SIMAAI) += modalix-zebu-basic.dtb

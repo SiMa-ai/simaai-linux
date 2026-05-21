@@ -27,6 +27,7 @@
 #include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/types.h>
+#include <linux/jiffies.h>
 
 #include "dw-axi-dmac.h"
 #include "../dmaengine.h"
@@ -624,6 +625,7 @@ static void dma_chan_issue_pending(struct dma_chan *dchan)
 		if (!axi_chan_is_hw_enable(chan))
 			axi_chan_start_first_queued(chan);
 	}
+	chan->last_buffer = jiffies;
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
 }
 
@@ -1388,7 +1390,8 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 			list_for_each_entry(vd_iter, &chan->vc.desc_issued, node)
 				issued_count++;
 
-		if ((chan->is_video_mode) && issued_count <= DMAC_MIN_DESCS_IN_LIST) {
+		if ((chan->is_video_mode) && (issued_count <= DMAC_MIN_DESCS_IN_LIST)
+			&& time_before(jiffies, chan->last_buffer + DMAC_DROP_TOUT * HZ)) {
 			/* If we do not have enough descriptors - return it back to the list */
 			chan->dropped++;
 			ctlhi = le32_to_cpu(desc->hw_desc[0].lli->ctl_hi);
@@ -1458,7 +1461,8 @@ static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 		list_for_each_entry(vd_iter, &chan->vc.desc_issued, node)
 			issued_count++;
 
-	if ((chan->is_video_mode) && issued_count <= DMAC_MIN_DESCS_IN_LIST) {
+	if ((chan->is_video_mode) && (issued_count <= DMAC_MIN_DESCS_IN_LIST)
+		&& time_before(jiffies, chan->last_buffer + DMAC_DROP_TOUT * HZ)) {
 		/* If we do not have enough descriptors - return it back to the list */
 		desc = vd_to_axi_desc(vd);
 		chan->dropped++;

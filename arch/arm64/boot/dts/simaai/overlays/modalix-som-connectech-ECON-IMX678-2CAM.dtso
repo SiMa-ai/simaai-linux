@@ -38,7 +38,7 @@
     imx678_clk_2: csi2_camera-clk {
         compatible = "fixed-clock";
         #clock-cells = <0>;
-        clock-frequency = <37125000>;
+        clock-frequency = <24000000>;
     };
 };
 

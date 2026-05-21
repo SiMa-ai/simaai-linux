@@ -38,7 +38,7 @@
     og05c10_clk_2: csi2_camera-clk {
         compatible = "fixed-clock";
         #clock-cells = <0>;
-        clock-frequency = <27000000>;
+        clock-frequency = <24000000>;
     };
 };
 

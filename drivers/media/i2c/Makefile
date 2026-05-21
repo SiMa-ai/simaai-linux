@@ -65,6 +65,7 @@ obj-$(CONFIG_VIDEO_IMX477) += imx477.o
 obj-$(CONFIG_VIDEO_IMX678) += econ_imx678.o
 obj-$(CONFIG_VIDEO_IMX568) += econ_imx568_drv.o
 obj-$(CONFIG_VIDEO_ECON_FPGA) += econ_fpga/
+obj-$(CONFIG_VIDEO_ECON_FPGA) += econ_kobe1_fpga/
 obj-$(CONFIG_VIDEO_IR_I2C) += ir-kbd-i2c.o
 obj-$(CONFIG_VIDEO_ISL7998X) += isl7998x.o
 obj-$(CONFIG_VIDEO_KS0127) += ks0127.o
