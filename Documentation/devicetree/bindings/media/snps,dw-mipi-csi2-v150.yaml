@@ -59,6 +59,57 @@ properties:
   power-domains:
     maxItems: 1
 
+  # SiMa.ai specific extensions: seed the IPI (Image Pixel Interface)
+  # blanking timings and the default value of the IPI custom V4L2 controls.
+  # All are optional; the driver falls back to its built-in defaults when a
+  # property is absent. The active resolution is taken from the V4L2 format
+  # and is intentionally not described here.
+  simaai,bt-pixelclock:
+    $ref: /schemas/types.yaml#/definitions/uint64
+    description:
+      MIPI clock in Hz used as the reference for converting the IPI
+      horizontal blanking intervals (hsync, hbackporch, hfrontporch) to
+      nanoseconds.
+
+  simaai,bt-hsync:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: IPI horizontal sync width, in pixels.
+
+  simaai,bt-hbackporch:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: IPI horizontal back porch, in pixels.
+
+  simaai,bt-hfrontporch:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: IPI horizontal front porch, in pixels.
+
+  simaai,bt-vsync:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: IPI vertical sync width, in lines.
+
+  simaai,bt-vbackporch:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: IPI vertical back porch, in lines.
+
+  simaai,bt-vfrontporch:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: IPI vertical front porch, in lines.
+
+  simaai,ipi-controller-mode:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1]
+    default: 0
+    description:
+      Default value for the "IPI Controller Mode" V4L2 control. 1 selects
+      controller timing mode, 0 (default) selects camera timing mode.
+
+  simaai,ipi-emb-data-enable:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1]
+    default: 0
+    description:
+      Default value for the "IPI Embedded Data Enable" V4L2 control.
+
   ports:
     $ref: /schemas/graph.yaml#/properties/ports
 

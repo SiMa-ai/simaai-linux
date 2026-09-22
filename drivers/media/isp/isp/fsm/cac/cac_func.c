@@ -70,8 +70,8 @@ static int64_t signed_bitshift64( int64_t val, int32_t shift )
 
 static void ca_filter_mem_reload( cac_fsm_ptr_t p_fsm )
 {
-    const uint32_t ca_filter_mem_len = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CA_FILTER_MEM );
-    const uint32_t *p_ca_filter_mem = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CA_FILTER_MEM );
+    const uint32_t ca_filter_mem_len = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CA_FILTER_MEM );
+    const uint32_t *p_ca_filter_mem = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CA_FILTER_MEM );
 
     LOG( LOG_DEBUG, "ca_filter_mem_len: %d", ca_filter_mem_len );
 
@@ -89,10 +89,10 @@ static void cac_lut_reload( cac_fsm_ptr_t p_fsm )
     acamera_isp_ctx_t *ctx_p = ACAMERA_FSM2ICTX_PTR( p_fsm );
     const int32_t isp_base = ctx_p->settings.isp_base;
 
-    cac_mem_lut_t *p_calibration_ca_model = (cac_mem_lut_t *)calib_mgr_lut_get( cm_p, CALIBRATION_CA_CORRECTION_MEM );
-    const uint32_t cac_mem_len = calib_mgr_lut_len( cm_p, CALIBRATION_CA_CORRECTION_MEM );
+    cac_mem_lut_t *p_calibration_ca_model = (cac_mem_lut_t *)calib_mgr_lut_get( cm_p, MODALIX_ISP_CALIB_CA_CORRECTION_MEM );
+    const uint32_t cac_mem_len = calib_mgr_lut_len( cm_p, MODALIX_ISP_CALIB_CA_CORRECTION_MEM );
 
-    const uint16_t *p_calibration_cac_cfg = calib_mgr_u16_lut_get( cm_p, CALIBRATION_CA_CORRECTION );
+    const uint16_t *p_calibration_cac_cfg = calib_mgr_u16_lut_get( cm_p, MODALIX_ISP_CALIB_CA_CORRECTION );
 
     const uint16_t calibration_ca_min_correction = p_calibration_cac_cfg[0];
     const uint16_t calibration_ca_mesh_width = p_calibration_cac_cfg[1];
@@ -340,7 +340,7 @@ void cac_init( cac_fsm_ptr_t p_fsm )
     acamera_isp_ca_correction_mesh_scale_write( isp_base,
                                                 ACAMERA_ISP_CA_CORRECTION_MESH_SCALE_DEFAULT );
 
-    acamera_isp_pipeline_bypass_ca_correction_write( isp_base, 0 );
+    /* bypass driven by the IPA (isp_config / ISP_BYPASS_CONFIG) */
 }
 
 void cac_config( cac_fsm_ptr_t p_fsm )

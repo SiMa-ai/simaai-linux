@@ -53,6 +53,7 @@ config VIDEO_ALVIUM_CSI2
 
 config VIDEO_AR0234
 	tristate "ON Semiconductor AR0234 sensor support"
+	select V4L2_CCI_I2C
 	help
 	  This is a Video4Linux2 sensor driver for the Sony
 	  IMX219 camera.
@@ -313,15 +314,43 @@ config VIDEO_IMX678
         To compile this driver as a module, choose M here: the
         module will be called imx678.
 
-config VIDEO_IMX568
+config VIDEO_IMX568_LI
 	tristate "Sony IMX568 sensor support"
 	depends on I2C && VIDEO_DEV
+	select V4L2_CCI_I2C
 	select VIDEO_V4L2_SUBDEV_API
 	select MEDIA_CONTROLLER
 	select V4L2_FWNODE
 	help
 	This is a Video4Linux2 sensor driver for the Sony
 	IMX568 camera.
+
+	To compile this driver as a module, choose M here: the
+	module will be called imx568.
+
+config VIDEO_IMX568
+	tristate "Sony IMX568 sensor support"
+	depends on I2C && VIDEO_DEV
+	select V4L2_CCI_I2C
+	select VIDEO_V4L2_SUBDEV_API
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	help
+	This is a Video4Linux2 sensor driver for the Sony
+	IMX568 camera.
+
+	To compile this driver as a module, choose M here: the
+	module will be called imx568.
+
+config VIDEO_IMX568_GMSL
+	tristate "Sony IMX568 sensor support over GMSL"
+	depends on I2C && VIDEO_DEV
+	select VIDEO_V4L2_SUBDEV_API
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	help
+	This is a Video4Linux2 sensor driver for the Sony
+	IMX568 GMSL camera .
 
 	To compile this driver as a module, choose M here: the
 	module will be called imx568.
@@ -340,6 +369,34 @@ config VIDEO_ECON_FPGA
 
 config VIDEO_MAX9271_LIB
 	tristate
+
+config VIDEO_MO_SIMOR
+	tristate "Metoak S315 SIMOR sensor support"
+	depends on I2C && VIDEO_DEV
+	select V4L2_CCI_I2C
+	select VIDEO_V4L2_SUBDEV_API
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the Metoak
+	  S315 simor depth sensor camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called simor.
+     
+config VIDEO_MO_XC9080
+	tristate "Metoak S315 XC 9080 sensor support"
+	depends on I2C && VIDEO_DEV
+	select V4L2_CCI_I2C
+	select VIDEO_V4L2_SUBDEV_API
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the Metoak
+	  S315 XC 9080 ISP sensor camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called xc9080.
 
 config VIDEO_MT9M001
 	tristate "mt9m001 support"

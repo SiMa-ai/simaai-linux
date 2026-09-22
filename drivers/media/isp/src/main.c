@@ -28,6 +28,9 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/uio_driver.h>
+#include <linux/clk.h>
+#include <linux/pm_runtime.h>
+#include <linux/devfreq.h>
 #include "system_control.h" //BSP
 #include "system_stdlib.h"
 #include "system_timer.h" //system_timer_usleep
@@ -36,9 +39,6 @@
 #include "acamera_control_config.h"
 #include "acamera_isp_config.h"
 #include "acamera_logger.h"
-#if ISP_HAS_STREAM_CONNECTION
-#include "acamera_connection.h"
-#endif
 
 #include <linux/simaai-stu.h>
 
@@ -59,6 +59,11 @@ static struct v4l2_device v4l2_dev;
 // Sima.ai STU driver handle
 struct simaai_stu *stu;
 
+static struct clk *ispclk;
+static struct clk *isppll;
+
+static struct devfreq *isp_df;
+
 extern void system_interrupts_set_irq( void *pdev, int irq_num, int flags );
 
 // system_cma.c
@@ -67,55 +72,41 @@ extern size_t g_resmem_remaining;
 extern size_t g_resmem_nodes_allocated;
 void system_cma_print_tracking_info( void ); // NOT an API function
 
-#define ISP_CONNECTION_PERIOD_MS 30
-
 static const struct of_device_id isp_dt_match[] = {
     {.compatible = "arm,isp"},
     {}};
 
 MODULE_DEVICE_TABLE( of, isp_dt_match );
 
+static int __maybe_unused isp_runtime_resume(struct device *dev)
+{
+	pr_debug("%s\n", __func__);
+	return clk_prepare_enable(ispclk);
+}
+
+static int __maybe_unused isp_runtime_suspend(struct device *dev)
+{
+	pr_debug("%s\n", __func__);
+	clk_disable_unprepare(ispclk);
+	return 0;
+}
+
+static const struct dev_pm_ops isp_pm_ops = {
+	SET_RUNTIME_PM_OPS(isp_runtime_suspend, isp_runtime_resume, NULL)
+};
+
 static struct platform_driver isp_platform_driver = {
     .driver = {
         .name = "arm,isp",
         .owner = THIS_MODULE,
         .of_match_table = isp_dt_match,
+	.pm = &isp_pm_ops,
     },
 };
 
 static semaphore_t isp_sync_semaphore = NULL;
 static struct task_struct *isp_fw_process_thread = NULL;
 static struct task_struct *isp_fw_init_thread = NULL;
-#if ISP_HAS_STREAM_CONNECTION
-static struct task_struct *isp_fw_connections_thread = NULL;
-#endif
-
-// The ISP pipeline can have several outputs such as Full Resolution, DownScaler1, DownScaler2, etc.
-// It is possible to set the firmware up for returning metadata on each output frame from
-// the specific channel. This callback must be set in acamera_settings structure and passed to the firmware in
-// acamera_init api function.
-// The pointer to the context can be used to differentiate contexts.
-
-#if ISP_HAS_STREAM_CONNECTION
-static int connection_thread( void *foo )
-{
-    LOG( LOG_INFO, "connection_thread start" );
-
-	LOG(LOG_INFO, "ISP : connection thread %d", current->pid);
-    acamera_connection_init();
-
-    while ( !kthread_should_stop() ) {
-        acamera_connection_process();
-        system_timer_usleep( ISP_CONNECTION_PERIOD_MS * 1000 );
-    }
-
-    acamera_connection_destroy();
-
-    LOG( LOG_INFO, "connection_thread stop" );
-    return 0;
-}
-#endif
-
 
 static int isp_fw_process( void *data )
 {
@@ -125,9 +116,17 @@ static int isp_fw_process( void *data )
 	LOG(LOG_INFO, "ISP : fw process thread %d", current->pid);
     while ( !kthread_should_stop() || ret ) {
 
-        system_semaphore_wait( sem, 1 );
+        /* no timeout needed as it will be wokenup when packet arrives.
+	 * This change necessary to keep the PM runtime in sane state
+	 * */
+        system_semaphore_wait( sem, 0);
 
-        ret = acamera_process_event();
+	if (pm_runtime_resume_and_get(&g_pdev->dev) >=0) {
+            ret = acamera_process_event();
+            pm_runtime_put(&g_pdev->dev);
+        } else {
+            ret = 0;
+        }
     }
     LOG( LOG_INFO, "isp_fw_process stop" );
     return 0;
@@ -198,17 +197,78 @@ static void isp_cdma_init( void )
     // Otherwise, do nothing if MFCE fsm is not present
 }
 
+/**
+ * isp_devfreq_target() - devfreq target callback, scale the ISP PLL
+ * @dev:   the devfreq device (ISP platform device)
+ * @freq:  in/out, requested frequency in Hz; updated to the chosen OPP rate
+ * @flags: devfreq frequency-selection flags
+ *
+ * Snaps the request to a supported OPP and reprograms the ISP PLL to it.
+ *
+ * Return: 0 on success or a negative errno from the OPP lookup / clk_set_rate().
+ */
+
+static int isp_devfreq_target(struct device *dev, unsigned long *freq, u32 flags)
+{
+    struct dev_pm_opp *opp;
+    int ret;
+
+    opp = devfreq_recommended_opp(dev, freq, flags);
+    if (IS_ERR(opp))
+        return PTR_ERR(opp);
+    dev_pm_opp_put(opp);
+
+    ret = clk_set_rate(isppll, *freq);
+    return ret;
+}
+
+/**
+ * isp_devfreq_get_cur_freq() - devfreq callback, report the current ISP rate
+ * @dev:  the devfreq device (ISP platform device)
+ * @freq: out, the current frequency in Hz
+ *
+ * Reads the live PLL rate and rounds it up to the nearest OPP so devfreq's
+ * statistics can match it.
+ *
+ * Return: 0 always.
+ */
+
+static int isp_devfreq_get_cur_freq(struct device *dev, unsigned long *freq)
+{
+    struct dev_pm_opp *opp;
+    unsigned long rate;
+
+    rate = clk_get_rate(isppll);
+
+    opp = dev_pm_opp_find_freq_ceil(dev, &rate);
+    if (!IS_ERR(opp))
+	dev_pm_opp_put(opp);
+
+    *freq = rate;
+    return 0;
+}
+
+static struct devfreq_dev_profile isp_devfreq_profile = {
+    .target        = isp_devfreq_target,
+    .get_cur_freq  = isp_devfreq_get_cur_freq,
+    .polling_ms    = 0,
+};
+
 static int isp_fw_init_kthread_func( void *pdev )
 {
     int result = 0;
     LOG( LOG_INFO, "isp_fw_init start" );
-
     // The firmware supports multicontext.
     // It means that the customer can use the same firmware for controlling
     // several instances of different sensors/ISP. To initialize a context,
     // the structure acamera_settings must be filled properly.
     // The total number of initialized contexts must not exceed FIRMWARE_CONTEXT_NUMBER.
     // All contexts are enumerated from 0 till ctx_number - 1.
+
+    result = pm_runtime_resume_and_get(&g_pdev->dev);
+    if(result < 0)
+	return -1;
+
     system_semaphore_init( &isp_sync_semaphore, 1 );
 
 // V4L2 builds do not need internal frame consumer
@@ -242,15 +302,6 @@ static int isp_fw_init_kthread_func( void *pdev )
 #endif
 
     if ( result == 0 ) {
-#if ISP_HAS_STREAM_CONNECTION
-        LOG( LOG_INFO, "Start connection thread." );
-        isp_fw_connections_thread = kthread_run( connection_thread, NULL, "isp_connection" );
-        if ( isp_fw_connections_thread == NULL ) {
-            LOG( LOG_CRIT, "Failed to start firmware connection thread." );
-        } else {
-            LOG( LOG_DEBUG, "isp_fw_connections_thread pid: %d", isp_fw_connections_thread->pid );
-        }
-#endif
         LOG( LOG_INFO, "Start firmware process thread." );
         isp_fw_process_thread = kthread_run( isp_fw_process, isp_sync_semaphore, "isp_process" );
         if ( isp_fw_process_thread == NULL ) {
@@ -264,7 +315,7 @@ static int isp_fw_init_kthread_func( void *pdev )
 #if V4L2_INTERFACE_BUILD
     if ( pdev == NULL ) {
         LOG( LOG_ERR, "Failed to register V4L2 device. Platform device pointer is NULL." );
-        return -1;
+        goto release_pm;
     }
 
     static atomic_t drv_instance = ATOMIC_INIT( 0 );
@@ -275,15 +326,18 @@ static int isp_fw_init_kthread_func( void *pdev )
         LOG( LOG_INFO, "V4L2 device successfully registered." );
     } else {
         LOG( LOG_ERR, "Failed to register V4L2 device (%d).", result );
-        return -1;
+        goto release_pm;
     }
 
     result = isp_v4l2_create_instance( &v4l2_dev );
     if ( result < 0 ) {
         LOG( LOG_ERR, "Failed to register ISP V4L2 driver (%d).", result );
-        return -1;
+        goto release_pm;
     }
 #endif
+
+release_pm:
+    pm_runtime_put(&g_pdev->dev);
 
     LOG( LOG_INFO, "isp_fw_init_thread exit" );
     isp_fw_init_thread = NULL;
@@ -297,6 +351,8 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
 	int irq;
     struct device_node *resmem_node;
     struct resource resmem;
+    struct dev_pm_opp *opp;
+    unsigned long init_rate;
 
     // Init DMA memory
     rc = of_reserved_mem_device_init( &pdev->dev );
@@ -348,6 +404,41 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
 	} else
 		LOG( LOG_NOTICE, "SUCCESS getting STU handle");
 
+    ispclk = devm_clk_get(&pdev->dev, "gate");
+    if (IS_ERR(ispclk))
+        return dev_err_probe(&pdev->dev, PTR_ERR(ispclk), "failed to get ISP gate clock\n");
+    isppll = devm_clk_get(&pdev->dev, "pll");
+    if (IS_ERR(isppll))
+        return dev_err_probe(&pdev->dev, PTR_ERR(isppll), "no PLL clock\n");
+
+    rc = clk_prepare_enable(ispclk);
+    if (rc) return rc;
+
+    pm_runtime_set_active(&pdev->dev);
+    pm_runtime_enable(&pdev->dev);
+
+     /* OPP table defines the frequencies the PLL may run at. */
+    rc = devm_pm_opp_of_add_table(&pdev->dev);
+    if (rc) {
+        dev_err_probe(&pdev->dev, rc, "failed to add OPP table\n");
+	goto err_probe;
+    }
+
+    /* Seed devfreq's initial frequency from the PLL's current rate. */
+    init_rate = clk_get_rate(isppll);
+
+    opp = dev_pm_opp_find_freq_ceil(&pdev->dev, &init_rate);
+    if (!IS_ERR(opp))
+	dev_pm_opp_put(opp);
+
+    isp_devfreq_profile.initial_freq = init_rate;
+    isp_df = devm_devfreq_add_device(&pdev->dev, &isp_devfreq_profile,
+			 DEVFREQ_GOV_USERSPACE, NULL);
+    if (IS_ERR(isp_df)) {
+        dev_err_probe(&pdev->dev, PTR_ERR(isp_df),
+                         "ISP devfreq registration failed\n");
+	goto err_probe;
+    }
     if ( rc == 0 ) {
         isp_fw_init_thread = kthread_run( isp_fw_init_kthread_func, pdev, "isp_fw_init" );
         if ( isp_fw_init_thread == NULL ) {
@@ -360,6 +451,13 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
 	LOG( LOG_INFO, "ISP driver probe complete !!!");
 
     return PTR_ERR_OR_ZERO( isp_fw_init_thread );
+
+err_probe:
+    clk_disable_unprepare(ispclk);
+    pm_runtime_disable(&pdev->dev);
+
+    return -1;
+
 }
 
 /**
@@ -384,13 +482,6 @@ static void __exit fw_module_exit( void )
 {
     LOG( LOG_INFO, "ISP %s", __FUNCTION__ );
 
-#if ISP_HAS_STREAM_CONNECTION
-    if ( isp_fw_connections_thread ) {
-        // blocks until isp_fw_connections_thread terminates
-        kthread_stop( isp_fw_connections_thread );
-    }
-#endif
-
     if ( isp_fw_init_thread ) {
         kthread_stop( isp_fw_init_thread );
     }
@@ -404,6 +495,7 @@ static void __exit fw_module_exit( void )
             acamera_deinit_ctx( i );
         }
 
+	system_semaphore_raise( isp_sync_semaphore );
         // blocks until isp_fw_process_thread terminates
         kthread_stop( isp_fw_process_thread );
     }
@@ -428,6 +520,10 @@ static void __exit fw_module_exit( void )
 
     of_reserved_mem_device_release( &g_pdev->dev );
     platform_driver_unregister( &isp_platform_driver );
+
+    if (g_pdev)
+        pm_runtime_disable(&g_pdev->dev);
+
 }
 
 module_init( fw_module_init );

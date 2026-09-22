@@ -79,9 +79,27 @@ int32_t acamera_calib_mgr_update( acamera_calib_mgr_entry_t *entry, uint32_t wdr
     return entry->get_calibrations( wdr_mode, entry->c.calibrations );
 }
 
+/* The UAPI calibrations[] / lookup_table.ptr fields are typed as
+ * __aligned_u64 so the wire format is 32/64-bit-portable. After the
+ * ioctl handler patches the offsets to real kernel pointers, the
+ * same byte storage is dereferenced as pointers via uintptr_t casts.
+ * These two helpers centralise the cast so the rest of the driver
+ * sees plain LookupTable * / void *. */
+static inline LookupTable *calib_mgr_table_ptr( acamera_calib_mgr_entry_t *entry, uint32_t idx )
+{
+    return (LookupTable *)(uintptr_t)entry->c.calibrations[idx];
+}
+
+static inline const void *calib_mgr_lut_data_ptr( const LookupTable *lut )
+{
+    return (const void *)(uintptr_t)lut->ptr;
+}
+
 int32_t calib_mgr_lut_exists( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 {
-    if ( ( idx < CALIBRATION_TOTAL_SIZE ) && ( entry != NULL ) && ( entry->c.calibrations[idx] != NULL ) && ( entry->c.calibrations[idx]->ptr != NULL ) ) {
+    if ( ( idx < MODALIX_ISP_CALIB_TOTAL_SIZE ) && ( entry != NULL )
+         && ( entry->c.calibrations[idx] != 0 )
+         && ( calib_mgr_table_ptr( entry, idx )->ptr != 0 ) ) {
         return 1;
     } else {
         return 0;
@@ -90,10 +108,10 @@ int32_t calib_mgr_lut_exists( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 
 static inline LookupTable *calib_mgr_lookup_get( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 {
-    if ( idx < CALIBRATION_TOTAL_SIZE ) {
-        return ( ( entry != NULL ) ? ( entry->c.calibrations[idx] ) : NULL );
+    if ( idx < MODALIX_ISP_CALIB_TOTAL_SIZE ) {
+        return ( ( entry != NULL ) ? calib_mgr_table_ptr( entry, idx ) : NULL );
     } else {
-        LOG( LOG_CRIT, "Calibration LUT index %d is out of range [0..%d]", (int)idx, CALIBRATION_TOTAL_SIZE - 1 );
+        LOG( LOG_CRIT, "Calibration LUT index %d is out of range [0..%d]", (int)idx, MODALIX_ISP_CALIB_TOTAL_SIZE - 1 );
         return NULL;
     }
 }
@@ -103,7 +121,7 @@ const void *calib_mgr_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx )
     const void *result = NULL;
     LookupTable *lut = calib_mgr_lookup_get( entry, idx );
     if ( lut != NULL ) {
-        result = lut->ptr;
+        result = calib_mgr_lut_data_ptr( lut );
     } else {
         LOG( LOG_CRIT, "Calibration LUT %d(%#X) is not initialized (NULL). Going to the infinite loop", (int)idx, (int)idx );
         assert( 0 );
@@ -196,7 +214,7 @@ uint32_t calib_mgr_lut_read( acamera_calib_mgr_entry_t *entry, void *data, uint3
 {
     LookupTable *lut = calib_mgr_lookup_get( entry, idx );
 
-    if ( lut == NULL || lut->ptr == NULL || data == NULL ) {
+    if ( lut == NULL || lut->ptr == 0 || data == NULL ) {
         return 0;
     }
 
@@ -206,7 +224,7 @@ uint32_t calib_mgr_lut_read( acamera_calib_mgr_entry_t *entry, void *data, uint3
         return 0;
     }
 
-    system_memcpy( data, lut->ptr, lut_size );
+    system_memcpy( data, calib_mgr_lut_data_ptr( lut ), lut_size );
 
     return lut_size;
 }
@@ -215,7 +233,7 @@ uint32_t calib_mgr_lut_write( acamera_calib_mgr_entry_t *entry, const void *data
 {
     LookupTable *lut = calib_mgr_lookup_get( entry, idx );
 
-    if ( lut == NULL || lut->ptr == NULL || data == NULL ) {
+    if ( lut == NULL || lut->ptr == 0 || data == NULL ) {
         return 0;
     }
 
@@ -225,7 +243,7 @@ uint32_t calib_mgr_lut_write( acamera_calib_mgr_entry_t *entry, const void *data
         return 0;
     }
 
-    system_memcpy( (void *)lut->ptr, data, lut_size );
+    system_memcpy( (void *)(uintptr_t)lut->ptr, data, lut_size );
 
     return lut_size;
 }

@@ -122,6 +122,11 @@ uint8_t system_context_state( void *instance, uint32_t value, uint8_t direction,
             default:
                 break;
             }
+
+            /* wake the FW pump so a command-queued transition (e.g. STOP) runs
+             * even after the sensor stalled and frame interrupts ceased */
+            if ( is_transition_allowed )
+                system_semaphore_raise( p_ictx->sync_sem );
         } else {
             is_transition_allowed = 1;
         }
@@ -256,7 +261,7 @@ static uint32_t get_calibration_description( acamera_isp_ctx_ptr_t p_ictx, uint3
 {
     uint32_t result = 0;
 
-    if ( id < CALIBRATION_TOTAL_SIZE ) {
+    if ( id < MODALIX_ISP_CALIB_TOTAL_SIZE ) {
         // support only 1, 2 and 4 bytes format now.
         // it's enough 2 bits only for this data
         uint32_t width = ( calib_mgr_lut_width( p_ictx->calib_mgr_data, id ) > 0 ) ? ( calib_mgr_lut_width( p_ictx->calib_mgr_data, id ) - 1 ) : 0;
@@ -266,7 +271,7 @@ static uint32_t get_calibration_description( acamera_isp_ctx_ptr_t p_ictx, uint3
         // 15 bits for rows number and 15 bits for cols number
         result = ( width << 30 | ( rows << 15 ) | cols );
     } else {
-        LOG( LOG_ERR, "Table pointer has invalid index %d. Maximum possible value is %d", (int)id, CALIBRATION_TOTAL_SIZE );
+        LOG( LOG_ERR, "Table pointer has invalid index %d. Maximum possible value is %d", (int)id, MODALIX_ISP_CALIB_TOTAL_SIZE );
     }
     return result;
 }
@@ -299,7 +304,7 @@ uint8_t acamera_api_calibration( uint32_t ctx_id, uint8_t type, uint8_t id, uint
         return FAIL;
     }
 
-    if ( id >= CALIBRATION_TOTAL_SIZE ) {
+    if ( id >= MODALIX_ISP_CALIB_TOTAL_SIZE ) {
         LOG( LOG_ERR, "Trying to get an access with an invalid LUT index %d", id );
         return FAIL;
     }
@@ -309,10 +314,6 @@ uint8_t acamera_api_calibration( uint32_t ctx_id, uint8_t type, uint8_t id, uint
         LOG( LOG_ERR, "Trying to get an access with an invalid LUT index %d", internal_lut_idx );
         return FAIL;
     }
-
-#if FW_HAS_CONTROL_CHANNEL
-    ctrl_channel_handle_api_calibration( ctx_id, type, id, direction, data, data_size );
-#endif
 
     // update an internal look-up table
     result = acamera_calibration_update( p_ictx, internal_lut_idx, direction, data, data_size, ret_value );
@@ -359,10 +360,6 @@ uint8_t acamera_api_event_ext( uint32_t ctx_id, uint8_t cmd_if_mode, uint32_t ev
     default:
         return FAIL;
     }
-
-#if FW_HAS_CONTROL_CHANNEL
-    ctrl_channel_handle_api_event( ctx_id, cmd_if_mode, event_id );
-#endif
 
     acamera_fsmgr_raise_event( &p_ictx->fsmgr, fsmgr_event_id );
 

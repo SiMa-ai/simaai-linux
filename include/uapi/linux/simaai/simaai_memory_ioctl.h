@@ -70,6 +70,20 @@ struct simaai_memcpy_args {
 	__u32 size;
 };
 
+/* Export an allocated memory buffer (or one of its segments) as a dma-buf. */
+struct simaai_export_dmabuf_args {
+	/* Physical address returned by SIMAAI_IOC_MEM_ALLOC_COHERENT. */
+	__u64 phys_addr;
+	/* File-descriptor flags. Only O_CLOEXEC is currently accepted. */
+	__u32 flags;
+	/* Returned dma-buf file descriptor. */
+	__s32 fd;
+	/* Buffer/segment size, used to validate the allocation being exported. */
+	__u64 size;
+	/* Bus address, used to validate the allocation being exported. */
+	__u64 bus_addr;
+};
+
 /*
  * Target mask to indicate from which target, memory is allocated
  */
@@ -106,5 +120,11 @@ struct simaai_memcpy_args {
  * memcpy through sdma
  */
 #define SIMAAI_IOC_MEMCPY		_IOWR('S', 3, struct simaai_memcpy_args)
+
+/*
+ * Export a buffer owned by this file descriptor as a dma-buf. The dma-buf
+ * keeps the allocation alive independently of the memory-manager fd.
+ */
+#define SIMAAI_IOC_MEM_EXPORT_DMABUF	_IOWR('S', 4, struct simaai_export_dmabuf_args)
 
 #endif /* _SIMAAI_MEMORY_IOCTL_UAPI_H */

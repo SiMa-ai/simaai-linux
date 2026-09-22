@@ -64,7 +64,8 @@ static struct workqueue_struct *wq;
 extern struct platform_device *g_pdev;
 
 #define MAX_RAW_FRAMES			(5)
-extern int32_t get_calibrations_og05c10( uint32_t wdr_mode, void *param );
+/* get_calibrations_og05c10 removed — calibrations now arrive via the IPA
+ * push on MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB. */
 extern acamera_settings *get_settings_by_id(u8 ctx_id);
 extern  int8_t get_dma_index(uint32_t ctx_id);
 
@@ -801,18 +802,14 @@ void sensor_init_og05c10( void **priv_ptr, uint8_t location, sensor_control_t *c
 
 	if (ctx_settings) {
 
-		ctx_settings->get_calibrations = get_calibrations_og05c10;
 		cdma_addr = ctx_settings->isp_base;
 
-		acamera_isp_pipeline_bypass_sensor_offset_wdr_write( cdma_addr, 0 );
-		acamera_isp_pipeline_bypass_white_balance_write(cdma_addr,0);
-		acamera_isp_pipeline_bypass_out_format_write(cdma_addr, 0);
-		acamera_isp_pipeline_bypass_gamma_be_sq_write( cdma_addr, 0);
-		acamera_isp_pipeline_bypass_gamma_fe_sq_write( cdma_addr, 0);
-		acamera_isp_offset_black_00_write( cdma_addr, 0xF0000 );
-		acamera_isp_offset_black_01_write( cdma_addr, 0xF0000 );
-		acamera_isp_offset_black_10_write( cdma_addr, 0xF0000);
-		acamera_isp_offset_black_11_write( cdma_addr, 0xF0000 );
+		/* ISP pipeline bypass now comes from the IPA tuning file's
+		 * isp_config: block (MODALIX_ISP_V4L2_CID_ISP_BYPASS_CONFIG).
+		 * The black-level offset here was dead — sensor_init() in the
+		 * sensor FSM overwrites it with OFFSET_BLACK_DEFAULT right after
+		 * this returns. The WB-gain seed below is kept (the AWB FSM
+		 * later replaces it once converged). */
 		acamera_isp_white_balance_gain_00_write(cdma_addr, 1008);
 		acamera_isp_white_balance_gain_01_write(cdma_addr, 450);
 		acamera_isp_white_balance_gain_10_write(cdma_addr, 450);

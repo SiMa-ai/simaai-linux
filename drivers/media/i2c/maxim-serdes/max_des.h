@@ -11,7 +11,6 @@
 #include "max_serdes.h"
 
 #define MAX_DES_DT_VC(dt, vc) (((vc) & 0x3) << 6 | ((dt) & 0x3f))
-#define MAX_RM_DTS		1
 
 struct max_des_remap {
 	u8 from_dt;
@@ -123,10 +122,6 @@ struct max_des {
 	struct max_des_phy *phys;
 	struct max_des_pipe *pipes;
 	struct max_des_link *links;
-
-	u32 max_des_dts[MAX_RM_DTS];
-	u32 max_des_dts_count;
-	bool max_des_rm_enable;
 
 	unsigned int phys_config;
 	bool tunnel;

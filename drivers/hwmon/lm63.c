@@ -31,6 +31,7 @@
 #include <linux/i2c.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/hwmon.h>
+#include <linux/thermal.h>
 #include <linux/err.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
@@ -137,6 +138,7 @@ enum chips { lm63, lm64, lm96163 };
 
 struct lm63_data {
 	struct i2c_client *client;
+	struct device *hwmon_dev;	/* registered hwmon device */
 	struct mutex update_lock;
 	const struct attribute_group *groups[5];
 	bool valid; /* false until following fields are valid */
@@ -1089,10 +1091,48 @@ static void lm63_init_client(struct lm63_data *data)
 
 static const struct i2c_device_id lm63_id[];
 
+static int lm63_thermal_get_temp(struct thermal_zone_device *tz, int *temp)
+{
+	struct lm63_data *data = thermal_zone_device_priv(tz);
+	int t;
+
+	/*
+	 * Report the remote-diode channel (temp2), which on the SoM is wired
+	 * to the monitored device. This mirrors the temp2_input sysfs node:
+	 * prefer the unsigned reading when non-zero, then apply temp2_offset.
+	 * Result is in milli-degrees Celsius.
+	 */
+	lm63_update_device(data->hwmon_dev);
+	if (data->temp11u)
+		t = TEMP11_FROM_REG(data->temp11u);
+	else
+		t = TEMP11_FROM_REG(data->temp11[0]);
+
+	*temp = t + data->temp2_offset;
+	return 0;
+}
+
+static void lm63_hot_notify(struct thermal_zone_device *tz) {
+	if (!tz) {
+		return;
+	}
+
+	const int id = thermal_zone_device_id(tz);
+	struct device *device = thermal_zone_device(tz);
+
+	dev_warn(device, "Hot temperature is reached, thermal zone id: %d", id);
+}
+
+static const struct thermal_zone_device_ops lm63_of_thermal_ops = {
+	.get_temp = lm63_thermal_get_temp,
+	.hot = lm63_hot_notify,
+};
+
 static int lm63_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct device *hwmon_dev;
+	struct thermal_zone_device *tz;
 	struct lm63_data *data;
 	int groups = 0;
 
@@ -1123,7 +1163,22 @@ static int lm63_probe(struct i2c_client *client)
 
 	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
 							   data, data->groups);
-	return PTR_ERR_OR_ZERO(hwmon_dev);
+	if (IS_ERR(hwmon_dev))
+		return PTR_ERR(hwmon_dev);
+	data->hwmon_dev = hwmon_dev;
+
+	/*
+	 * Register with the thermal-OF core so a thermal-zones node that
+	 * references this chip (#thermal-sensor-cells = <0>) gets a working
+	 * thermal zone. Boards without such a node return -ENODEV, which is
+	 * not an error.
+	 */
+	tz = devm_thermal_of_zone_register(dev, 0, data, &lm63_of_thermal_ops);
+	if (IS_ERR(tz) && PTR_ERR(tz) != -ENODEV)
+		return dev_err_probe(dev, PTR_ERR(tz),
+				     "failed to register thermal zone\n");
+
+	return 0;
 }
 
 /*

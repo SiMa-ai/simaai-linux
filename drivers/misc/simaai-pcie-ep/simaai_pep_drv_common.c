@@ -527,6 +527,7 @@ int si_pep_register_irq_handler(struct si_pep_dev *pep, char *irqname,
 	struct device *dev = pep->dev;
 
 	irq = platform_get_irq_byname(pep->pdev, irqname);
+	si_info(pep, "irq %s = %#lx\n", irqname, irq);
 	if (irq < 0) {
 		si_err(pep, "Failed to find IRQ for '%s'", irqname);
 		return irq;
@@ -605,21 +606,6 @@ irqreturn_t si_pep_dma_irq_handler(int irq, void *arg)
 	return IRQ_HANDLED;
 }
 
-irqreturn_t si_pep_irq_link_down(int irq, void *arg)
-{
-	struct si_pep_dev *pep = (struct si_pep_dev *)arg;
-
-	if (unlikely(!pep)) {
-		pr_err("%s: Invalid pointer\n", __func__);
-		return IRQ_NONE;
-	}
-
-	pep->drv_ops->set_soc_state(pep, SOC_STATE_INIT);
-	queue_work(system_wq, &pep->link_down_handler.work);
-
-	return IRQ_HANDLED;
-}
-
 static int si_pep_pcie_read(void __iomem *addr, int size, u32 *val)
 {
 	if (!IS_ALIGNED((uintptr_t)addr, size)) {
@@ -656,6 +642,61 @@ static int si_pep_pcie_write(void __iomem *addr, int size, u32 val)
 		return PCIBIOS_BAD_REGISTER_NUMBER;
 
 	return PCIBIOS_SUCCESSFUL;
+}
+
+static u32 si_pep_pcie_read_pciesys(struct si_pep_dev *pep, u32 reg, size_t size)
+{
+	int ret;
+	u32 val = 0;
+
+	ret = si_pep_pcie_read(pep->pciesys_base + reg, size, &val);
+	if (ret != PCIBIOS_SUCCESSFUL)
+		si_err(pep, "Failed to read 0x%08x, error %d\n", reg, ret);
+
+	return val;
+}
+
+static void si_pep_pcie_write_pciesys(struct si_pep_dev *pep, u32 reg, size_t size,
+		u32 val)
+{
+	int ret;
+
+	ret = si_pep_pcie_write(pep->pciesys_base + reg, size, val);
+	if (ret != PCIBIOS_SUCCESSFUL)
+		si_err(pep, "Failed to write 0x%08x, error %d\n", reg, ret);
+}
+
+static inline void si_pep_pcie_writel_pciesys(struct si_pep_dev *pep, u32 reg,
+					  u32 val)
+{
+	si_pep_pcie_write_pciesys(pep, reg, 4, val);
+}
+
+static inline u32 si_pep_pcie_readl_pciesys(struct si_pep_dev *pep, u32 reg)
+{
+	return si_pep_pcie_read_pciesys(pep, reg, 4);
+}
+
+static inline void si_pep_pcie_writew_pciesys(struct si_pep_dev *pep, u32 reg,
+					  u16 val)
+{
+	si_pep_pcie_write_pciesys(pep, reg, 2, val);
+}
+
+static inline u16 si_pep_pcie_readw_pciesys(struct si_pep_dev *pep, u32 reg)
+{
+	return si_pep_pcie_read_pciesys(pep, reg, 2);
+}
+
+static inline void si_pep_pcie_writeb_pciesys(struct si_pep_dev *pep, u32 reg,
+					  u8 val)
+{
+	si_pep_pcie_write_pciesys(pep, reg, 1, val);
+}
+
+static inline u8 si_pep_pcie_readb_pciesys(struct si_pep_dev *pep, u32 reg)
+{
+	return si_pep_pcie_read_pciesys(pep, reg, 1);
 }
 
 static u32 si_pep_pcie_read_dbi(struct si_pep_dev *pep, u32 reg, size_t size)
@@ -713,6 +754,64 @@ static inline u8 si_pep_pcie_readb_dbi(struct si_pep_dev *pep, u32 reg)
 	return si_pep_pcie_read_dbi(pep, reg, 1);
 }
 
+
+#define PCIE0_ERR_INT_STS_REG	(0x1000e0)
+#define PCIE0_ERR_INT_CTRL_REG	(0x1000e4)
+#define PCIE0_ERR_STS_LDEVENT	BIT(30)
+#define PCIE0_ERR_STS_SLDEVENT	BIT(29)
+#define PCIE0_ERR_STS_RDLHUP	BIT(28)
+
+int si_pep_irq_link_down_disable(struct si_pep_dev *pep)
+{
+	uint32_t errint_ctrl;
+
+	if (unlikely(!pep)) {
+		pr_err("%s: Invalid pointer\n", __func__);
+		return -EINVAL;
+	}
+	errint_ctrl = si_pep_pcie_readl_pciesys(pep, PCIE0_ERR_INT_CTRL_REG);
+	/* disable link down event */
+	errint_ctrl = (errint_ctrl & (~(PCIE0_ERR_STS_LDEVENT)));
+	si_pep_pcie_writel_pciesys(pep, PCIE0_ERR_INT_CTRL_REG, errint_ctrl);
+	si_err(pep, "Link down interrupt disabled\n");
+	return 0;
+}
+
+int si_pep_irq_link_down_enable(struct si_pep_dev *pep)
+{
+	uint32_t errint_ctrl;
+
+	if (unlikely(!pep)) {
+		pr_err("%s: Invalid pointer\n", __func__);
+		return -EINVAL;
+	}
+	errint_ctrl = si_pep_pcie_readl_pciesys(pep, PCIE0_ERR_INT_CTRL_REG);
+	/* enable only link down event, NOT surprise link down event */
+	errint_ctrl = (errint_ctrl | PCIE0_ERR_STS_LDEVENT);
+	si_pep_pcie_writel_pciesys(pep, PCIE0_ERR_INT_CTRL_REG, errint_ctrl);
+	si_err(pep, "Link down interrupt enabled\n");
+	return 0;
+}
+
+irqreturn_t si_pep_irq_link_down(int irq, void *arg)
+{
+	struct si_pep_dev *pep = (struct si_pep_dev *)arg;
+	uint32_t errint_sts;
+
+	if (unlikely(!pep)) {
+		pr_err("%s: Invalid pointer\n", __func__);
+		return IRQ_NONE;
+	}
+
+	/* First, check link down event and surprise link down event */
+	errint_sts = si_pep_pcie_readl_pciesys(pep, PCIE0_ERR_INT_STS_REG);
+	si_pep_pcie_writel_pciesys(pep, PCIE0_ERR_INT_STS_REG, errint_sts);
+	pep->state = SOC_STATE_INVALID;
+	queue_work(system_wq, &pep->link_down_handler.work);
+
+	return IRQ_HANDLED;
+}
+
 static u8 si_pep_pcie_find_next_cap(struct si_pep_dev *pep, u8 cap_ptr,
 				    u8 cap)
 {
@@ -747,26 +846,48 @@ static u8 si_pep_pcie_find_capability(struct si_pep_dev *pep, u8 cap)
 	return si_pep_pcie_find_next_cap(pep, next_cap_ptr, cap);
 }
 
-static void si_pep_get_msi_prams(struct si_pep_dev *pep, u32 *msg_addr_lower,
-				 u32 *msg_addr_upper)
+static int si_pep_get_msi_config(struct si_pep_dev *pep,
+		struct si_pep_msi_config *config)
 {
-	u32 msi_cap;
-	u32 msi_reg;
-	bool has_upper;
-	u16 msg_ctrl;
+	u32 msi_cap_offset;
+	u32 reg;
+	u16 data; 
+	bool is_64bit;
 
-	msi_cap = si_pep_pcie_find_capability(pep, PCI_CAP_ID_MSI);
-	msi_reg = msi_cap + PCI_MSI_FLAGS;
-	msg_ctrl = si_pep_pcie_readw_dbi(pep, msi_reg);
-	has_upper = msg_ctrl & PCI_MSI_FLAGS_64BIT;
-	msi_reg = msi_cap + PCI_MSI_ADDRESS_LO;
-	*msg_addr_lower = si_pep_pcie_readl_dbi(pep, msi_reg);
-	if (has_upper) {
-		msi_reg = msi_cap + PCI_MSI_ADDRESS_HI;
-		*msg_addr_upper = si_pep_pcie_readl_dbi(pep, msi_reg);
-	} else {
-		*msg_addr_upper = 0;
+	msi_cap_offset = si_pep_pcie_find_capability(pep, PCI_CAP_ID_MSI);
+	if (msi_cap_offset == 0) {
+		si_err(pep, "Unable to find MSI capability offset");
+		return -ENOENT;
 	}
+
+	/* Read the MSI flags */
+	reg = msi_cap_offset + PCI_MSI_FLAGS;
+	data = si_pep_pcie_readw_dbi(pep, reg);
+	if (!(data & PCI_MSI_FLAGS_ENABLE)) {
+		si_err(pep, "MSI is not enabled. Reg: 0x%x, Data: 0x%x", reg, data);
+		return -ENOTSUPP;
+	}
+
+	config->msg_nvecs = (u16)(1U << ((data & PCI_MSI_FLAGS_QSIZE) >>
+				__ffs(PCI_MSI_FLAGS_QSIZE)));
+
+	if (data & PCI_MSI_FLAGS_64BIT)
+		is_64bit = true;
+
+	reg = msi_cap_offset + PCI_MSI_ADDRESS_LO;
+	config->msg_addr_l = si_pep_pcie_readl_dbi(pep, reg);
+	if (is_64bit) {
+		reg = msi_cap_offset + PCI_MSI_ADDRESS_HI;
+		config->msg_addr_h = si_pep_pcie_readl_dbi(pep, reg);
+		reg = msi_cap_offset + PCI_MSI_DATA_64;
+		config->msg_data = si_pep_pcie_readw_dbi(pep, reg);
+	} else {
+		config->msg_addr_h = 0;
+		reg = msi_cap_offset + PCI_MSI_DATA_32;
+		config->msg_data = si_pep_pcie_readw_dbi(pep, reg);
+	}
+
+	return 0;
 }
 
 int si_pep_copy_to_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
@@ -775,6 +896,7 @@ int si_pep_copy_to_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
 	int dir = DIR_WRITE;
 	volatile u32 reg;
 	int retry_count = 3;
+	struct si_pep_msi_config msicfg;
 
 	if ((pep->state != SOC_STATE_RUN) && (msi == -1))
 		return -EAGAIN;
@@ -793,18 +915,19 @@ int si_pep_copy_to_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
 	DMA_REG_WRITE(pep, ch, dir, control1, 0x2);
 	DMA_REG_WRITE(pep, ch, dir, int_clear, DMA_INT_CLEAR_INTS_MASK);
 	DMA_REG_WRITE(pep, ch, dir, int_setup, DMA_INT_SETUP_LAIE);
-	if (msi >= 0) {
-		if (!pep->msg_addr_lower)
-			si_pep_get_msi_prams(pep, &pep->msg_addr_lower,
-					&pep->msg_addr_upper);
-		DMA_REG_WRITE(pep, ch, dir, msi_stop_low, pep->msg_addr_lower);
-		DMA_REG_WRITE(pep, ch, dir, msi_stop_high,
-				pep->msg_addr_upper);
-		DMA_REG_WRITE(pep, ch, dir, msi_abort_low,
-			      pep->msg_addr_lower);
-		DMA_REG_WRITE(pep, ch, dir, msi_abort_high,
-			      pep->msg_addr_upper);
-		DMA_REG_WRITE(pep, ch, dir, msi_msgd, msi);
+	if (msi >= 0 && (si_pep_get_msi_config(pep, &msicfg) == 0)) {
+		DMA_REG_WRITE(pep, ch, dir, msi_stop_low, msicfg.msg_addr_l);
+		DMA_REG_WRITE(pep, ch, dir, msi_stop_high, msicfg.msg_addr_h);
+		DMA_REG_WRITE(pep, ch, dir, msi_abort_low, msicfg.msg_addr_l);
+		DMA_REG_WRITE(pep, ch, dir, msi_abort_high, msicfg.msg_addr_h);
+
+		if (msicfg.msg_nvecs == 1) {
+			DMA_REG_WRITE(pep, ch, dir, msi_msgd, msicfg.msg_data);
+		} else {
+			DMA_REG_WRITE(pep, ch, dir, msi_msgd,
+					msi + msicfg.msg_data);
+		}
+
 		DMA_REG_WRITE(pep, ch, dir, int_setup,
 				DMA_INT_SETUP_LAIE |
 				DMA_INT_SETUP_RAIE | DMA_INT_SETUP_RSIE);
@@ -895,6 +1018,7 @@ int si_pep_copy_do_ll(struct si_pep_dev *pep, struct si_pep_dma_ll_ctx *llctx,
 	int dir;
 	volatile u32 reg;
 	spinlock_t *lock;
+	struct si_pep_msi_config msicfg;
 
 	if ((pep->state != SOC_STATE_RUN) && (msi == -1))
 		return -EAGAIN;
@@ -908,7 +1032,7 @@ int si_pep_copy_do_ll(struct si_pep_dev *pep, struct si_pep_dma_ll_ctx *llctx,
 	}
 
 	dir = llctx->dir;
-	lock = (dir==DIR_READ)?&pep->dma_write_lock[ch]:&pep->dma_read_lock[ch];
+	lock = (dir == DIR_READ) ? &pep->dma_read_lock[ch] : &pep->dma_write_lock[ch];
 
 	si_dbg_dma(pep, "DMA %s with linked list on channel %d, msi %d",
 			(dir==DIR_READ)?"read":"write", ch, msi);
@@ -927,22 +1051,25 @@ int si_pep_copy_do_ll(struct si_pep_dev *pep, struct si_pep_dma_ll_ctx *llctx,
         DMA_REG_WRITE(pep, ch, dir, llp_low, lower_32_bits(llctx->p_dma_ll));
         DMA_REG_WRITE(pep, ch, dir, llp_high, upper_32_bits(llctx->p_dma_ll));
 
-	if ((dir == DIR_WRITE) && (msi >= 0)) {
-		if (!pep->msg_addr_lower)
-			si_pep_get_msi_prams(pep, &pep->msg_addr_lower,
-					&pep->msg_addr_upper);
-		DMA_REG_WRITE(pep, ch, dir, msi_stop_low, pep->msg_addr_lower);
-		DMA_REG_WRITE(pep, ch, dir, msi_stop_high,
-				pep->msg_addr_upper);
-		DMA_REG_WRITE(pep, ch, dir, msi_abort_low,
-			      pep->msg_addr_lower);
-		DMA_REG_WRITE(pep, ch, dir, msi_abort_high,
-			      pep->msg_addr_upper);
-		DMA_REG_WRITE(pep, ch, dir, msi_msgd, msi);
+	if (dir == DIR_WRITE && msi >= 0 &&
+			(si_pep_get_msi_config(pep, &msicfg) == 0)) {
+		DMA_REG_WRITE(pep, ch, dir, msi_stop_low, msicfg.msg_addr_l);
+		DMA_REG_WRITE(pep, ch, dir, msi_stop_high, msicfg.msg_addr_h);
+		DMA_REG_WRITE(pep, ch, dir, msi_abort_low, msicfg.msg_addr_l);
+		DMA_REG_WRITE(pep, ch, dir, msi_abort_high, msicfg.msg_addr_h);
+
+		if (msicfg.msg_nvecs == 1) {
+			DMA_REG_WRITE(pep, ch, dir, msi_msgd, msicfg.msg_data);
+		} else {
+			DMA_REG_WRITE(pep, ch, dir, msi_msgd,
+					msi + msicfg.msg_data);
+		}
+
 		DMA_REG_WRITE(pep, ch, dir, int_setup,
 				DMA_INT_SETUP_LAIE |
 				DMA_INT_SETUP_RAIE | DMA_INT_SETUP_RSIE);
 	}
+
 
 	DMA_REG_WRITE(pep, ch, dir, doorbell, DMA_DOORBELL_DB_START);
 	do { /* Wait for completion|error */
@@ -1307,22 +1434,22 @@ static int si_pep_handle_setup_soc_cmd(struct si_pep_dev *pep,
 	return SI_RES_SUCCESS;
 }
 
-static int si_pep_setup_neintf(struct si_pep_dev *pep)
+static int si_pep_setup_netintf(struct si_pep_dev *pep, dma_addr_t haddr)
 {
 	int ret;
 
-	if (pep->card_num == -1) /* Host hasn't called setup yet */
+	if (pep->card_num == -1) {
+		si_err(pep, "Host hasn't set the card number");
 		return -ENOENT;
-
-	if (pep->net_dev.host_hwdata_p == 0)
-		return -ENOENT;
+	}
 
 	if (pep->net_dev.created) {
 		si_err(pep, "Interface exists");
 		return -EEXIST;
 	}
 
-	ret = si_pep_net_init(pep);
+	si_minfo(pep, "Creating veth interface");
+	ret = si_pep_net_init(pep, haddr);
 	if (ret) {
 		si_err(pep, "Failed to setup network interface");
 		return ret;
@@ -1395,7 +1522,7 @@ static int si_pep_set_veth_ifaddr(struct si_pep_dev *pep,
 	return ret;
 }
 
-static int si_pep_set_neintf_ifaddr(struct si_pep_dev *pep,
+static int si_pep_set_netintf_ifaddr(struct si_pep_dev *pep,
 		struct si_mcmd_set_ipaddr_params *ifaddr)
 {
 	int ret;
@@ -1450,6 +1577,8 @@ static void si_pep_teardown_netintf(struct si_pep_dev *pep)
 {
 	int ret;
 	struct net_device *ndev = pep->net_dev.ndev;
+	
+	si_minfo(pep, "Teardown veth interface");
 
 	if (pep->net_dev.created == 0)
 		return;
@@ -1483,6 +1612,7 @@ void si_pep_handle_mcmd(struct si_pep_dev *pep, struct si_mcmd *mcmd_in)
 	struct timezone tz;
 	struct si_qctx *ctx;
 	enum si_qstatus cur_status;
+	dma_addr_t haddr;
 	int res = SI_RES_SUCCESS;
 	int ret;
 	void *params;
@@ -1580,21 +1710,23 @@ void si_pep_handle_mcmd(struct si_pep_dev *pep, struct si_mcmd *mcmd_in)
 		pep->card_num = *((u32 *)params);
 		break;
 	case SI_MCMD_SET_NETHWADDR:
-		pep->net_dev.host_hwdata_p =
-			((struct si_mcmd_set_nethw_addr_params *)params)->
+		haddr = ((struct si_mcmd_set_nethw_addr_params *)params)->
 			nethw_addr_high;
-		pep->net_dev.host_hwdata_p =
-			(pep->net_dev.host_hwdata_p << 32) |
+		haddr = (haddr << 32) |
 			((struct si_mcmd_set_nethw_addr_params *)params)->
 			nethw_addr_low;
-		if (pep->net_dev.host_hwdata_p != 0) {
-			si_pep_setup_neintf(pep);
+		si_dbg_net(pep, "Net hardware data on host 0x%llx", haddr);
+
+		if (haddr != 0) {
+			ret = si_pep_setup_netintf(pep, haddr);
+			if (ret)
+				res = SI_RES_FAILURE;
 		} else {
 			si_pep_teardown_netintf(pep);
 		}
 		break;
 	case SI_MCMD_SET_NETIPADDR:
-		ret = si_pep_set_neintf_ifaddr(pep,
+		ret = si_pep_set_netintf_ifaddr(pep,
 				(struct si_mcmd_set_ipaddr_params*)params);
 		if (ret)
 			res = SI_RES_FAILURE;
@@ -1862,34 +1994,133 @@ void si_pep_get_reqs_from_host(struct si_pep_dev *pep, enum si_qtype t, int qid)
 	return;
 }
 
+#define MOD_PCIE_SYS_PCIE0_LINK_DBG2_OFFSET	(0x1000b4)
+#define PCIE0_LINK_DBG2_CDM_IN_RESET_MASK	(BIT(24))
+#define PCIE0_LINK_DBG2_CDM_IN_RESET_SHIFT	24
+
+static int si_pep_recover_from_link_down(void *arg)
+{
+	int i;
+	u32 reg;
+	u32 cdm_in_reset = 1;
+	struct si_pep_dev *pep = (struct si_pep_dev*)arg;
+
+	while (!kthread_should_stop()) {
+		reg = si_pep_pcie_read_pciesys(pep, 
+				MOD_PCIE_SYS_PCIE0_LINK_DBG2_OFFSET, 4);
+		cdm_in_reset = (reg & PCIE0_LINK_DBG2_CDM_IN_RESET_MASK) >>
+			PCIE0_LINK_DBG2_CDM_IN_RESET_SHIFT;
+		if (cdm_in_reset) {
+			/* 
+			 * We are still in reset. Link training and other stuff
+			 * take time in millisecond range. Sleep accordingly.
+			 * Even if we miss the exact time controller is out of
+			 * reset, we will have pleanty of time until the host
+			 * comes back.
+			 */
+			msleep(50);
+		} else
+			break;
+	}
+
+	/* We were either stopped or we are out of reset */
+	if (cdm_in_reset)
+		return 0;
+
+	si_info(pep, "PCIe controller is out of reset");
+	/* We could wait here for smlh link up */
+	msleep(100);
+
+	if (use_driver_loopback) {
+		t_params[i].pep = pep;
+		t_params[i].qid = i;
+		pep->loopback_hdlr[i] =
+			kthread_create(si_pep_data_loopback_handler,
+					&t_params[i],
+					"sima-loopback-hdlr-%d", i);
+	}
+
+	pep->drv_ops->local_init(pep);
+	pep->drv_ops->set_soc_state(pep, SOC_STATE_RUN);
+	pep->recovery_mode = 0;
+
+	return 0;
+}
+
+static void si_pep_link_down_cleanup(struct si_pep_dev *pep)
+{
+	int i;
+	struct si_qctx *ctx;
+
+	if (pep->recovery_mode) {
+		/* Multiple interrupts? */
+		return;
+	}
+
+	si_pep_teardown_netintf(pep);
+	pep->drv_ops->local_deinit(pep);
+
+	if (use_driver_loopback) {
+		for (i = 0; i < SI_MAX_DQS; i++) {
+			if (pep->loopback_hdlr[i]) {
+				kthread_stop(pep->loopback_hdlr[i]);
+				wake_up_interruptible(&pep->dreq_wait[i]);
+			}
+		}
+	}
+
+	if (pep->recovery_mode == 0) {
+		pep->recovery_thread = kthread_run(si_pep_recover_from_link_down,
+				pep, "simaai_ep_recovery");
+		if (IS_ERR(pep->recovery_thread)) {
+			si_err(pep, "Failed to create recovery thread. Reboot SoC");
+			return;
+		}
+		pep->recovery_mode = 1;
+	}
+
+	i = 0;
+	ctx = pep->mwq_ctx;
+	if (ctx->status != SI_INVALID)
+		si_pep_destroy_queue(pep, SI_MWQ, &i);
+	
+	ctx = pep->mcq_ctx;
+	if (ctx->status != SI_INVALID)
+		si_pep_destroy_queue(pep, SI_MCQ, &i);
+
+	ctx = pep->mrq_ctx;
+	if (ctx->status != SI_INVALID)
+		si_pep_destroy_queue(pep, SI_MRQ, &i);
+
+	for (i = 0; i < SI_MAX_DQS; i++) {
+		ctx = pep->dwq_ctx[i];
+		if (ctx->status != SI_INVALID)
+			si_pep_destroy_queue(pep, SI_DWQ, &i);
+
+		ctx = pep->drq_ctx[i];
+		if (ctx->status != SI_INVALID)
+			si_pep_destroy_queue(pep, SI_DRQ, &i);
+
+		ctx = pep->dcq_ctx[i];
+		if (ctx->status != SI_INVALID)
+			si_pep_destroy_queue(pep, SI_DCQ, &i);
+	}
+}
+
 static void si_pep_link_down_handler(struct work_struct *lwork)
 {
 	struct si_pep_dev *pep;
-	struct si_alert alert;
-	
-	u8 __iomem *stat7;
 	u32 reg;
-
+	
 	pep = link_down_work_to_pep_dev(lwork);
 	if (unlikely(!pep)) {
 		pr_err("%s: Invalid end point device pointer\n", __func__);
 		return;
 	}
 
-	/* Immediately reading stat7 causes synchronous external abort */
-	si_err(pep, "PCIe Link toggled");
-	stat7 = ((u8*)pep->glue_logic_base) + 0x74;
-	do {
-		reg = readl(stat7);
-	} while ((reg & 0x02) != 0);
-
-	/* Give link and host some time to settle down before we notify */
-	msleep(250);
-	pep->drv_ops->set_soc_state(pep, SOC_STATE_INIT);
-	alert.type = SI_ALERT_LINK_DOWN;
-	alert.sub_type = 0;
-	strncpy(alert.data, "PCIe Link Toggled\n", sizeof(alert.data) - 1);
-	si_pep_alert_host(pep, &alert);
+	si_err(pep, "PCIe Link down. Cleaning up state.");
+	/* Reading any pcie registers at this point might cause abort */
+	si_pep_link_down_cleanup(pep);
 }
 
 static void si_pep_dbg_dump_bufid(struct si_pep_dev *pep,
@@ -2283,11 +2514,66 @@ static int si_pep_get_buff_arg(struct si_pep_dev *pep, struct si_buffer *buf,
 	return 0;
 
 error_copy_from:
-	devm_kfree(dev, sizes);
+	devm_kfree(dev, *sizes);
 error_salloc:
-	devm_kfree(dev, addrs);
+	devm_kfree(dev, *addrs);
 
 	return ret;
+}
+
+/*
+ * Obtain a coherent buffer for a DMA linked list.
+ *
+ * dma_alloc_coherent() on a non-coherent device sets up an uncached vmap and
+ * is far too expensive to repeat for every transfer, so each queue keeps one
+ * buffer and reuses it, growing it when a larger transfer comes along.
+ * ll_busy claims the cached buffer without taking a lock on the submission
+ * path; a concurrent transfer on the same queue just allocates its own.
+ */
+static int si_pep_get_dma_ll_buf(struct si_pep_qdev *qdev,
+		struct si_pep_dma_ll_ctx *ll, size_t size)
+{
+	struct si_pep_dev *pep = qdev->pep;
+	void *buf;
+	dma_addr_t dma;
+
+	if (!test_and_set_bit(0, &qdev->ll_busy)) {
+		if (qdev->ll_cache && qdev->ll_cache_size >= size) {
+			ll->dma_ll = qdev->ll_cache;
+			ll->p_dma_ll = qdev->ll_cache_dma;
+			ll->size = qdev->ll_cache_size;
+			ll->cached = true;
+			return 0;
+		}
+
+		/* too small (or first use): grow it and keep the new one */
+		buf = dma_alloc_coherent(pep->dev, size, &dma, GFP_KERNEL);
+		if (buf == NULL) {
+			clear_bit(0, &qdev->ll_busy);
+			return -ENOMEM;
+		}
+		if (qdev->ll_cache)
+			dma_free_coherent(pep->dev, qdev->ll_cache_size,
+					qdev->ll_cache, qdev->ll_cache_dma);
+		qdev->ll_cache = buf;
+		qdev->ll_cache_dma = dma;
+		qdev->ll_cache_size = size;
+		ll->dma_ll = buf;
+		ll->p_dma_ll = dma;
+		ll->size = size;
+		ll->cached = true;
+		return 0;
+	}
+
+	/* cached buffer is in use by another transfer on this queue */
+	buf = dma_alloc_coherent(pep->dev, size, &dma, GFP_KERNEL);
+	if (buf == NULL)
+		return -ENOMEM;
+	ll->dma_ll = buf;
+	ll->p_dma_ll = dma;
+	ll->size = size;
+	ll->cached = false;
+	return 0;
 }
 
 static void si_pep_free_dma_ll(struct si_pep_dev *pep,
@@ -2299,8 +2585,29 @@ static void si_pep_free_dma_ll(struct si_pep_dev *pep,
 	if (ll->dma_ll == NULL)
 		return;
 
+	if (ll->cached) {
+		/* buffer stays with the queue; just release the claim */
+		clear_bit(0, ll->ll_busy);
+		memset(ll, 0, sizeof(*ll));
+		return;
+	}
+
 	dma_free_coherent(pep->dev, ll->size, ll->dma_ll, ll->p_dma_ll);
 	memset(ll, 0, sizeof(*ll));
+}
+
+/* Release a queue's cached linked-list buffer (driver teardown). */
+static void si_pep_free_dma_ll_cache(struct si_pep_qdev *qdev)
+{
+	if (qdev->ll_cache == NULL)
+		return;
+
+	dma_free_coherent(qdev->pep->dev, qdev->ll_cache_size,
+			qdev->ll_cache, qdev->ll_cache_dma);
+	qdev->ll_cache = NULL;
+	qdev->ll_cache_dma = 0;
+	qdev->ll_cache_size = 0;
+	clear_bit(0, &qdev->ll_busy);
 }
 	
 static void si_pep_unmap_user_ptr_single(struct si_pep_dev *pep,
@@ -2310,14 +2617,14 @@ static void si_pep_unmap_user_ptr_single(struct si_pep_dev *pep,
 		return;
 
 	if (ubmap->nr_sgents > 0) {
-		dma_unmap_sg(pep->dev, ubmap->sgt.sgl, ubmap->sgt.nents,
-				DMA_BIDIRECTIONAL);
+		dma_unmap_sg(pep->dev, ubmap->sgt.sgl, ubmap->sgt.orig_nents,
+				ubmap->dir);
 		ubmap->nr_sgents = 0;
 	}
 
 	sg_free_table(&ubmap->sgt);
 	unpin_user_pages(ubmap->pages, ubmap->nr_pages);
-	devm_kfree(pep->dev, ubmap->pages);
+	kvfree(ubmap->pages);
 	ubmap->nr_pages = 0;
 	ubmap->pages = NULL;
 }
@@ -2336,28 +2643,46 @@ static void si_pep_unmap_user_ptrs(struct si_pep_dev *pep,
 	for (idx = 0; idx < (*bufctx)->nr_bufs; idx++)
 		si_pep_unmap_user_ptr_single(pep, &(*bufctx)->userbuf_maps[idx]);
 
-	devm_kfree(pep->dev, *bufctx);
+	kfree((*bufctx)->userbuf_maps);
+	kfree(*bufctx);
 	*bufctx = NULL;
 }
 
 static int si_pep_map_user_ptr_single(struct si_pep_dev *pep, void __user *ptr,
-		size_t size, struct si_pep_userbuf_map *ubmap)
+		size_t size, struct si_pep_userbuf_map *ubmap,
+		enum dma_data_direction dir)
 {
 	int ret;
 	ulong start = (ulong)ptr;
 	ulong offset = offset_in_page(start);
 	uint nr_pages;
+	uint gup_flags;
 
 	ubmap->total_size = size;
+	ubmap->dir = dir;
 	nr_pages = DIV_ROUND_UP(offset + size, PAGE_SIZE);
-	ubmap->pages = devm_kmalloc_array(pep->dev, nr_pages,
-			sizeof(struct page *), GFP_KERNEL);
+	/*
+	 * A 16MB buffer needs 4096 page pointers (32KB); use kvmalloc so a
+	 * large transfer does not depend on high-order page allocations.
+	 */
+	ubmap->pages = kvmalloc_array(nr_pages, sizeof(struct page *),
+			GFP_KERNEL);
 	if (ubmap->pages == NULL)
 		return -ENOMEM;
-	ret = pin_user_pages_fast(start & PAGE_MASK, nr_pages,
-			FOLL_WRITE | FOLL_LONGTERM, ubmap->pages);
+	/*
+	 * FOLL_WRITE is only needed when the device writes into the buffer.
+	 * Asking for it on a device-to-host transfer would needlessly break
+	 * COW mappings and dirty every page.
+	 * This is a short-term pin held only for the duration of one transfer,
+	 * so FOLL_LONGTERM is deliberately not used: it would force migration
+	 * of any page that happens to sit in ZONE_MOVABLE/CMA on every call.
+	 */
+	gup_flags = (dir == DMA_TO_DEVICE) ? 0 : FOLL_WRITE;
+	ret = pin_user_pages_fast(start & PAGE_MASK, nr_pages, gup_flags,
+			ubmap->pages);
 	if (ret < 0) {
-		devm_kfree(pep->dev, ubmap->pages);
+		kvfree(ubmap->pages);
+		ubmap->pages = NULL;
 		ubmap->nr_pages = 0;
 		return ret;
 	}
@@ -2373,8 +2698,8 @@ static int si_pep_map_user_ptr_single(struct si_pep_dev *pep, void __user *ptr,
 			offset, size, GFP_KERNEL);
 	if (ret)
 		goto error_pin;
-	ubmap->nr_sgents = dma_map_sg(pep->dev, ubmap->sgt.sgl, ubmap->sgt.nents,
-			DMA_BIDIRECTIONAL);
+	ubmap->nr_sgents = dma_map_sg(pep->dev, ubmap->sgt.sgl,
+			ubmap->sgt.orig_nents, dir);
 	if (ubmap->nr_sgents == 0) {
 		ret = -EIO;
 		goto error_sg_alloc;
@@ -2386,18 +2711,25 @@ error_sg_alloc:
 	sg_free_table(&ubmap->sgt);
 error_pin:
 	unpin_user_pages(ubmap->pages, ubmap->nr_pages);
-	devm_kfree(pep->dev, ubmap->pages);
+	kvfree(ubmap->pages);
+	ubmap->pages = NULL;
+	ubmap->nr_pages = 0;
 
 	return ret;
 }
 
 static int si_pep_map_user_ptr(struct si_pep_dev *pep, struct si_buffer *buf,
-		struct si_pep_userbuf_ctx **bufctx)
+		struct si_pep_userbuf_ctx **bufctx,
+		enum dma_data_direction dir)
 {
 	int ret;
-	int idx;
+	int idx = 0;
 	int nents = buf->nents;
-	u8 *ptrs = NULL;
+	/*
+	 * si_pep_get_buff_arg() fills this with an array of user pointers
+	 * (sizeof(void __user *) elements), so it must be indexed as pointers.
+	 */
+	void **ptrs = NULL;
 	size_t *sizes = NULL;
 	struct si_pep_userbuf_map *userbuf_maps;
 	struct device *dev = pep->dev;
@@ -2406,20 +2738,19 @@ static int si_pep_map_user_ptr(struct si_pep_dev *pep, struct si_buffer *buf,
 		return -ENOTSUPP;
 
 	if (nents > 1) {
-		ret = si_pep_get_buff_arg(pep, buf, (void**)&ptrs, &sizes);
+		ret = si_pep_get_buff_arg(pep, buf, (void **)&ptrs, &sizes);
 		if (ret)
 			return ret;
 	}
 
-	userbuf_maps = devm_kcalloc(dev, nents,
-			sizeof(struct si_pep_userbuf_map), GFP_KERNEL);
+	userbuf_maps = kcalloc(nents, sizeof(struct si_pep_userbuf_map),
+			GFP_KERNEL);
 	if (userbuf_maps == NULL) {
 		ret = -ENOMEM;
 		goto done;
 	}
 
-	*bufctx = devm_kzalloc(dev, sizeof(struct si_pep_userbuf_ctx),
-			GFP_KERNEL);
+	*bufctx = kzalloc(sizeof(struct si_pep_userbuf_ctx), GFP_KERNEL);
 	if (*bufctx == NULL) {
 		ret = -ENOMEM;
 		goto error_alloc_ctx;
@@ -2429,8 +2760,9 @@ static int si_pep_map_user_ptr(struct si_pep_dev *pep, struct si_buffer *buf,
 	(*bufctx)->nr_bufs = nents;
 
 	if (nents == 1) {
+		idx = 0;
 		ret = si_pep_map_user_ptr_single(pep, buf->addr, buf->size,
-				&userbuf_maps[idx]);
+				&userbuf_maps[0], dir);
 		if (ret)
 			goto error_map_single;
 
@@ -2438,8 +2770,8 @@ static int si_pep_map_user_ptr(struct si_pep_dev *pep, struct si_buffer *buf,
 	}
 
 	for (idx = 0; idx < buf->nents; idx++) {
-		ret = si_pep_map_user_ptr_single(pep, (void *)&ptrs[idx],
-				sizes[idx], &userbuf_maps[idx]);
+		ret = si_pep_map_user_ptr_single(pep, ptrs[idx], sizes[idx],
+				&userbuf_maps[idx], dir);
 		if (ret)
 			goto error_map_single;
 	}
@@ -2452,8 +2784,14 @@ error_map_single:
 		idx--;
 		si_pep_unmap_user_ptr_single(pep, &userbuf_maps[idx]);
 	}
+	/*
+	 * *bufctx still referenced userbuf_maps here, so the caller's
+	 * si_pep_unmap_user_ptrs() walked freed memory.
+	 */
+	kfree(*bufctx);
+	*bufctx = NULL;
 error_alloc_ctx:
-	devm_kfree(dev, userbuf_maps);
+	kfree(userbuf_maps);
 done:
 	if (sizes)
 		devm_kfree(dev, sizes);
@@ -2463,18 +2801,27 @@ done:
 	return ret;
 }
 
-static int si_pep_prepare_dma_ll(struct si_pep_dev *pep,
+static int si_pep_prepare_dma_ll(struct si_pep_qdev *qdev,
 		struct si_pep_dmabuf *src, int nsrc,
 		struct si_pep_dmabuf *dst, int ndst,
 		struct si_pep_dma_ll_ctx *ll, enum si_dma_dir dir)
 {
-	struct device *dev = pep->dev;
+	struct si_pep_dev *pep = qdev->pep;
 	struct si_pep_dma_ll_lelem *lelem;
-	struct si_pep_dma_ll_delem *delem;
+	struct si_pep_dma_ll_delem *delem = NULL;
 	dma_addr_t saddr, daddr;
 	int sbi, sbo, dbi, dbo, lli;
+	int ret;
 	size_t stsz, dtsz, csz, srsz, drsz;
-	size_t n_ll_ents = 0;
+	size_t n_ll_ents;
+
+	memset(ll, 0, sizeof(*ll));
+
+	if (!src || !dst || nsrc <= 0 || ndst <= 0) {
+		si_err(pep, "Invalid DMA LL inputs: src %p nsrc %d dst %p ndst %d",
+				src, nsrc, dst, ndst);
+		return -EINVAL;
+	}
 
 	stsz = 0;
 	for (sbi = 0; sbi < nsrc; sbi++)
@@ -2484,13 +2831,19 @@ static int si_pep_prepare_dma_ll(struct si_pep_dev *pep,
 	for (dbi = 0; dbi < ndst; dbi++)
 		dtsz += dst[dbi].size;
 
+	if (!stsz || !dtsz) {
+		si_err(pep, "Invalid DMA LL sizes: source %lu destination %lu",
+				stsz, dtsz);
+		return -EINVAL;
+	}
+
+	n_ll_ents = (size_t)nsrc + ndst; /* This is the maximum possible size */
 	ll->dir = dir;
-	ll->size = (n_ll_ents + 1) * sizeof(struct si_pep_dma_ll_lelem);
-	ll->dma_ll = dma_alloc_coherent(dev, ll->size, &ll->p_dma_ll,
-			GFP_KERNEL);
-	if (ll->dma_ll == NULL)
-		return PTR_ERR(ll->dma_ll);
-	ll->nents = n_ll_ents;
+	ll->ll_busy = &qdev->ll_busy;
+	ret = si_pep_get_dma_ll_buf(qdev, ll,
+			(n_ll_ents + 1) * sizeof(struct si_pep_dma_ll_lelem));
+	if (ret)
+		return ret;
 
 	sbi = 0;
 	sbo = 0;
@@ -2515,6 +2868,12 @@ static int si_pep_prepare_dma_ll(struct si_pep_dev *pep,
 
 		saddr = src[sbi].addr + sbo;
 		daddr = dst[dbi].addr + dbo;
+		if ((size_t)lli >= n_ll_ents) {
+			si_err(pep, "DMA LL descriptor overflow: lli %d nents %lu",
+					lli, n_ll_ents);
+			ret = -EOVERFLOW;
+			goto err_free_ll;
+		}
 		delem = &ll->dma_ll[lli++];
 		csz = (srsz < drsz)?srsz:drsz;
 		delem->dar_low = lower_32_bits(daddr);
@@ -2538,15 +2897,28 @@ static int si_pep_prepare_dma_ll(struct si_pep_dev *pep,
 		}
 	}
 
+	if (!delem || lli == 0) {
+		si_err(pep, "DMA LL has no data descriptors: nsrc %d ndst %d source %lu destination %lu",
+				nsrc, ndst, stsz, dtsz);
+		ret = -EINVAL;
+		goto err_free_ll;
+	}
+
 	delem->flags |= LWIE_BIT;
 	lelem = (struct si_pep_dma_ll_lelem *)&ll->dma_ll[lli];
 	memset(lelem, 0, sizeof(*lelem));
 	lelem->flags = LLP_ELEMENT | TCB_BIT;
 	lelem->ll_ptr_low = lower_32_bits(ll->p_dma_ll);
 	lelem->ll_ptr_high = upper_32_bits(ll->p_dma_ll);
-	si_dbg_l(pep, "Linked list prepeated. Total copy: %lu bytes", ll->tsize);
+	ll->nents = lli + 1;
+	si_dbg_l(pep, "DMA list created with %lu elements. Copy size %lu",
+			ll->nents, ll->tsize);
 
 	return 0;
+
+err_free_ll:
+	si_pep_free_dma_ll(pep, ll);
+	return ret;
 }
 
 static int si_pep_dma_buflist_from_sge(struct si_pep_dev *pep,
@@ -2568,7 +2940,7 @@ static int si_pep_dma_buflist_from_sge(struct si_pep_dev *pep,
 	else
 		return -EINVAL;
 
-	*db = devm_kzalloc(dev, n * sizeof(struct si_pep_dmabuf), GFP_KERNEL);
+	*db = kcalloc(n, sizeof(struct si_pep_dmabuf), GFP_KERNEL);
 	if (*db == NULL)
 		return -ENOMEM;
 
@@ -2584,14 +2956,16 @@ static int si_pep_dma_buflist_from_sge(struct si_pep_dev *pep,
 	rsges = dma_alloc_coherent(pep->dev, ssz, &p_rsges, GFP_KERNEL);
 	if (rsges == NULL) {
 		si_err(pep, "Failed to allocate mem for remote sges");
-		devm_kfree(dev, *db);
+		kfree(*db);
+		*db = NULL;
 		return -ENOMEM;
 	}
 
 	raddr = sge->addr_l | ((dma_addr_t)sge->addr_h << 32);
 	if (si_pep_copy_from_host(pep, p_rsges, raddr, ssz, ch)) {
 		si_err(pep, "Failed to copy sge list from host");
-		devm_kfree(dev, *db);
+		kfree(*db);
+		*db = NULL;
 		dma_free_coherent(dev, ssz, rsges, p_rsges);
 		return -EIO;
 	}
@@ -2621,8 +2995,7 @@ static int si_pep_dma_buflist_from_physptr(struct si_pep_dev *pep,
 	if (buf->addrtype != SI_BUF_ADDR_PHYSICAL)
 		return -EINVAL;
 
-	*db = devm_kzalloc(dev, buf->nents * sizeof(struct si_pep_dmabuf),
-			GFP_KERNEL);
+	*db = kcalloc(buf->nents, sizeof(struct si_pep_dmabuf), GFP_KERNEL);
 	if (*db == NULL)
 		return -ENOMEM;
 
@@ -2636,7 +3009,8 @@ static int si_pep_dma_buflist_from_physptr(struct si_pep_dev *pep,
 
 	ret = si_pep_get_buff_arg(pep, buf, &addrs, &sizes);
 	if (ret) {
-		devm_kfree(dev, *db);
+		kfree(*db);
+		*db = NULL;
 		return ret;
 	}
 
@@ -2658,9 +3032,9 @@ static int si_pep_dma_buflist_from_uptr(struct si_pep_dev *pep,
 		int *nents, size_t *tsize)
 {
 	struct si_pep_userbuf_map *ubmap = bufctx->userbuf_maps;
-	struct device *dev = pep->dev;
 	struct sg_table *sgt;
 	struct scatterlist *sl;
+	size_t left, csz;
 	int n = 0;
 	int i, j, k = 0;
 
@@ -2668,28 +3042,45 @@ static int si_pep_dma_buflist_from_uptr(struct si_pep_dev *pep,
 		n += ubmap[i].nr_sgents;
 	}
 
-	*db = devm_kzalloc(dev, sizeof(struct si_pep_dmabuf) * n, GFP_KERNEL);
+	*db = kcalloc(n, sizeof(struct si_pep_dmabuf), GFP_KERNEL);
 	if (*db == NULL)
 		return -ENOMEM;
 
 	*tsize = 0;
 	for (i = 0; i < bufctx->nr_bufs; i++) {
 		sgt = &ubmap[i].sgt;
-		for_each_sg (sgt->sgl, sl, sgt->nents, j) {
+		left = ubmap[i].total_size;
+		/*
+		 * Iterate the number of *mapped* entries returned by
+		 * dma_map_sg(), not sgt->nents. When the IOMMU or swiotlb
+		 * coalesces, the mapped count is smaller than the allocated
+		 * count; walking sgt->nents both reads sg_dma_address() from
+		 * entries that were never mapped and can write past the end of
+		 * *db, which is sized from nr_sgents.
+		 *
+		 * Clamp to total_size as well: a coalesced entry can be longer
+		 * than the part of the buffer this mapping covers.
+		 */
+		for_each_sg (sgt->sgl, sl, ubmap[i].nr_sgents, j) {
+			if (left == 0)
+				break;
+			csz = min_t(size_t, sg_dma_len(sl), left);
 			(*db)[k].addr = sg_dma_address(sl);
-			(*db)[k].size = sg_dma_len(sl);
-			(*tsize) += sg_dma_len(sl);
+			(*db)[k].size = csz;
+			(*tsize) += csz;
+			left -= csz;
 			k++;
 		}
 	}
-	*nents = n;
+	*nents = k;
 
 	return 0;
 }
 
 static int si_pep_buf_prepare_dmabuf_list(struct si_pep_qdev *qdev,
 		struct si_buffer *buf, struct si_pep_dmabuf **db, int *nents,
-		size_t *tsize, struct si_pep_userbuf_ctx **bufctx)
+		size_t *tsize, struct si_pep_userbuf_ctx **bufctx,
+		enum dma_data_direction dir)
 {
 	struct si_pep_dev *pep = qdev->pep;
 	struct si_sge sge;
@@ -2698,7 +3089,7 @@ static int si_pep_buf_prepare_dmabuf_list(struct si_pep_qdev *qdev,
 
 	*tsize = 0;
 	if (buf->addrtype == SI_BUF_ADDR_USER) {
-		ret = si_pep_map_user_ptr(pep, buf, bufctx);
+		ret = si_pep_map_user_ptr(pep, buf, bufctx, dir);
 		if (ret) {
 			si_err(pep, "Failed to map user pointer");
 			return ret;
@@ -2782,7 +3173,6 @@ static int si_pep_send_data(struct si_pep_qdev *qdev, struct si_buffer *buf,
 	struct si_pep_dma_ll_ctx ll = { 0 };
 	struct si_pep_userbuf_ctx *bufctx = NULL;
 	struct si_pep_dev *pep = qdev->pep;
-	struct device *dev = pep->dev;
 	enum si_dma_dir dir = DIR_WRITE;
 	size_t tsize;
 	int ndest, nsrc;
@@ -2811,13 +3201,13 @@ static int si_pep_send_data(struct si_pep_qdev *qdev, struct si_buffer *buf,
 		}
 
 		ret = si_pep_buf_prepare_dmabuf_list(qdev, buf, &srcb, &nsrc,
-				&tsize, &bufctx);
+				&tsize, &bufctx, DMA_TO_DEVICE);
 		if (ret) {
 			si_err(pep, "Unable to prepare source buffer list");
 			goto err_clean_send_data;
 		}
 
-		ret = si_pep_prepare_dma_ll(pep, srcb, nsrc, destb, ndest, &ll,
+		ret = si_pep_prepare_dma_ll(qdev, srcb, nsrc, destb, ndest, &ll,
 				dir);
 		if (ret) {
 			si_err(pep, "Unable to prepare source buffer list");
@@ -2839,10 +3229,8 @@ static int si_pep_send_data(struct si_pep_qdev *qdev, struct si_buffer *buf,
 	ret = si_pep_set_rqe(pep, rqe);
 
 err_clean_send_data:
-	if (destb)
-		devm_kfree(dev, destb);
-	if (srcb)
-		devm_kfree(dev, srcb);
+	kfree(destb);
+	kfree(srcb);
 	if (ll.dma_ll)
 		si_pep_free_dma_ll(pep, &ll);
 	if (bufctx)
@@ -3045,13 +3433,13 @@ static int si_pep_recv_data(struct si_pep_qdev *qdev,
 		}
 
 		ret = si_pep_buf_prepare_dmabuf_list(qdev, dst, &dstb, &ndst,
-				&tsize, &bufctx);
+				&tsize, &bufctx, DMA_FROM_DEVICE);
 		if (ret) {
 			si_err(pep, "Unable to prepare destination list");
 			goto err_clean_recv_data;
 		}
 
-		ret = si_pep_prepare_dma_ll(pep, srcb, nsrc, dstb, ndst, &ll,
+		ret = si_pep_prepare_dma_ll(qdev, srcb, nsrc, dstb, ndst, &ll,
 				DIR_READ);
 		if (ret) {
 			si_err(pep, "Unable to prepare source buffer list");
@@ -3065,10 +3453,8 @@ static int si_pep_recv_data(struct si_pep_qdev *qdev,
 		ret = si_pep_recv_data_single(qdev, dst, &sge);
 
 err_clean_recv_data:
-	if (dstb)
-		devm_kfree(pep->dev, dstb);
-	if (srcb)
-		devm_kfree(pep->dev, srcb);
+	kfree(dstb);
+	kfree(srcb);
 	if (ll.dma_ll)
 		si_pep_free_dma_ll(pep, &ll);
 	if (bufctx)
@@ -3708,8 +4094,10 @@ static int si_pep_probe(struct platform_device *pdev)
 	}
 	of_node_put(node);
 
-	pep->drv_ops->platform_init(pep);
-	si_pep_get_msi_prams(pep, &pep->msg_addr_lower, &pep->msg_addr_upper);
+	ret = pep->drv_ops->platform_init(pep);
+	if (ret != 0) {
+		si_err(pep, "Platform init failed. %d\n", ret);
+	}
 	si_pep_dump_devinfo(pep);
 
 	if (pep->drv_ops->set_mlsoc_caps) {
@@ -3866,7 +4254,13 @@ static void si_pep_remove(struct platform_device *pdev)
 	pep = platform_get_drvdata(pdev);
 	si_pep_teardown_netintf(pep);
 	wake_up_interruptible(&pep->mreq_wait);
-	pep->drv_ops->local_deinit(pep);
+
+	if (pep->recovery_mode == 0) {
+		pep->drv_ops->local_deinit(pep);
+	} else {
+		kthread_stop(pep->recovery_thread);
+	}
+	
 	pep->drv_ops->platform_deinit(pep);
 	sysfs_remove_file(pep->kobj_stats, &sys_timestamp.attr);
 	sysfs_remove_file(pep->kobj_stats, &sys_mgmt_stats.attr);
@@ -3875,7 +4269,7 @@ static void si_pep_remove(struct platform_device *pdev)
 		sysfs_remove_file(pep->kobj_stats, &sys_queue_occup.attr);
 	kobject_put(pep->kobj_stats);
 
-	if (use_driver_loopback) {
+	if (use_driver_loopback && (pep->recovery_mode == 0)) {
 		for (i = 0; i < SI_MAX_DQS; i++) {
 			if (pep->loopback_hdlr[i]) {
 				kthread_stop(pep->loopback_hdlr[i]);
@@ -3892,6 +4286,10 @@ static void si_pep_remove(struct platform_device *pdev)
 			kfree(pep->qdev[i+1].timepoint_4);
 		}
 	}
+
+	/* mgmt queue is qdev[0], data queues follow */
+	for (i = 0; i < SI_MAX_DQS + 1; i++)
+		si_pep_free_dma_ll_cache(&pep->qdev[i]);
 
 	device_destroy(pep->class, pep->devt);
 	class_destroy(pep->class);

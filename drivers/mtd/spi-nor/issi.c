@@ -29,6 +29,28 @@ static const struct spi_nor_fixups is25lp256_fixups = {
 	.post_bfpt = is25lp256_post_bfpt_fixups,
 };
 
+static void is25wx01g_default_init(struct spi_nor *nor)
+{
+	struct spi_nor_flash_parameter *params = nor->params;
+
+	/* Set all read/write data operations to use,
+	 * 1 command line, 1 address lines, 8 data lines.
+	 */
+	nor->read_proto = SNOR_PROTO_1_1_8;
+	nor->write_proto = SNOR_PROTO_1_1_8;
+
+	/* Set page program/write flags in default init,
+	 * read capability is set in spi_nor_no_sfdp_init_params.
+	 */
+	params->hwcaps.mask |= SNOR_HWCAPS_PP_1_1_8;
+	spi_nor_set_pp_settings(&params->page_programs[SNOR_CMD_PP_1_1_8],
+			SPINOR_OP_PP_1_1_8, SNOR_PROTO_1_1_8);
+}
+
+static const struct spi_nor_fixups is25wx01g_fixups = {
+	.default_init = is25wx01g_default_init,
+};
+
 static int pm25lv_nor_late_init(struct spi_nor *nor)
 {
 	struct spi_nor_erase_map *map = &nor->params->erase_map;
@@ -126,6 +148,15 @@ static const struct flash_info issi_nor_parts[] = {
 		.flags = SPI_NOR_QUAD_PP,
 		.fixups = &is25lp256_fixups,
 		.fixup_flags = SPI_NOR_4B_OPCODES,
+	}, {
+		.id = SNOR_ID(0x9d, 0x5b, 0x1b),
+		.name = "is25wx01g",
+		.sector_size = SZ_64K,
+		.size = SZ_128M,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ |
+				 SPI_NOR_OCTAL_READ,
+		.fixup_flags = SPI_NOR_4B_OPCODES,
+		.fixups = &is25wx01g_fixups,
 	}
 };
 

@@ -647,8 +647,19 @@ config MCHP_LAN966X_PCI
 config SIMAAI_MEMORY
 	bool "SiMa.ai SoC family memory management support"
 	depends on ARCH_SIMAAI
+	select DMA_SHARED_BUFFER
 	help
 	  This option enables memory management on SiMa.ai platforms.
+
+config SIMAAI_MEMORY_KUNIT_TEST
+	bool "KUnit tests for SiMa.ai memory DMA-BUF state" if !KUNIT_ALL_TESTS
+	depends on KUNIT && SIMAAI_MEMORY
+	default KUNIT_ALL_TESTS
+	help
+	  Exercises the internal state used by SiMa.ai DMA-BUF exports.
+	  Tests cover allocation provenance, nested attachment mappings,
+	  direction changes, and serialization between buffer export and
+	  memory-device removal.
 
 config SIMAAI_STU
 	bool "SIMAAI STU driver for Modalix board"

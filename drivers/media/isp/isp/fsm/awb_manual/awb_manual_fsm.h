@@ -76,6 +76,10 @@ struct _AWB_fsm_t {
     AWB_state_t state;
     system_fw_interrupt_mask_t irq_mask;
     system_fw_interrupt_mask_t repeat_irq_mask;
+    /* Per-zone stats captured this frame; populated by
+     * awb_read_statistics, consumed by the V4L2 meta-stats publisher.
+     * Previously lived in fw_sbuf->awb_sbuf[idx].stats_data. */
+    awb_zone_t awb_zones[MAX_AWB_ZONES];
     uint16_t curr_AWB_ZONES;
     uint32_t sum;
     uint16_t rg_coef;

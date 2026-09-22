@@ -21,9 +21,15 @@
 #include "system_interrupts.h"
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
-#include <linux/slab.h>         // kmalloc()
+#include <linux/kfifo.h>        // SPSC ring used for IRQ -> BH handoff.
+#include <linux/printk.h>       // pr_warn_ratelimited().
 #include <linux/workqueue.h>    // For bottom half approach.
+#include "acamera_configuration.h" // FIRMWARE_CONTEXT_NUMBER
 #include "acamera_interrupts.h" // For isr_data_t
+#include "acamera_logger.h"     // LOG()
+
+#undef LOG_MODULE
+#define LOG_MODULE LOG_MODULE_GENERIC
 
 volatile uint32_t *mcfe_slot_read = NULL;
 volatile uint32_t *start_status_read = NULL;
@@ -56,11 +62,26 @@ static int m_irq_flags = -1;                  /**< Kernel IRQ flags. */
 static int m_global_flag = 0;                 /**< Unsure what this is used for! */
 static struct workqueue_struct *m_work_queue; /**< linux bottom half work queue. */
 
-/** Work item typedef. Required for bottom half. */
+/* Per-context IRQ→BH staging. One kfifo + one work_struct per ISP
+ * context. Slot id read from the MCFE register indexes directly into
+ * m_irq_ctx[]: FIRMWARE_CONTEXT_NUMBER == ISP_MCFE_MAX_SLOT (16), so
+ * the HW slot number IS the SW context index — no remap needed.
+ *
+ * Each fifo is SPSC by construction: producer is the IRQ handler
+ * (pinned to ISP_CPU_CORE_NUMBER via irq_set_affinity), consumer is
+ * the matching bh_work. The workqueue's max_active is set to
+ * FIRMWARE_CONTEXT_NUMBER so different contexts' bottom halves run
+ * concurrently on different CPUs without contention.
+ */
+#define ISP_IRQ_FIFO_DEPTH 64u
 typedef struct {
-    struct work_struct work; /**< Work struct, required by BH. */
-    isr_data_t data;         /**< Time sensitive data read by ISR, read on IRQ. */
-} isp_work_t;
+    struct kfifo       isr_data_fifo;   /**< SPSC ring of isr_data_t records. */
+    struct work_struct bh_work;         /**< One per context, lifetime = module. */
+    uint32_t           ctx_id;          /**< Slot / context id, set at init. */
+    atomic_t           drops;           /**< FIFO-full counter, ratelimited. */
+} isp_irq_ctx_state_t;
+
+static isp_irq_ctx_state_t m_irq_ctx[FIRMWARE_CONTEXT_NUMBER];
 
 
 void system_set_global_flag( void )
@@ -73,22 +94,38 @@ void system_set_global_flag( void )
 /**
  * @brief      Bottom half handler.
  *
- * @param      work  The work
- *
- * @details    Passes the pointer to #isr_data_t to user handler.
+ * @details    Drains this context's kfifo and dispatches every queued
+ *             isr_data_t record to the registered user handler. Runs
+ *             in workqueue context; never sleeps under a lock.
  */
 static void bh_work_handler( struct work_struct *work )
 {
-    /* Sanity null check. */
+    isp_irq_ctx_state_t *s;
+    isr_data_t           data;
+    unsigned int         drained = 0u;
+
     if ( work == NULL ) return;
 
-    isp_work_t *w = (isp_work_t *)work;
+    s = container_of( work, isp_irq_ctx_state_t, bh_work );
 
-    if ( m_app_handler ) {
-        m_app_handler( (void *)&w->data );
+    while ( kfifo_out( &s->isr_data_fifo, &data, sizeof( data ) ) == sizeof( data ) ) {
+        drained++;
+        LOG( LOG_DEBUG, "BH ctx=%u dispatch #%u slot=%u stats=0x%x mcfe=0x%x sof=0x%x eof=0x%x",
+             (unsigned)s->ctx_id,
+             drained,
+             (unsigned)data.slot,
+             (unsigned)data.regs.stats,
+             (unsigned)data.regs.mcfe,
+             (unsigned)data.regs.sof,
+             (unsigned)data.regs.eof );
+        if ( m_app_handler ) {
+            m_app_handler( (void *)&data );
+        }
     }
-
-    kfree( (void *)work );
+    if ( drained == 0u ) {
+        LOG( LOG_DEBUG, "BH ctx=%u ran with empty fifo (spurious wakeup)",
+             (unsigned)s->ctx_id );
+    }
 }
 
 /**
@@ -107,36 +144,48 @@ static void bh_work_handler( struct work_struct *work )
  */
 static irqreturn_t system_interrupt_handler( int irq, void *dev_id )
 {
+    isr_data_t data;
+    isp_irq_ctx_state_t *s;
+
     (void)irq;    // Unused.
     (void)dev_id; // Unused.
 
-    /* Allocate work item using ATOMIC since we are running in ISR context. */
-    isp_work_t *w_item = (isp_work_t *)kmalloc( sizeof( isp_work_t ), GFP_ATOMIC );
+    /* Read & ack the hardware first — we own this IRQ once we've acked it. */
+    data.slot = acamera_interrupt_read_current_slot();
+    data.regs = acamera_interrupt_read_acknowledge();
 
-	//printk("Interrupt recieved %d", irq);
+    LOG( LOG_DEBUG, "ISR slot=%u stats=0x%x mcfe=0x%x sof=0x%x eof=0x%x",
+         (unsigned)data.slot,
+         (unsigned)data.regs.stats,
+         (unsigned)data.regs.mcfe,
+         (unsigned)data.regs.sof,
+         (unsigned)data.regs.eof );
 
-    if ( w_item == NULL ) {
-        /* Failed to allocate work item. Ensure we acknowledged the interrupts
-         * anyway but ignore the results. */
-        (void)acamera_interrupt_read_acknowledge();
-        printk( KERN_CRIT "Failed to allocate work item for bottom half handler!" );
-        return IRQ_NONE;
+    /* HW MCFE slot id maps 1:1 to SW context: FIRMWARE_CONTEXT_NUMBER ==
+     * ISP_MCFE_MAX_SLOT (16). An out-of-range slot would mean the HW
+     * register is corrupt — we still need to ack the IRQ (already done
+     * above), so just drop the record. */
+    if ( data.slot >= FIRMWARE_CONTEXT_NUMBER ) {
+        pr_warn_ratelimited( "ISP IRQ slot %u out of range (max %u), dropping\n",
+                             (unsigned)data.slot, FIRMWARE_CONTEXT_NUMBER - 1u );
+        return IRQ_HANDLED;
     }
 
-    INIT_WORK( (struct work_struct *)w_item, bh_work_handler );
+    s = &m_irq_ctx[data.slot];
 
-    // Read ISP registers.
-    w_item->data.slot = acamera_interrupt_read_current_slot();
-    w_item->data.regs = acamera_interrupt_read_acknowledge();
-
-    if ( queue_work( m_work_queue, (struct work_struct *)w_item ) == 0 ) {
-        // Failed to enqueue, free to avoid memory leak.
-        kfree( (void *)w_item );
-        printk( KERN_CRIT "Failed to enqueue work item for bottom half handler!" );
-        return IRQ_NONE;
+    /* SPSC fast path: no alloc, no spinlock — one IRQ producer per fifo
+     * (pinned to ISP_CPU_CORE_NUMBER), one consumer (this ctx's
+     * bh_work). On overflow the record is dropped (already acked at
+     * HW) and the per-context counter is bumped. */
+    if ( kfifo_in( &s->isr_data_fifo, &data, sizeof( data ) ) != sizeof( data ) ) {
+        atomic_inc( &s->drops );
+        pr_warn_ratelimited( "ISP ctx %u IRQ FIFO full, drops=%u\n",
+                             (unsigned)data.slot,
+                             (unsigned)atomic_read( &s->drops ) );
+        return IRQ_HANDLED;
     }
 
-    // Succeeded to queue up work.
+    queue_work( m_work_queue, &s->bh_work );
     return IRQ_HANDLED;
 }
 
@@ -151,6 +200,8 @@ void system_interrupts_set_irq( void *pdev, int irq_num, int flags )
 int system_interrupts_init( void )
 {
 	cpumask_t mask;
+	uint32_t i;
+	int rc_kfifo;
 
     if ( m_interrupt_request_status != ISP_IRQ_STATUS_DEINIT ) {
         /* Interrupts are already initialized. */
@@ -163,13 +214,39 @@ int system_interrupts_init( void )
         return -EINVAL;
     }
 
+    /* Per-context IRQ staging: one kfifo + one work_struct per context.
+     * Allocated up front so the IRQ path never calls kmalloc. */
+    for ( i = 0u; i < FIRMWARE_CONTEXT_NUMBER; i++ ) {
+        rc_kfifo = kfifo_alloc( &m_irq_ctx[i].isr_data_fifo,
+                                ISP_IRQ_FIFO_DEPTH * sizeof( isr_data_t ),
+                                GFP_KERNEL );
+        if ( rc_kfifo != 0 ) {
+            printk( KERN_CRIT "Failed to alloc IRQ fifo for ctx %u (rc=%d).", i, rc_kfifo );
+            while ( i-- > 0u ) {
+                kfifo_free( &m_irq_ctx[i].isr_data_fifo );
+            }
+            return -ENOMEM;
+        }
+        INIT_WORK( &m_irq_ctx[i].bh_work, bh_work_handler );
+        m_irq_ctx[i].ctx_id = i;
+        atomic_set( &m_irq_ctx[i].drops, 0 );
+    }
+
     /// @note       Be careful when changing workqueue type, this will affect
     ///             performance of the system and may cause MCFE output
     ///             overflow!
+    ///
+    /// max_active = FIRMWARE_CONTEXT_NUMBER so different contexts' bottom
+    /// halves can run on different CPUs concurrently. Each work_struct is
+    /// distinct (one per ctx) and each consumes its own SPSC kfifo.
 	m_work_queue = alloc_workqueue( "isp_bh_queue",
-						WQ_UNBOUND | WQ_HIGHPRI | WQ_CPU_INTENSIVE | WQ_SYSFS | WQ_MEM_RECLAIM, 1);
+						WQ_UNBOUND | WQ_HIGHPRI | WQ_CPU_INTENSIVE | WQ_SYSFS | WQ_MEM_RECLAIM,
+						FIRMWARE_CONTEXT_NUMBER );
     if ( m_work_queue == NULL ) {
         printk( KERN_CRIT "Failed to allocate memory for bottom half work queue." );
+        for ( i = 0u; i < FIRMWARE_CONTEXT_NUMBER; i++ ) {
+            kfifo_free( &m_irq_ctx[i].isr_data_fifo );
+        }
         return -ENOMEM;
     }
 
@@ -181,8 +258,10 @@ int system_interrupts_init( void )
 
     if ( rc != 0 ) {
         printk( KERN_CRIT "Failed to register IRQ." );
-        /* Failed to request the irq, destroy the workqueue to avoid leaks. */
         destroy_workqueue( m_work_queue );
+        for ( i = 0u; i < FIRMWARE_CONTEXT_NUMBER; i++ ) {
+            kfifo_free( &m_irq_ctx[i].isr_data_fifo );
+        }
         return rc;
     }
 
@@ -190,12 +269,18 @@ int system_interrupts_init( void )
 	cpumask_set_cpu(ISP_CPU_CORE_NUMBER, &mask);
 	irq_set_affinity(m_irq_num, &mask);
 
+    LOG( LOG_NOTICE, "system_interrupts_init: %u ctx fifos x %u records each, irq=%d on CPU%d",
+         (unsigned)FIRMWARE_CONTEXT_NUMBER, (unsigned)ISP_IRQ_FIFO_DEPTH,
+         m_irq_num, ISP_CPU_CORE_NUMBER );
+
     m_interrupt_request_status = ISP_IRQ_STATUS_ENABLED;
     return 0;
 }
 
 void system_interrupts_deinit( void )
 {
+    uint32_t i;
+    unsigned int total_drops = 0u;
 
     if ( m_interrupt_request_status == ISP_IRQ_STATUS_DEINIT ) {
         printk( KERN_WARNING "Interrupts are already deinit'd." );
@@ -203,13 +288,25 @@ void system_interrupts_deinit( void )
     }
     system_interrupts_disable();
 
-    /* Runs all items on the work queue. */
-    flush_workqueue( m_work_queue );
+    /* Free the IRQ first so no new records can be pushed into the fifos
+     * while we're tearing them down. */
+    free_irq( m_irq_num, m_vdev );
 
-    /* Safely destroys the workqueue, all work will be ran (hence deallocated). */
+    /* Drain any pending bottom halves, then destroy the workqueue. After
+     * destroy_workqueue() returns no bh_work_handler can be running. */
+    flush_workqueue( m_work_queue );
     destroy_workqueue( m_work_queue );
 
-    free_irq( m_irq_num, m_vdev );
+    /* Safe to release the per-context kfifos now: no producer (IRQ freed)
+     * and no consumer (workqueue destroyed). */
+    for ( i = 0u; i < FIRMWARE_CONTEXT_NUMBER; i++ ) {
+        total_drops += (unsigned)atomic_read( &m_irq_ctx[i].drops );
+        kfifo_free( &m_irq_ctx[i].isr_data_fifo );
+    }
+
+    LOG( LOG_DEBUG, "system_interrupts_deinit: total drops across %u ctx fifos = %u",
+         (unsigned)FIRMWARE_CONTEXT_NUMBER, total_drops );
+
     m_interrupt_request_status = ISP_IRQ_STATUS_DEINIT;
 }
 

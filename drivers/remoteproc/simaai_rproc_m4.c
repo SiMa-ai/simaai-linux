@@ -11,7 +11,9 @@
 #include <linux/of_device.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
+#include <linux/clk.h>
 #include <linux/pm_runtime.h>
+#include <linux/devfreq.h>
 #include <linux/remoteproc.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/dma-mapping.h>
@@ -132,6 +134,9 @@ struct sima_rproc {
 	int is_rtc_only;
 	struct simaai_rproc_config *config;
 	struct sima_dev char_dev;
+	struct clk *mlaclk;
+	struct clk *mlapll;
+	struct devfreq  *df;
 };
 
 #define SIMAAI_MLAMEM_REV 1
@@ -343,9 +348,20 @@ static long simaai_ioctl(struct file *filep, unsigned int cmd, unsigned long arg
 static int simaai_open(struct inode *inode, struct file *filep)
 {
 	struct sima_dev *char_dev = container_of(filep->private_data, struct sima_dev, miscdev);
+	int ret;
 
 	filep->private_data = char_dev;
+	ret = pm_runtime_resume_and_get(char_dev->miscdev.parent);
+	if (ret < 0)
+		return ret;
+	return 0;
+}
 
+static int simaai_release(struct inode *inode, struct file *filep)
+{
+	struct sima_dev *char_dev = filep->private_data;
+
+	pm_runtime_put(char_dev->miscdev.parent);
 	return 0;
 }
 
@@ -355,6 +371,7 @@ static const struct file_operations sima_fops = {
 	.unlocked_ioctl = simaai_ioctl,
 	.open			= simaai_open,
 	.llseek			= noop_llseek,
+	.release		= simaai_release,
 };
 
 static int chr_dev_init(struct rproc *rproc)
@@ -379,6 +396,7 @@ static int chr_dev_init(struct rproc *rproc)
 	char_dev->miscdev.minor = MISC_DYNAMIC_MINOR;
 	char_dev->miscdev.name  = SIMAAI_MLAMEM_DEV_NAME;
 	char_dev->miscdev.fops  = &sima_fops;
+	char_dev->miscdev.parent = dev;
 
 	ret = misc_register(&char_dev->miscdev);
 	if (ret) {
@@ -421,6 +439,7 @@ static int sima_rproc_start(struct rproc *rproc)
 
 	val = readl(addr);
 	writel(val & (~(data->m4_reset_mask)), addr);
+
 	dev_dbg(dev, "Started M4.\n");
 
 	iounmap(addr);
@@ -475,8 +494,13 @@ static int sima_rproc_elf_load(struct rproc *rproc, const struct firmware *fw)
 		dev_err(dev, "No device match data found\n");
 		return -ENODEV;
 	}
+
 	addr = ioremap(data->prc_base_addr, 0x1000);
 
+	if (pm_runtime_resume_and_get(dev) < 0) {
+		iounmap(addr);
+		return -ENODEV;
+	}
 	val = readl(addr + data->prc_mla_ck_rst_offset);
 	val |= data->mla_clk_en_mask;
 	writel(val, addr + data->prc_mla_ck_rst_offset);
@@ -503,6 +527,7 @@ static int sima_rproc_elf_load(struct rproc *rproc, const struct firmware *fw)
 		return -ENODEV;
 	}
 
+	pm_runtime_put(dev);
 	iounmap(sram);
 	return rproc_elf_load_segments(rproc, fw);
 }
@@ -566,6 +591,70 @@ static int sima_parse_fw(struct rproc *rproc, const struct firmware *fw)
 	return sima_rproc_elf_load_rsc_table(rproc, fw);
 }
 
+/**
+ * mla_devfreq_target() - devfreq target callback, scale the MLA PLL
+ * @dev:   the devfreq device (the rproc platform device)
+ * @freq:  in/out, requested frequency in Hz; updated to the chosen OPP rate
+ * @flags: devfreq frequency-selection flags
+ *
+ * Snaps the requested frequency to a supported OPP and reprograms the MLA PLL
+ * to that rate. Driven by the userspace governor.
+ *
+ * Return: 0 on success or a negative errno from the OPP lookup / clk_set_rate().
+ */
+
+static int mla_devfreq_target(struct device *dev, unsigned long *freq,
+				u32 flags)
+{
+	struct rproc *rproc = dev_get_drvdata(dev);
+	struct sima_rproc *sproc = rproc->priv;
+	struct dev_pm_opp *opp;
+	int ret;
+
+	opp = devfreq_recommended_opp(dev, freq, flags);
+	if (IS_ERR(opp))
+		return PTR_ERR(opp);
+	dev_pm_opp_put(opp);
+
+	ret = clk_set_rate(sproc->mlapll, *freq);
+
+	return ret;
+}
+
+/**
+ * mla_devfreq_get_cur_freq() - devfreq callback, report the current MLA rate
+ * @dev:  the devfreq device (the rproc platform device)
+ * @freq: out, the current frequency in Hz
+ *
+ * Return: 0 always.
+ */
+
+static int mla_devfreq_get_cur_freq(struct device *dev, unsigned long *freq)
+{
+	struct rproc *rproc = dev_get_drvdata(dev);
+	struct sima_rproc *sproc = rproc->priv;
+	struct dev_pm_opp *opp;
+	unsigned long rate;
+
+	rate = clk_get_rate(sproc->mlapll);
+
+	/* round to nearest OPP so devfreq stats can find it */
+	opp = dev_pm_opp_find_freq_ceil(dev, &rate);
+	if (!IS_ERR(opp))
+		dev_pm_opp_put(opp);
+
+	/* if no OPP ≥ rate, just leave rate as the raw clk_get_rate value */
+	*freq = rate;
+
+	return 0;
+}
+
+static struct devfreq_dev_profile mla_devfreq_profile = {
+	.target        = mla_devfreq_target,
+	.get_cur_freq  = mla_devfreq_get_cur_freq,
+	.polling_ms    = 0,    /* userspace governor doesn't poll */
+};
+
 static const struct rproc_ops sima_rproc_ops = {
 	.start					= sima_rproc_start,
 	.stop					= sima_rproc_stop,
@@ -594,6 +683,8 @@ static int sima_rproc_probe(struct platform_device *pdev)
 	struct rproc *rproc;
 	struct resource *res;
 	int ret, i;
+	struct dev_pm_opp *opp;
+	unsigned long init_rate;
 
 	ret = of_property_read_string(dev->of_node, "simaai,pm-firmware", &fw_name);
 	if (ret) {
@@ -644,7 +735,50 @@ static int sima_rproc_probe(struct platform_device *pdev)
 		goto err_put_rproc;
 	}
 
+	sproc->mlaclk = devm_clk_get(&pdev->dev, "gate");
+	if (IS_ERR(sproc->mlaclk)) {
+		dev_err_probe(&pdev->dev, PTR_ERR(sproc->mlaclk), "no gate clock\n");
+		goto err_put_rproc;
+	}
+
+	sproc->mlapll = devm_clk_get(&pdev->dev, "pll");
+	if (IS_ERR(sproc->mlapll)) {
+		dev_err_probe(&pdev->dev, PTR_ERR(sproc->mlapll), "no PLL clock\n");
+		goto err_put_rproc;
+	}
+
+	/* PLL clock scaled by devfreq. */
+	ret = devm_pm_opp_of_add_table(&pdev->dev);
+	if (ret) {
+		dev_err_probe(&pdev->dev, ret, "failed to add OPP table\n");
+		goto err_put_rproc;
+	}
+
+	/* Seed devfreq's initial frequency from the PLL's current rate. */
+	init_rate = clk_get_rate(sproc->mlapll);
+
+	opp = dev_pm_opp_find_freq_ceil(&pdev->dev, &init_rate);
+	if (!IS_ERR(opp))
+		dev_pm_opp_put(opp);
+
+	mla_devfreq_profile.initial_freq = init_rate;
+	sproc->df = devm_devfreq_add_device(&pdev->dev, &mla_devfreq_profile,
+				    DEVFREQ_GOV_USERSPACE, NULL);
+	if (IS_ERR(sproc->df)) {
+		dev_err_probe(&pdev->dev, PTR_ERR(sproc->df),
+			 "devfreq registration failed\n");
+		goto err_put_rproc;
+	}
+
+	ret = clk_prepare_enable(sproc->mlaclk);
+	if (ret)
+		goto err_put_rproc;
+
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
+
 	dev_dbg(dev, "Successfully added rproc handle\n");
+	return 0;
 
 err_put_rproc:
 	rproc_free(rproc);
@@ -655,6 +789,15 @@ err:
 static void sima_rproc_remove(struct platform_device *pdev)
 {
 	struct rproc *rproc = platform_get_drvdata(pdev);
+	struct sima_rproc *sproc = rproc->priv;
+
+	pm_runtime_disable(&pdev->dev);
+	/* Balance the clk_prepare_enable() from probe, but only if a
+	 * runtime suspend hasn't already dropped it.
+	 */
+	if (!pm_runtime_status_suspended(&pdev->dev))
+		clk_disable_unprepare(sproc->mlaclk);
+	pm_runtime_set_suspended(&pdev->dev);
 
 	chr_dev_exit(rproc);
 	rproc_del(rproc);
@@ -662,20 +805,53 @@ static void sima_rproc_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM
-static int sima_rpm_suspend(struct device *dev)
+static int sima_pm_suspend(struct device *dev)
 {
 	return -EBUSY;
 }
 
-static int sima_rpm_resume(struct device *dev)
+static int sima_pm_resume(struct device *dev)
 {
 	return 0;
 }
 #endif
 
+/**
+ * sima_mla_runtime_resume() - runtime-PM resume callback
+ * @dev: the rproc platform device
+ *
+ * Return: 0 on success or a negative errno from clk_prepare_enable().
+ */
+
+static int __maybe_unused sima_mla_runtime_resume(struct device *dev)
+{
+	struct rproc *rproc = dev_get_drvdata(dev);
+	struct sima_rproc *srproc = rproc->priv;
+
+	return clk_prepare_enable(srproc->mlaclk);
+}
+
+/**
+ * sima_mla_runtime_suspend() - runtime-PM suspend callback
+ * @dev: the rproc platform device
+ *
+ * Return: 0 always.
+ */
+
+static int __maybe_unused sima_mla_runtime_suspend(struct device *dev)
+{
+	struct rproc *rproc = dev_get_drvdata(dev);
+	struct sima_rproc *srproc = rproc->priv;
+
+	clk_disable_unprepare(srproc->mlaclk);
+	return 0;
+}
+
 static const struct dev_pm_ops sima_rproc_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(sima_rpm_suspend, sima_rpm_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(sima_pm_suspend, sima_pm_resume)
+	SET_RUNTIME_PM_OPS(sima_mla_runtime_suspend, sima_mla_runtime_resume, NULL)
 };
+
 
 static struct platform_driver sima_rproc_driver = {
 	.probe = sima_rproc_probe,

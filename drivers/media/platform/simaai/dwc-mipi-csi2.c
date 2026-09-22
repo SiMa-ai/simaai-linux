@@ -9,12 +9,17 @@
 #include <linux/errno.h>
 #include <linux/iopoll.h>
 #include <linux/kernel.h>
+#include <linux/ktime.h>
+#include <linux/math64.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
+#include <linux/delay.h>
+#include <linux/ratelimit.h>
 
 #include <media/mipi-csi2.h>
 #include <media/v4l2-ctrls.h>
@@ -23,6 +28,12 @@
 #include <media/v4l2-mc.h>
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-dv-timings.h>
+
+#define SECS_PER_MIN 60
+
+/* Driver-private V4L2 control IDs */
+#define V4L2_CID_DWC_CSI2_IPI_CTRL_MODE	(V4L2_CID_USER_BASE + 0x1000)
+#define V4L2_CID_DWC_CSI2_IPI_EMB_DATA_EN	(V4L2_CID_USER_BASE + 0x1001)
 
 /* MIPI CSI-2 Host Controller Registers Define */
 
@@ -48,8 +59,26 @@
 #define   CSI2RX_INT_ST_MAIN_ERR_DID			BIT(6)
 #define   CSI2RX_INT_ST_MAIN_ERR_ECC			BIT(7)
 #define   CSI2RX_INT_ST_MAIN_ERR_PHY			BIT(16)
+#define   CSI2RX_INT_ST_MAIN_ERR_LINE			BIT(17)
 #define   CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI		BIT(18)
+#define   CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI2		BIT(19)
+#define   CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI3		BIT(20)
+#define   CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI4		BIT(21)
+#define   CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI5		BIT(22)
+#define   CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI6		BIT(23)
+#define   CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI7		BIT(24)
+#define   CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI8		BIT(25)
 
+/* Payload CRC Fatal - status/mask/force triplet*/
+#define CSI2RX_INT_ST_PLD_CRC_FATAL 0x2b0
+#define CSI2RX_INT_MSK_PLD_CRC_FATAL 0x2b4
+#define CSI2RX_INT_FORCE_PLD_CRC_FATAL 0x2b8
+#define CSI2RX_INT_ST_PLD_CRC_FATAL_ERR BIT(0)
+
+/* Fatal Interruption caused by Frame CRC - status/mask/force triplet */
+#define CSI2RX_INT_ST_CRC_FRAME_FATAL 0x2a0
+#define CSI2RX_INT_MSK_CRC_FRAME_FATAL 0x2a4
+#define CSI2RX_INT_FORCE_CRC_FRAME_FATAL 0x2a8
 /* Data monitor */
 #define CSI2RX_DATA_IDS_1_DT				0x10
 #define   CSI2RX_DATA_IDS_1_DT_DATA_ID0(x)		FIELD_PREP(GENMASK(5, 0), (x))
@@ -134,11 +163,11 @@
 #define   CSI2RX_PPI_PG_STATUS_ACTIVE			BIT(0)
 
 /* IPI Mode */
-#define CSI2RX_IPI1_MODE				0x80
-#define CSI2RX_IPI2_MODE				0x200
-#define CSI2RX_IPI3_MODE				0x220
-#define CSI2RX_IPI4_MODE				0x240
-#define   CSI2RX_IPI_MODE_CONTROLLER			BIT(1)
+#define  CSI2RX_IPI1_MODE				0x80
+#define  CSI2RX_IPI2_MODE				0x200
+#define  CSI2RX_IPI3_MODE				0x220
+#define  CSI2RX_IPI4_MODE				0x240
+#define   CSI2RX_IPI_MODE_CONTROLLER			BIT(0)
 #define   CSI2RX_IPI_MODE_COLOR_MODE16			BIT(8)
 #define   CSI2RX_IPI_MODE_CUT_THROUGH			BIT(16)
 #define   CSI2RX_IPI_MODE_ENABLE			BIT(24)
@@ -402,9 +431,14 @@
 #define DWC_CSI2RX_DEF_HSA_TIME				0x10
 #define DWC_CSI2RX_DEF_HBP_TIME				0xc8
 #define DWC_CSI2RX_DEF_HSD_TIME				0x10
+/* Fixed HSD time programmed into the IPI HSD_TIME register */
+#define DWC_CSI2RX_HSD_TIME				10
 #define DWC_CSI2RX_DEF_VSA_LINES			0x2
 #define DWC_CSI2RX_DEF_VBP_LINES			0x2
 #define DWC_CSI2RX_DEF_VFP_LINES			0xf
+
+/* Default IPI enable delay (ms) if not overridden by the deserializer DT node */
+#define DWC_CSI2RX_IPI_ENABLE_DELAY_MS			0
 
 struct dwc_csi_event {
 	u32 mask;
@@ -423,11 +457,33 @@ static const struct dwc_csi_event dwc_events[] = {
 	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_BNDRY_FRAMEL, "Frame Boundaries Fatal Error" },
 	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_PKT, "Packet Construction Fatal Error" },
 	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_PHY, "PHY Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_ERR_LINE, "Line Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI2, "IPI2 Interface Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI3, "IPI3 Interface Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI4, "IPI4 Interface Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI5, "IPI5 Interface Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI6, "IPI6 Interface Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI7, "IPI7 Interface Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI8, "IPI8 Interface Fatal Error" },
 };
 
-#define DWC_NUM_EVENTS		ARRAY_SIZE(dwc_events)
-#define DWC_EVENT_MASK		0x500ff
-#define DWC_STOPSTATE_TIMEOUT	1000000
+#define DWC_NUM_EVENTS ARRAY_SIZE(dwc_events)
+#define DWC_EVENT_MASK                                                         \
+	(CSI2RX_INT_ST_MAIN_FATAL_ERR_PHY | CSI2RX_INT_ST_MAIN_FATAL_ERR_PKT | \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_BNDRY_FRAMEL |                           \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_SEQ_FRAME |                              \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_CRC_FRAME |                              \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_PLD_CRC | CSI2RX_INT_ST_MAIN_ERR_DID |   \
+	 CSI2RX_INT_ST_MAIN_ERR_ECC | CSI2RX_INT_ST_MAIN_ERR_PHY |             \
+	 CSI2RX_INT_ST_MAIN_ERR_LINE | CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI |      \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI2 |                                   \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI3 |                                   \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI4 |                                   \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI5 |                                   \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI6 |                                   \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI7 |                                   \
+	 CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI8)
+#define DWC_STOPSTATE_TIMEOUT 1000000
 
 struct dwc_csi_pix_format {
 	u32 code;
@@ -449,6 +505,7 @@ struct dwc_csi_device {
 	void __iomem *regs;
 	void __iomem *glue;
 	struct phy *phy;
+	int irq;
 	struct clk_bulk_data *clks;
 	int num_clks;
 	struct v4l2_subdev sd;
@@ -462,7 +519,12 @@ struct dwc_csi_device {
 	struct v4l2_mbus_config_mipi_csi2 bus;
 	u32 cfgclkfreqrange;
 	u32 hsfreqrange;
+	/* MIPI D-PHY link frequency (Hz), used to program the PHY HS clock */
+	s64 link_freq;
 	u64 enabled_streams;
+
+	/* Delay before enabling the IPI interface, from deserializer DT node */
+	u32 ipi_enable_delay_ms;
 
 	/* Use driver mutex lock for the ctrl lock */
 	struct mutex lock;
@@ -471,10 +533,40 @@ struct dwc_csi_device {
 	const struct dwc_csi_pix_format *csi_fmt;
 	struct v4l2_dv_timings dv_tmg;
 
-	/* Used for deferred polling of stopstate */
+	/* Rate limiter for CRC error live logging */
+	struct ratelimit_state crc_err_rs;
+
+	/*
+	 * Private high-priority WQ: stop-state (LP-11) poll, deferred IPI
+	 * enable, and IPI-overflow recovery.
+	 */
 	struct workqueue_struct *wq;
 	struct work_struct work;
 	int poll_state;
+
+	/* Deferred IPI enable, used when an enable delay is configured */
+	struct delayed_work ipi_work;
+	/* IPI timing mode: false = camera timing (default), true = controller */
+	bool ipi_mode_controller;
+
+	/* Enable embedded data on IPI data type register */
+	bool ipi_emb_data_en;
+
+	/*
+	 * IPI-overflow recovery (SOCSW-5392). On the IPI Interface Fatal IRQ
+	 * (CSI pixel overflow when the video DMA halts on an invalid LLI) the
+	 * hardirq schedules ovf_recover_work, which resets the CSI + glue and
+	 * then asks the downstream DMA to resume via ovf_resume() (registered by
+	 * the vdma capture driver, which owns the dma_chan). Rate-limited so a
+	 * persistent fault can't reset-storm.
+	 */
+	struct work_struct ovf_recover_work;
+	void (*ovf_quiesce)(void *data);
+	void (*ovf_resume)(void *data);
+	void *ovf_resume_data;
+	bool streaming;
+	unsigned int ovf_recover_count;
+	ktime_t ovf_last_recover_time;	/* monotonic time of the last recovery, for decay */
 
 	/* Used for pattern generator */
 	bool pg_enable;
@@ -805,7 +897,7 @@ static void dwc_csi_ipi_enable(struct dwc_csi_device *csidev)
 	u32 mask = 0xf;
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(ipi_regs); i++)
+	for (i = 0; i < ARRAY_SIZE(ipi_regs); i++) {
 		if ((mask) & (1 << i)) {
 			/* Memory is automatically flushed at each Frame Start */
 			val = CSI2RX_IPI_MEM_FLUSH_AUTO;
@@ -820,6 +912,15 @@ static void dwc_csi_ipi_enable(struct dwc_csi_device *csidev)
 			dwc_gluen_write(csidev, PXL_CNT_CTRL, i, val);
 			dwc_gluen_write(csidev, STAT_CTRL, i, 0);
 		}
+	}
+}
+
+static void dwc_csi_delayed_ipi_enable(struct work_struct *work)
+{
+	struct dwc_csi_device *csidev =
+		container_of(work, struct dwc_csi_device, ipi_work.work);
+
+	dwc_csi_ipi_enable(csidev);
 }
 
 static void dwc_csi_ipi_disable(struct dwc_csi_device *csidev)
@@ -839,19 +940,88 @@ static void dwc_csi_ipi_disable(struct dwc_csi_device *csidev)
 		}
 }
 
-static void dwc_csi_device_ipi_config(struct dwc_csi_device *csidev)
+/*
+ * Convert a horizontal interval given in pixels into nanoseconds, referenced
+ * to the MIPI clock. The dv-timings supply HSYNC, HFP and HBP in pixels, and
+ * the IPI timing registers (HSA_TIME / HBP_TIME / HLINE_TIME) are programmed
+ * as a time in ns:
+ *
+ *   time_ns = (Pixels * 1e9) / mipi_clock(Hz)
+ *
+ * The reference clock comes from bt.pixelclock, which is the MIPI clock (not
+ * the sensor pixel clock) provided through the device tree
+ * (simaai,bt-pixelclock, e.g. 500000000 for 500 MHz).
+ */
+static u32 dwc_csi_pixels_to_ns(struct dwc_csi_device *csidev, u32 pixels)
+{
+	u64 pixelclock = csidev->dv_tmg.bt.pixelclock;
+
+	if (!pixelclock)
+		return 0;
+
+	return div_u64((u64)pixels * 1000000000ULL, pixelclock);
+}
+
+/*
+ * Calculate the IPI horizontal active PHY time, i.e. the time to receive the
+ * active pixels over the D-PHY:
+ *
+ *   Hactive_phy_time = (Frame Width * Data type * 1000) /
+ *                      (Data Rate * No. of Lanes)
+ *
+ *   Frame Width  - active horizontal resolution in pixels
+ *   Data type    - bits per pixel of the CSI data type
+ *   Data Rate    - D-PHY data rate per lane in Mbps (2 * link freq, DDR)
+ *   No. of Lanes - number of active MIPI data lanes
+ */
+static u32 dwc_csi_calc_hactive_phy_time(struct dwc_csi_device *csidev, u32 width)
+{
+	const struct dwc_csi_pix_format *csi_fmt = csidev->csi_fmt;
+	u32 num_lanes = csidev->bus.num_data_lanes;
+	u64 data_rate_mbps;
+
+	/* MIPI D-PHY data rate per lane (Mbps) = 2 * link frequency (DDR) */
+	data_rate_mbps = div_u64(csidev->link_freq * 2, 1000000);
+
+	if (!data_rate_mbps || !num_lanes)
+		return 0;
+
+	return div_u64((u64)width * csi_fmt->width * 1000,
+		       data_rate_mbps * num_lanes);
+}
+
+static void dwc_csi_device_ipi_config(struct dwc_csi_device *csidev,
+				      struct v4l2_subdev_state *state)
 {
 	const struct dwc_csi_pix_format *csi_fmt = csidev->csi_fmt;
 	const struct v4l2_bt_timings *bt_tmg = &csidev->dv_tmg.bt;
+	const struct v4l2_mbus_framefmt *fmt;
+	u32 hsa_time, hbp_time, hfp_time, hactive_time;
+	u32 hline_time;
+	u32 width, height;
 	u32 val = 0;
 	u32 mask = 0xf;
 	int i;
+
+	/* Active resolution comes from the format set through .set_fmt */
+	fmt = v4l2_subdev_state_get_format(state, DWC_CSI2RX_PAD_SINK, 0);
+	width = fmt->width;
+	height = fmt->height;
+
+	/* HSYNC/HBP/HFP come from dv-timings in pixels; convert to ns at pixel clock */
+	hsa_time = dwc_csi_pixels_to_ns(csidev, bt_tmg->hsync);
+	hbp_time = dwc_csi_pixels_to_ns(csidev, bt_tmg->hbackporch);
+	hfp_time = dwc_csi_pixels_to_ns(csidev, bt_tmg->hfrontporch);
+	/* Hactive uses the D-PHY active receive time */
+	hactive_time = dwc_csi_calc_hactive_phy_time(csidev, width);
+	dev_dbg(csidev->dev, "HACTIVE_TIME: %u\n", hactive_time);
 
 	for (i = 0; i < ARRAY_SIZE(ipi_regs); i++)
 		if ((mask) & (1 << i)) {
 			/* Select virtual channel and data type to be processed by IPI */
 			val = CSI2RX_IPI_DATA_TYPE_DT(csi_fmt->data_type);
-			val |= CSI2RX_IPI_DATA_TYPE_EMB_DATA_EN;
+			if (csidev->ipi_emb_data_en)
+				val |= CSI2RX_IPI_DATA_TYPE_EMB_DATA_EN;
 			dwc_ipi_write(csidev, DATA_TYPE, i, val);
 
 			/* Set virtual channel 0 as default */
@@ -863,7 +1033,10 @@ static void dwc_csi_device_ipi_config(struct dwc_csi_device *csidev)
 			 * to be non-continuous when pixel interface FIFO is empty
 			 */
 			val = dwc_ipi_read(csidev, MODE, i);
-			val &= ~CSI2RX_IPI_MODE_CONTROLLER;
+			if (csidev->ipi_mode_controller)
+				val |= CSI2RX_IPI_MODE_CONTROLLER;
+			else
+				val &= ~CSI2RX_IPI_MODE_CONTROLLER;
 			val &= ~CSI2RX_IPI_MODE_COLOR_MODE16;
 			val |= CSI2RX_IPI_MODE_CUT_THROUGH;
 			dwc_ipi_write(csidev, MODE, i, val);
@@ -874,27 +1047,33 @@ static void dwc_csi_device_ipi_config(struct dwc_csi_device *csidev)
 	val |= CSI2RX_IPI_ADV_FEATURES_SYNC_VIDEO_PKT;
 	val |= CSI2RX_IPI_ADV_FEATURES_SYNC_EMBEDDED_PKT;
 
-	///TODO: Implement calculation of these parameters
 	for (i = 0; i < ARRAY_SIZE(ipi_regs); i++)
 		if ((mask) & (1 << i)) {
 			dwc_ipi_write(csidev, HSA_TIME, i,
-				CSI2RX_IPI_HSA_TIME_VAL(bt_tmg->hsync));
+				CSI2RX_IPI_HSA_TIME_VAL(hsa_time));
 			dwc_ipi_write(csidev, HBP_TIME, i,
-				CSI2RX_IPI_HBP_TIME_VAL(bt_tmg->hbackporch));
+				CSI2RX_IPI_HBP_TIME_VAL(hbp_time));
+			/* HSD time is fixed to a constant */
 			dwc_ipi_write(csidev, HSD_TIME, i,
-				CSI2RX_IPI_HSD_TIME_VAL(bt_tmg->hfrontporch));
+				CSI2RX_IPI_HSD_TIME_VAL(DWC_CSI2RX_HSD_TIME));
 			dwc_ipi_write(csidev, ADV_FEATURES, i, val);
 		}
 
-	val = CSI2RX_IPI_HLINE_TIME_VAL(V4L2_DV_BT_FRAME_WIDTH(bt_tmg));
+	/* HLINE_TIME = HSA + HBP + HFP + Hactive PHY time */
+	hline_time = hsa_time + hbp_time + hfp_time + hactive_time;
+	if (csidev->ipi_mode_controller)
+		dev_info(csidev->dev,
+			 "hsa_time: %u, hbp_time: %u, hfp_time: %u, hactive_time: %u, hline_time: %u, width: %u, height: %u\n",
+			 hsa_time, hbp_time, hfp_time, hactive_time, hline_time, width, height);
+	val = CSI2RX_IPI_HLINE_TIME_VAL((u32)(hline_time/2));
 	dwc_csi_write(csidev, CSI2RX_IPI_HLINE_TIME, val);
 	val = CSI2RX_IPI_VSA_LINES_VAL(bt_tmg->vsync);
 	dwc_csi_write(csidev, CSI2RX_IPI_VSA_LINES, val);
-	val = CSI2RX_IPI_VBP_LINES_VAL(bt_tmg->hbackporch);
+	val = CSI2RX_IPI_VBP_LINES_VAL(bt_tmg->vbackporch);
 	dwc_csi_write(csidev, CSI2RX_IPI_VBP_LINES, val);
 	val = CSI2RX_IPI_VFP_LINES_VAL(bt_tmg->vfrontporch);
 	dwc_csi_write(csidev, CSI2RX_IPI_VFP_LINES, val);
-	val = CSI2RX_IPI_VACTIVE_LINES_VAL(V4L2_DV_BT_FRAME_HEIGHT(bt_tmg));
+	val = CSI2RX_IPI_VACTIVE_LINES_VAL(height);
 	dwc_csi_write(csidev, CSI2RX_IPI_VACTIVE_LINES, val);
 	dwc_csi_write(csidev, CSI2RX_VIRTUAL_CHANNEL_EXT, 0x0);
 
@@ -918,20 +1097,20 @@ static void dwc_csi_device_ipi_config(struct dwc_csi_device *csidev)
 			val |= DWC_CSI2GLUE_VIS_CTRL_PIX_FRAME_FMT(0x4);
 			dwc_gluen_write(csidev, VIS_CTRL_PIX, i, val);
 
-			val = DWC_CSI2GLUE_LNBYTES_LINE_BYTES(bt_tmg->width);
+			val = DWC_CSI2GLUE_LNBYTES_LINE_BYTES(width);
 			dwc_gluen_write(csidev, LNBYTES, i, val);
 
-			val = DWC_CSI2GLUE_FRMDIM_WIDTH(bt_tmg->width);
-			val |= DWC_CSI2GLUE_FRMDIM_HEIGHT(bt_tmg->height);
+			val = DWC_CSI2GLUE_FRMDIM_WIDTH(width);
+			val |= DWC_CSI2GLUE_FRMDIM_HEIGHT(height);
 			dwc_gluen_write(csidev, FRMDIM, i, val);
 
 			val = DWC_CSI2GLUE_FILTINFO_DT(csi_fmt->data_type);
 			val |= DWC_CSI2GLUE_FILTINFO_CHAN(0);
 			dwc_gluen_write(csidev, FILTINFO, i, val);
 
-			val = DWC_CSI2GLUE_META_EMB_LD(bt_tmg->il_vfrontporch * bt_tmg->width *
+			val = DWC_CSI2GLUE_META_EMB_LD(bt_tmg->il_vfrontporch * width *
 				csi_fmt->width / 8);
-			val |= DWC_CSI2GLUE_META_EMB_TR(bt_tmg->il_vbackporch * bt_tmg->width *
+			val |= DWC_CSI2GLUE_META_EMB_TR(bt_tmg->il_vbackporch * width *
 				csi_fmt->width / 8);
 			dwc_gluen_write(csidev, META, i, val);
 		}
@@ -967,7 +1146,7 @@ static int dwc_csi_get_dphy_configuration(struct dwc_csi_device *csidev,
 	struct phy_configure_opts_mipi_dphy *cfg = &opts->mipi_dphy;
 
 	memset(cfg, 0x0, sizeof(*cfg));
-	cfg->hs_clk_rate = csidev->dv_tmg.bt.pixelclock * 2;
+	cfg->hs_clk_rate = csidev->link_freq * 2;
 	cfg->lanes = csidev->bus.num_data_lanes;
 
 	return 0;
@@ -1033,7 +1212,6 @@ static void stopstate_poll(struct work_struct *work)
 		dev_err(csidev->dev, "Lanes are not in stop state(%#x)\n", val);
 		csidev->poll_state = DWC_POLL_TIMEOUT;
 	} else {
-		phy_stopstate = val;
 		for (i = 0; i < ARRAY_SIZE(ipi_regs); i++)
 			if ((mask) & (1 << i)) {
 				val = dwc_gluen_read(csidev, DPHY_CTRL, i);
@@ -1048,6 +1226,7 @@ static int dwc_csi_device_init(struct dwc_csi_device *csidev)
 {
 	union phy_configure_opts opts;
 	int ret;
+	ktime_t end;
 
 	ret = dwc_csi_get_dphy_configuration(csidev, &opts);
 	if (ret)
@@ -1072,9 +1251,26 @@ static int dwc_csi_device_init(struct dwc_csi_device *csidev)
 		return ret;
 
 	/* Wait until other polls are done*/
-	while (csidev->poll_state != DWC_POLL_INACTIVE)
+	end = ktime_add_us(ktime_get(), DWC_STOPSTATE_TIMEOUT);
+	while (csidev->poll_state != DWC_POLL_INACTIVE) {
+		if (ktime_after(ktime_get(), end)) {
+			/*
+			 * The previous poll should have expired on its own by
+			 * now. Make sure its work item is no longer pending or
+			 * running before we override the state and take over,
+			 * so it can't race our poll_state writes below.
+			 */
+			dev_warn(csidev->dev, "Overriding stale stop-state poll(%d)\n",
+				 csidev->poll_state);
+			cancel_work_sync(&csidev->work);
+			csidev->poll_state = DWC_POLL_INACTIVE;
+			break;
+		}
 		udelay(1);
+	}
+
 	csidev->poll_state = DWC_POLL_SCHEDULED;
+	/* Queue the stopstate poll on the high-priority WQ */
 	queue_work(csidev->wq, &csidev->work);
 	/*
 	 * We need to wait only that work is at least active here
@@ -1086,9 +1282,18 @@ static int dwc_csi_device_init(struct dwc_csi_device *csidev)
 	return 0;
 }
 
-static void dwc_csi_device_hs_rx_start(struct dwc_csi_device *csidev)
+static int dwc_csi_device_hs_rx_start(struct dwc_csi_device *csidev)
 {
-	dwc_csi_ipi_enable(csidev);
+	/* No delay: enable inline to avoid scheduling latency. */
+	if (!csidev->ipi_enable_delay_ms) {
+		dwc_csi_ipi_enable(csidev);
+		return 0;
+	}
+
+	queue_delayed_work(csidev->wq, &csidev->ipi_work,
+			   msecs_to_jiffies(csidev->ipi_enable_delay_ms));
+
+	return 0;
 }
 
 static int dwc_csi_device_hs_rx_stop(struct dwc_csi_device *csidev)
@@ -1096,9 +1301,20 @@ static int dwc_csi_device_hs_rx_stop(struct dwc_csi_device *csidev)
 	struct device *dev = csidev->dev;
 	u32 val;
 
+	/* Cancel pending delayed enable so it can't fire after teardown. */
+	cancel_delayed_work_sync(&csidev->ipi_work);
+
+	/*
+	 * Quiesce the IPI (MODE=0 + glue CHAN_CTRL/counter reset) BEFORE cutting
+	 * the PHY, mirroring the start order in reverse (start enables the IPI
+	 * last). Powering off the PHY while the IPI is still enabled removes its
+	 * input mid-frame and faults the pixel FIFO -- the noisy stop-time "IPI
+	 * Interface Fatal". Disabling the IPI first drains it so it never fatals.
+	 */
+	dwc_csi_ipi_disable(csidev);
+
 	phy_power_off(csidev->phy);
 	phy_exit(csidev->phy);
-	dwc_csi_ipi_disable(csidev);
 
 	/* Check clock lanes are not in High Speed Mode */
 	val = dwc_csi_read(csidev, CSI2RX_DPHY_RX_STATUS);
@@ -1117,6 +1333,10 @@ static void dwc_csi_device_enable_interrupts(struct dwc_csi_device *csidev, bool
 	dwc_csi_write(csidev, CSI2RX_INT_MSK_PKT_FATAL, on ? 0x3 : 0);
 	dwc_csi_write(csidev, CSI2RX_INT_MSK_DPHY, on ? 0x30003 : 0);
 	dwc_csi_write(csidev, CSI2RX_INT_MSK_IPI_FATAL, on ? 0x7f : 0);
+	dwc_csi_write(csidev, CSI2RX_INT_MSK_PLD_CRC_FATAL,
+		      on ? 0xFFFFFFFF : 0);
+	dwc_csi_write(csidev, CSI2RX_INT_MSK_CRC_FRAME_FATAL,
+		      on ? 0xFFFFFFFF : 0);
 }
 
 static void dwc_csi_clear_counters(struct dwc_csi_device *csidev)
@@ -1295,7 +1515,7 @@ static int dwc_csi_subdev_set_fmt(struct v4l2_subdev *sd,
 {
 	struct dwc_csi_device *csidev = sd_to_dwc_csi_device(sd);
 	struct dwc_csi_pix_format const *csi_fmt;
-	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_mbus_framefmt *sink_fmt, *src_fmt;
 	unsigned int align;
 
 	/*
@@ -1336,32 +1556,46 @@ static int dwc_csi_subdev_set_fmt(struct v4l2_subdev *sd,
 			      &sdformat->format.height, 1,
 			      DWC_CSI2RX_MAX_PIX_HEIGHT, 0, 0);
 
-	fmt = v4l2_subdev_state_get_format(sd_state, sdformat->pad,
-					   sdformat->stream);
-	if (!fmt)
-		return -EINVAL;
-
-	*fmt = sdformat->format;
-
 	/* Set default code if user set an invalid value */
-	fmt->code = csi_fmt->code;
-	fmt->field = V4L2_FIELD_NONE;
+	sdformat->format.code = csi_fmt->code;
+	sdformat->format.field = V4L2_FIELD_NONE;
+
+	sink_fmt = v4l2_subdev_state_get_format(sd_state, sdformat->pad,
+						sdformat->stream);
+	if (!sink_fmt)
+		return -EINVAL;
+	*sink_fmt = sdformat->format;
 
 	/* Propagate the format from sink stream to source stream */
-	fmt = v4l2_subdev_state_get_opposite_stream_format(sd_state, sdformat->pad,
-							   sdformat->stream);
-	if (!fmt)
+	src_fmt = v4l2_subdev_state_get_opposite_stream_format(sd_state,
+							       sdformat->pad,
+							       sdformat->stream);
+	if (!src_fmt)
 		return -EINVAL;
-
-	*fmt = sdformat->format;
+	*src_fmt = sdformat->format;
 	/* The format on the source pad might change due to unpacking. */
-	fmt->code = csi_fmt->output;
+	src_fmt->code = csi_fmt->output;
+
+	if (sdformat->which != V4L2_SUBDEV_FORMAT_ACTIVE)
+		return 0;
 
 	/* Store the CSIS format descriptor for active formats. */
-	if (sdformat->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
-		csidev->csi_fmt = csi_fmt;
-		csidev->dv_tmg.bt.width = sdformat->format.width;
-		csidev->dv_tmg.bt.height = sdformat->format.height;
+	csidev->csi_fmt = csi_fmt;
+
+	if (csidev->source_sd) {
+		struct v4l2_subdev_format up = *sdformat;
+		struct v4l2_subdev_state *ust;
+		int ret = -ENODEV;
+
+		ust = v4l2_subdev_lock_and_get_active_state(csidev->source_sd);
+		if (ust) {
+			ret = v4l2_subdev_routing_find_opposite_end(&ust->routing,
+					csidev->remote_pad, sdformat->stream,
+					&up.pad, &up.stream);
+			v4l2_subdev_unlock_state(ust);
+		}
+		if (!ret)
+			v4l2_subdev_call_state_active(csidev->source_sd, pad, set_fmt, &up);
 	}
 
 	return 0;
@@ -1448,13 +1682,14 @@ static int dwc_csi_set_routing(struct v4l2_subdev *sd,
 	return __dwc_csi_subdev_set_routing(sd, state, routing);
 }
 
-static int dwc_csi_start_stream(struct dwc_csi_device *csidev)
+static int dwc_csi_start_stream(struct dwc_csi_device *csidev,
+				struct v4l2_subdev_state *state)
 {
 	int ret;
 
 	dwc_csi_device_startup(csidev);
 
-	dwc_csi_device_ipi_config(csidev);
+	dwc_csi_device_ipi_config(csidev, state);
 
 	ret = dwc_csi_device_init(csidev);
 	if (ret)
@@ -1462,18 +1697,31 @@ static int dwc_csi_start_stream(struct dwc_csi_device *csidev)
 
 	ret = dwc_csi_device_pg_enable(csidev);
 	if (ret)
-		return ret;
+		goto err_cancel_poll;
 
-	dwc_csi_device_hs_rx_start(csidev);
+	ret = dwc_csi_device_hs_rx_start(csidev);
+	if (ret)
+		goto err_cancel_poll;
 
+	csidev->ovf_recover_count = 0;
+	csidev->streaming = true;
 	dwc_csi_device_enable_interrupts(csidev, true);
 
 	return 0;
+
+err_cancel_poll:
+	/* device_init queued the stop-state poll; don't leave it running. */
+	cancel_work_sync(&csidev->work);
+	csidev->poll_state = DWC_POLL_INACTIVE;
+	return ret;
 }
 
 static void dwc_csi_stop_stream(struct dwc_csi_device *csidev)
 {
+	csidev->streaming = false;
 	dwc_csi_device_enable_interrupts(csidev, false);
+	/* No new overflow IRQs will queue now; drain any in-flight recovery. */
+	cancel_work_sync(&csidev->ovf_recover_work);
 	dwc_csi_device_hs_rx_stop(csidev);
 	dwc_csi_device_pg_disable(csidev);
 }
@@ -1484,6 +1732,7 @@ static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 {
 	struct dwc_csi_device *csidev = sd_to_dwc_csi_device(sd);
 	u64 sink_streams;
+	bool started = false;
 	int ret;
 	int poll_result;
 
@@ -1503,10 +1752,11 @@ static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 
 		dwc_csi_clear_counters(csidev);
 
-		ret = dwc_csi_start_stream(csidev);
+		ret = dwc_csi_start_stream(csidev, state);
 		if (ret < 0)
 			goto err_runtime_put;
 
+		started = true;
 		dwc_csi_dump_regs(csidev);
 		dwc_csi_log_counters(csidev);
 	}
@@ -1520,6 +1770,22 @@ static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 
 	ret = v4l2_subdev_enable_streams(csidev->source_sd, csidev->remote_pad,
 					 sink_streams);
+	if (ret == -EALREADY && started) {
+		/* Earlier failed start left the sensor stream enabled and
+		 * driving the lanes: disable it, restart the receiver, retry. */
+		dev_warn(csidev->dev,
+			 "stale enabled sensor stream (earlier failed start); recovering\n");
+		v4l2_subdev_disable_streams(csidev->source_sd,
+					    csidev->remote_pad, sink_streams);
+		cancel_work_sync(&csidev->work);
+		csidev->poll_state = DWC_POLL_INACTIVE;
+		dwc_csi_stop_stream(csidev);
+		ret = dwc_csi_start_stream(csidev, state);
+		if (!ret)
+			ret = v4l2_subdev_enable_streams(csidev->source_sd,
+							 csidev->remote_pad,
+							 sink_streams);
+	}
 
 	/* Wait for poll work to complete and store it's result*/
 	flush_work(&csidev->work);
@@ -1527,17 +1793,26 @@ static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 	csidev->poll_state = DWC_POLL_INACTIVE;
 
 	if (ret)
-		return ret;
+		goto err_stop_stream;
 
-	if (poll_result == DWC_POLL_TIMEOUT)
-		return -ETIMEDOUT;
-
-	if (poll_result != DWC_POLL_SUCCESS)
-		return -EPROTO;
+	if (started && poll_result != DWC_POLL_SUCCESS) {
+		ret = poll_result == DWC_POLL_TIMEOUT ? -ETIMEDOUT : -EPROTO;
+		/* Wind the sensor back or no later start can succeed. */
+		v4l2_subdev_disable_streams(csidev->source_sd,
+					    csidev->remote_pad, sink_streams);
+		goto err_stop_stream;
+	}
 
 	csidev->enabled_streams |= streams_mask;
 
 	return 0;
+
+err_stop_stream:
+	if (started) {
+		dwc_csi_stop_stream(csidev);
+		pm_runtime_put(csidev->dev);
+	}
+	return ret;
 
 err_runtime_put:
 	pm_runtime_put(csidev->dev);
@@ -1568,6 +1843,35 @@ static int dwc_csi_disable_streams(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/*
+ * Lightweight range check used instead of v4l2_valid_dv_timings().
+ *
+ * The core helper rejects any blanking interval larger than 3 * width, which
+ * prevents the large front/back porches we need to stretch the IPI line time
+ * in controller mode. Here we only validate the bounds that actually matter
+ * for the hardware (frame type, active resolution and pixel clock) and let the
+ * porches be arbitrary.
+ */
+static bool dwc_csi_timings_in_range(const struct v4l2_dv_timings *t,
+				     const struct v4l2_dv_timings_cap *cap)
+{
+	const struct v4l2_bt_timings *bt = &t->bt;
+	const struct v4l2_bt_timings_cap *bcap = &cap->bt;
+
+	if (t->type != cap->type)
+		return false;
+
+	if (bt->width < bcap->min_width || bt->width > bcap->max_width ||
+	    bt->height < bcap->min_height || bt->height > bcap->max_height)
+		return false;
+
+	if (bt->pixelclock < bcap->min_pixelclock ||
+	    bt->pixelclock > bcap->max_pixelclock)
+		return false;
+
+	return true;
+}
+
 static int dwc_csi_s_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
 				 struct v4l2_dv_timings *timings)
 {
@@ -1576,8 +1880,7 @@ static int dwc_csi_s_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
 	if (v4l2_match_dv_timings(&csidev->dv_tmg, timings, 0, false))
 		return 0; /* no changes */
 
-	if (!v4l2_valid_dv_timings(timings, &dwc_csi_dv_tmg_cap,
-				   NULL, NULL))
+	if (!dwc_csi_timings_in_range(timings, &dwc_csi_dv_tmg_cap))
 		return -ERANGE;
 
 	/*
@@ -1755,6 +2058,15 @@ static int dwc_csi_notify_bound(struct v4l2_async_notifier *notifier,
 	csidev->source_sd = sd;
 	csidev->remote_pad = ret;
 
+	/*
+	 * Allow the deserializer to override the delay applied before the IPI
+	 * interface is enabled. Left untouched (default) if the property is
+	 * absent or the source has no associated device node.
+	 */
+	if (sd->dev)
+		device_property_read_u32(sd->dev, "simaai,ipi-enable-delay-ms",
+					 &csidev->ipi_enable_delay_ms);
+
 	ret = v4l2_create_fwnode_links_to_pad(sd, sink, MEDIA_LNK_FL_ENABLED);
 	if (ret < 0) {
 		dev_err(csidev->dev, "Failed to link pad with %s\n", sd->name);
@@ -1770,7 +2082,13 @@ static int dwc_csi_notify_bound(struct v4l2_async_notifier *notifier,
 		return link_freq;
 	}
 
-	csidev->dv_tmg.bt.pixelclock = link_freq;
+	/*
+	 * link_freq is the sensor's MIPI link frequency used to compute the
+	 * D-PHY data rate. bt.pixelclock is the MIPI clock supplied separately
+	 * through the device tree (simaai,bt-pixelclock) and is used as the
+	 * reference for converting the IPI blanking intervals to ns.
+	 */
+	csidev->link_freq = link_freq;
 	return 0;
 }
 
@@ -1875,6 +2193,12 @@ static int dwc_csi_s_ctrl(struct v4l2_ctrl *ctrl)
 		csidev->pg_pattern = ctrl->val - 1;
 		csidev->pg_enable = (ctrl->val) ? true : false;
 		break;
+	case V4L2_CID_DWC_CSI2_IPI_CTRL_MODE:
+		csidev->ipi_mode_controller = ctrl->val;
+		break;
+	case V4L2_CID_DWC_CSI2_IPI_EMB_DATA_EN:
+		csidev->ipi_emb_data_en = ctrl->val;
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1887,12 +2211,38 @@ static const struct v4l2_ctrl_ops dwc_csi_ctrl_ops = {
 	.s_ctrl = dwc_csi_s_ctrl,
 };
 
+static const struct v4l2_ctrl_config dwc_csi_ctrl_ipi_mode = {
+	.ops	= &dwc_csi_ctrl_ops,
+	.id	= V4L2_CID_DWC_CSI2_IPI_CTRL_MODE,
+	.name	= "IPI Controller Mode",
+	.type	= V4L2_CTRL_TYPE_BOOLEAN,
+	.min	= 0,
+	.max	= 1,
+	.step	= 1,
+	.def	= 0,  /* camera timing mode by default */
+};
+
+static const struct v4l2_ctrl_config dwc_csi_ctrl_ipi_emb_data = {
+	.ops	= &dwc_csi_ctrl_ops,
+	.id	= V4L2_CID_DWC_CSI2_IPI_EMB_DATA_EN,
+	.name	= "IPI Embedded Data Enable",
+	.type	= V4L2_CTRL_TYPE_BOOLEAN,
+	.min	= 0,
+	.max	= 1,
+	.step	= 1,
+	.def	= 0,
+};
+
 static int dwc_csi_controls_init(struct dwc_csi_device *csidev)
 {
 	struct v4l2_ctrl_handler *handler = &csidev->ctrl_handler;
+	struct device_node *node = csidev->dev->of_node;
+	struct v4l2_ctrl_config ipi_mode_cfg = dwc_csi_ctrl_ipi_mode;
+	struct v4l2_ctrl_config ipi_emb_data_cfg = dwc_csi_ctrl_ipi_emb_data;
+	u32 val;
 	int ret;
 
-	v4l2_ctrl_handler_init(handler, 1);
+	v4l2_ctrl_handler_init(handler, 3);
 
 	/* Use driver mutex lock for the ctrl lock */
 	handler->lock = &csidev->lock;
@@ -1901,6 +2251,19 @@ static int dwc_csi_controls_init(struct dwc_csi_device *csidev)
 				     V4L2_CID_TEST_PATTERN,
 				     ARRAY_SIZE(test_pattern_menu) - 1,
 				     0, 0, test_pattern_menu);
+
+	/*
+	 * Use the device tree values as the defaults for the IPI controls
+	 * when present. Otherwise keep controller mode disabled and embedded
+	 * data off (the defaults from the static control configs).
+	 */
+	if (!of_property_read_u32(node, "simaai,ipi-controller-mode", &val))
+		ipi_mode_cfg.def = !!val;
+	if (!of_property_read_u32(node, "simaai,ipi-emb-data-enable", &val))
+		ipi_emb_data_cfg.def = !!val;
+
+	v4l2_ctrl_new_custom(handler, &ipi_mode_cfg, NULL);
+	v4l2_ctrl_new_custom(handler, &ipi_emb_data_cfg, NULL);
 
 	if (handler->error) {
 		ret = handler->error;
@@ -1964,6 +2327,186 @@ static const struct dev_pm_ops dwc_csi_device_pm_ops = {
 	SET_RUNTIME_PM_OPS(dwc_csi_runtime_suspend, dwc_csi_runtime_resume, NULL)
 };
 
+/*
+ * IPI-overflow recovery delays (SOCSW-5392). The HW team's manual sequence used
+ * sleep 20s / 100ms, but those were typing-speed artifacts — the true minimal
+ * delays are unknown. Exposed as module params so they can be tuned down on the
+ * bench without recompiling. ipi_ovf_reset_us is the delay while CSI+glue are
+ * held in reset; ipi_ovf_post_us is the settle after each re-enable step.
+ */
+static bool ipi_overflow_recovery_enable = true;
+
+module_param(ipi_overflow_recovery_enable, bool, 0644);
+MODULE_PARM_DESC(ipi_overflow_recovery_enable,
+                 "Enable IPI overflow recovery");
+
+static unsigned int ipi_ovf_reset_us = 1000;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(ipi_ovf_reset_us, uint, 0644);
+MODULE_PARM_DESC(ipi_ovf_reset_us, "IPI-overflow recovery: reset-hold delay (us)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+static unsigned int ipi_ovf_post_us = 100;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(ipi_ovf_post_us, uint, 0644);
+MODULE_PARM_DESC(ipi_ovf_post_us, "IPI-overflow recovery: per-step settle delay (us)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
+/* Test knob: when false, resets only the IPI/glue and SKIPS the DMA resume,
+ * to check on-bench whether an IPI-only reset recovers the chain or the DMA
+ * descriptor must be re-validated (SOCSW-5392). Default true (full recovery). */
+static bool ipi_ovf_dma_resume = true;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(ipi_ovf_dma_resume, bool, 0644);
+MODULE_PARM_DESC(ipi_ovf_dma_resume, "IPI-overflow recovery: also resume the DMA (0 = IPI-only, test)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
+/* Minimum gap between recovery attempts: re-firing within a frame period
+ * resets the IPI faster than it can re-sync and capture never converges. */
+static unsigned int ipi_ovf_holdoff_ms = 100;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(ipi_ovf_holdoff_ms, uint, 0644);
+MODULE_PARM_DESC(ipi_ovf_holdoff_ms, "IPI-overflow recovery: minimum gap between attempts (ms)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
+/* Clean-streaming window after which the recovery counter decays to 0 (a fresh
+ * overflow after this long is a new incident, not part of a reset-storm). */
+static unsigned int ipi_ovf_decay_ms = 10000;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(ipi_ovf_decay_ms, uint, 0644);
+MODULE_PARM_DESC(ipi_ovf_decay_ms, "IPI-overflow recovery: reset the attempt count after this many ms of clean streaming");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
+/* Bound CONSECUTIVE recovery attempts (within ipi_ovf_decay_ms of each other) so
+ * a persistent fault can't reset-storm; the count decays after clean streaming. */
+#define DWC_OVF_RECOVER_MAX	32
+
+/*
+ * Recover a controller-mode CSI IPI pixel overflow (SOCSW-5392): reset the glue
+ * + CSI IPI for instance 0, re-sync the VCID (Synopsys: program a wrong id then
+ * the correct one), then ask the downstream DMA to resume (it owns the channel,
+ * so it is invoked through the vdma-registered callback). Runs in process
+ * context off the IRQ — must NOT be called from hardirq.
+ */
+static void dwc_csi_ovf_recover_work(struct work_struct *w)
+{
+	struct dwc_csi_device *csidev =
+		container_of(w, struct dwc_csi_device, ovf_recover_work);
+	void (*quiesce)(void *data);
+	void (*resume)(void *data);
+	void *resume_data;
+	u32 chan_ctrl, rstn;
+	bool do_dma;
+
+	mutex_lock(&csidev->lock);
+	if (!csidev->streaming) {
+		mutex_unlock(&csidev->lock);
+		return;
+	}
+
+	/* Holdoff: skipping is safe, a still-dead pipe re-raises the fatal
+	 * IRQ (and the vdma watchdog re-triggers). */
+	if (csidev->ovf_recover_count &&
+	    ktime_ms_delta(ktime_get(), csidev->ovf_last_recover_time) <
+		    ipi_ovf_holdoff_ms) {
+		mutex_unlock(&csidev->lock);
+		return;
+	}
+
+	quiesce = csidev->ovf_quiesce;
+	resume = csidev->ovf_resume;
+	resume_data = csidev->ovf_resume_data;
+	do_dma = quiesce && resume && ipi_ovf_dma_resume;
+
+	/* 0: park the DMA before yanking its pixel source (resetting under a
+	 * running block raises an async src bus error; resubmission races). */
+	if (do_dma)
+		quiesce(resume_data);
+
+	/* 1: glue reset — disable glue channel 0 */
+	chan_ctrl = dwc_csi_read(csidev, DWC_CSI2GLUE_CHAN_CTRL1);
+	dwc_csi_write(csidev, DWC_CSI2GLUE_CHAN_CTRL1,
+		      chan_ctrl & ~DWC_CSI2GLUE_CHAN_CTRL_EN);
+	/* 2: assert IPI soft reset (active-low) for instance 0 */
+	rstn = dwc_csi_read(csidev, CSI2RX_IPI_SOFTRSTN);
+	dwc_csi_write(csidev, CSI2RX_IPI_SOFTRSTN, rstn & ~BIT(0));
+	/* 3: VCID -> wrong id (re-sync trick) */
+	dwc_csi_write(csidev, CSI2RX_IPI1_VCID, CSI2RX_IPI_VCID_VC(1));
+	/* 4: hold in reset */
+	usleep_range(ipi_ovf_reset_us, ipi_ovf_reset_us + 100);
+	/* 5: re-enable glue channel 0 */
+	dwc_csi_write(csidev, DWC_CSI2GLUE_CHAN_CTRL1, chan_ctrl);
+	usleep_range(ipi_ovf_post_us, ipi_ovf_post_us + 50);
+	/* 7: deassert IPI soft reset */
+	dwc_csi_write(csidev, CSI2RX_IPI_SOFTRSTN, rstn | BIT(0));
+	usleep_range(ipi_ovf_post_us, ipi_ovf_post_us + 50);
+	/* 9: VCID -> correct id */
+	dwc_csi_write(csidev, CSI2RX_IPI1_VCID, CSI2RX_IPI_VCID_VC(0));
+
+	csidev->ovf_recover_count++;
+	csidev->ovf_last_recover_time = ktime_get();
+	mutex_unlock(&csidev->lock);
+
+	/* 10: restart the parked DMA — must follow every quiesce above. */
+	if (do_dma)
+		resume(resume_data);
+
+	dev_info_ratelimited(csidev->dev,
+			     "IPI overflow recovery #%u (reset_us=%u post_us=%u)\n",
+			     csidev->ovf_recover_count, ipi_ovf_reset_us,
+			     ipi_ovf_post_us);
+}
+
+/*
+ * Register the downstream DMA resume callback. Called by the vdma capture driver
+ * (which owns the dma_chan) at stream-on; pass NULL cb to unregister.
+ */
+int dwc_csi_register_overflow_recovery(struct v4l2_subdev *sd,
+				       void (*quiesce)(void *data),
+				       void (*resume)(void *data), void *data)
+{
+	struct dwc_csi_device *csidev = sd_to_dwc_csi_device(sd);
+
+	mutex_lock(&csidev->lock);
+	csidev->ovf_quiesce = quiesce;
+	csidev->ovf_resume = resume;
+	csidev->ovf_resume_data = data;
+	mutex_unlock(&csidev->lock);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(dwc_csi_register_overflow_recovery);
+
+/*
+ * Trigger the same IPI-overflow recovery as the FATAL_ERR_IPI IRQ, but from an
+ * external caller (the vdma frame watchdog) for SILENT stalls that never raise a
+ * fatal interrupt. Atomic-safe (queue_work only); coalesces with a pending IRQ
+ * recovery and honours the per-stream cap.
+ */
+void dwc_csi_trigger_overflow_recovery(struct v4l2_subdev *sd)
+{
+	struct dwc_csi_device *csidev = sd_to_dwc_csi_device(sd);
+
+	/*
+	 * No DWC_OVF_RECOVER_MAX cap here (unlike the IRQ path): the caller (the
+	 * vdma frame watchdog) is rate-limited by its own timer and bounded by
+	 * frame_watchdog_max_retry, which supports an explicit infinite-retry mode.
+	 */
+	if (csidev->streaming)
+		queue_work(csidev->wq, &csidev->ovf_recover_work);
+}
+EXPORT_SYMBOL_GPL(dwc_csi_trigger_overflow_recovery);
+
+/* CRC error log rate limit - tunable at runtime without recompiling */
+static unsigned int crc_ratelimit_interval_min = 1;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(crc_ratelimit_interval_min, uint, 0644);
+MODULE_PARM_DESC(crc_ratelimit_interval_min, "CRC rate limit interval (minutes)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+static unsigned int crc_ratelimit_burst = 10;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(crc_ratelimit_burst, uint, 0644);
+MODULE_PARM_DESC(crc_ratelimit_burst, "CRC error log rate limit: max prints per window");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
 static irqreturn_t dwc_csi_irq_handler(int irq, void *priv)
 {
 	struct dwc_csi_device *csidev = priv;
@@ -1977,17 +2520,61 @@ static irqreturn_t dwc_csi_irq_handler(int irq, void *priv)
 		for (i = 0; i < DWC_NUM_EVENTS; ++i) {
 			struct dwc_csi_event *event = &csidev->events[i];
 
-			if (status & event->mask)
+			if (status & event->mask) {
 				event->counter++;
+
+				if (event->mask == CSI2RX_INT_ST_MAIN_FATAL_ERR_PLD_CRC ||
+				    event->mask == CSI2RX_INT_ST_MAIN_FATAL_ERR_CRC_FRAME) {
+
+					/*
+					 * Re-read the live module param values
+					 * every time, so writes to
+					 * /sys/module/.../parameters/crc_ratelimit_*
+					 * take effect immediately.
+					 */
+					csidev->crc_err_rs.interval =
+						secs_to_jiffies(crc_ratelimit_interval_min * SECS_PER_MIN);
+					csidev->crc_err_rs.burst = crc_ratelimit_burst;
+
+					if (__ratelimit(&csidev->crc_err_rs))
+						dev_warn(
+							csidev->dev,
+							"%s (INT_ST_MAIN=0x%08x) [total: %u]\n",
+							event->name, status, event->counter);
+				}
+			}
 		}
 	}
 
+    if (ipi_overflow_recovery_enable) {
+    /* recovery code */
+
+	/*
+	 * IPI pixel overflow (DMA out of descriptors, SOCSW-5392): kick the
+	 * deferred recovery. queue_work() coalesces if one is already pending;
+	 * the per-stream cap stops a persistent fault reset-storming. The
+	 * recovery sequence is mode-agnostic, so gate on a registered resume
+	 * callback rather than controller mode — the overflow also hits the
+	 * standard v4l2-m2m path (12h soak, SOCSW-isp-sensor-v4l2-collapse).
+	 */
+	if ((status & CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI) &&
+	    csidev->ovf_resume && csidev->streaming) {
+		/* decay: clean streaming since the last recovery => fresh incident */
+		if (csidev->ovf_recover_count &&
+		    ktime_ms_delta(ktime_get(), csidev->ovf_last_recover_time) >
+			    ipi_ovf_decay_ms)
+			csidev->ovf_recover_count = 0;
+		if (csidev->ovf_recover_count < DWC_OVF_RECOVER_MAX)
+			queue_work(csidev->wq, &csidev->ovf_recover_work);
+	}
+    }    
 	return IRQ_HANDLED;
 }
 
 static inline void dwc_csi_param_init(struct dwc_csi_device *csidev)
 {
 	csidev->csi_fmt = &dwc_csi_formats[0];
+	csidev->ipi_enable_delay_ms = DWC_CSI2RX_IPI_ENABLE_DELAY_MS;
 }
 
 static int dwc_csi_subdev_init(struct dwc_csi_device *csidev)
@@ -2032,19 +2619,42 @@ static int dwc_csi_subdev_init(struct dwc_csi_device *csidev)
 
 static void dwc_csi_dv_timing_init(struct dwc_csi_device *csidev)
 {
+	struct device_node *node = csidev->dev->of_node;
 	struct v4l2_dv_timings *dv_tmg = &csidev->dv_tmg;
+	struct v4l2_bt_timings *bt = &dv_tmg->bt;
+	u64 pixelclock;
 
 	memset(dv_tmg, 0x0, sizeof(*dv_tmg));
 
 	dv_tmg->type = V4L2_DV_BT_656_1120;
-	dv_tmg->bt.width = DWC_CSI2RX_DEF_PIX_WIDTH;
-	dv_tmg->bt.height = DWC_CSI2RX_DEF_PIX_HEIGHT;
-	dv_tmg->bt.hfrontporch = DWC_CSI2RX_DEF_HSD_TIME;
-	dv_tmg->bt.hsync = DWC_CSI2RX_DEF_HSA_TIME;
-	dv_tmg->bt.hbackporch = DWC_CSI2RX_DEF_HBP_TIME;
-	dv_tmg->bt.vfrontporch = DWC_CSI2RX_DEF_VFP_LINES;
-	dv_tmg->bt.vsync = DWC_CSI2RX_DEF_VSA_LINES;
-	dv_tmg->bt.vbackporch = DWC_CSI2RX_DEF_VBP_LINES;
+	bt->width = DWC_CSI2RX_DEF_PIX_WIDTH;
+	bt->height = DWC_CSI2RX_DEF_PIX_HEIGHT;
+	bt->hfrontporch = DWC_CSI2RX_DEF_HSD_TIME;
+	bt->hsync = DWC_CSI2RX_DEF_HSA_TIME;
+	bt->hbackporch = DWC_CSI2RX_DEF_HBP_TIME;
+	bt->vfrontporch = DWC_CSI2RX_DEF_VFP_LINES;
+	bt->vsync = DWC_CSI2RX_DEF_VSA_LINES;
+	bt->vbackporch = DWC_CSI2RX_DEF_VBP_LINES;
+
+	/*
+	 * Allow the board device tree to override the default IPI blanking
+	 * timings. Each property is optional and falls back to the default
+	 * above when it is absent. The active resolution (width/height) is not
+	 * taken from here; it comes from the format set through .set_fmt.
+	 */
+	of_property_read_u32(node, "simaai,bt-hfrontporch", &bt->hfrontporch);
+	of_property_read_u32(node, "simaai,bt-hsync", &bt->hsync);
+	of_property_read_u32(node, "simaai,bt-hbackporch", &bt->hbackporch);
+	of_property_read_u32(node, "simaai,bt-vfrontporch", &bt->vfrontporch);
+	of_property_read_u32(node, "simaai,bt-vsync", &bt->vsync);
+	of_property_read_u32(node, "simaai,bt-vbackporch", &bt->vbackporch);
+	if (!of_property_read_u64(node, "simaai,bt-pixelclock", &pixelclock))
+		bt->pixelclock = pixelclock;
+
+	dev_info(csidev->dev,
+		 "IPI blanking timings: pixelclock=%llu hsync=%u hbackporch=%u hfrontporch=%u vsync=%u vbackporch=%u vfrontporch=%u\n",
+		 bt->pixelclock, bt->hsync, bt->hbackporch, bt->hfrontporch,
+		 bt->vsync, bt->vbackporch, bt->vfrontporch);
 };
 
 static void dwc_csi_subdev_cleanup(void *data)
@@ -2071,6 +2681,11 @@ static int dwc_csi_device_probe(struct platform_device *pdev)
 	csidev->dev = dev;
 	memcpy(csidev->events, dwc_events, sizeof(dwc_events));
 
+	/* Cap CRC error warnings to 10 per every 1min to avoid log flooding */
+	ratelimit_state_init(&csidev->crc_err_rs,
+			      secs_to_jiffies(crc_ratelimit_interval_min * SECS_PER_MIN),
+			      crc_ratelimit_burst);
+
 	csidev->regs = devm_platform_ioremap_resource_byname(pdev, "csi");
 	if (IS_ERR(csidev->regs)) {
 		dev_err(dev, "Failed to get DWC csi2 register map\n");
@@ -2096,6 +2711,7 @@ static int dwc_csi_device_probe(struct platform_device *pdev)
 			       dev_name(dev), csidev);
 	if (ret < 0)
 		return dev_err_probe(dev, ret, "Failed to request IRQ\n");
+	csidev->irq = irq;
 
 	csidev->num_clks = devm_clk_bulk_get_all(dev, &csidev->clks);
 
@@ -2125,15 +2741,28 @@ static int dwc_csi_device_probe(struct platform_device *pdev)
 
 	pm_runtime_enable(dev);
 
-	csidev->wq = alloc_ordered_workqueue("%s-pollstopstate", 0, dev_name(dev));
-	if (!csidev->wq)
-		return dev_err_probe(dev, ret, "Failed to allocate WQ\n");
+	/* Private high-priority WQ; the stop-state poll must run promptly. */
+	csidev->wq = alloc_ordered_workqueue("%s-csi", WQ_HIGHPRI, dev_name(dev));
+	if (!csidev->wq) {
+		ret = -ENOMEM;
+		dev_err(dev, "Failed to allocate WQ\n");
+		goto err_pm_disable;
+	}
 
 	dwc_csi_dv_timing_init(csidev);
 	INIT_WORK(&csidev->work, stopstate_poll);
+	INIT_DELAYED_WORK(&csidev->ipi_work, dwc_csi_delayed_ipi_enable);
+	INIT_WORK(&csidev->ovf_recover_work, dwc_csi_ovf_recover_work);
 	csidev->poll_state = DWC_POLL_INACTIVE;
 
 	return 0;
+
+err_pm_disable:
+	pm_runtime_disable(dev);
+	v4l2_async_nf_unregister(&csidev->notifier);
+	v4l2_async_nf_cleanup(&csidev->notifier);
+	v4l2_async_unregister_subdev(&csidev->sd);
+	return ret;
 }
 
 static void dwc_csi_device_remove(struct platform_device *pdev)
@@ -2144,6 +2773,19 @@ static void dwc_csi_device_remove(struct platform_device *pdev)
 	v4l2_async_nf_unregister(&csidev->notifier);
 	v4l2_async_nf_cleanup(&csidev->notifier);
 	v4l2_async_unregister_subdev(&csidev->sd);
+
+	/*
+	 * Free the IRQ and stop the watchdog trigger path before tearing the WQ
+	 * down: otherwise dwc_csi_irq_handler() or the exported
+	 * dwc_csi_trigger_overflow_recovery() could queue_work() onto a
+	 * destroyed WQ if the device is unbound while streaming. Done before
+	 * mutex_destroy() so a flushed ovf_recover_work can still take the lock.
+	 */
+	devm_free_irq(csidev->dev, csidev->irq, csidev);
+	csidev->streaming = false;
+	cancel_delayed_work_sync(&csidev->ipi_work);
+	cancel_work_sync(&csidev->ovf_recover_work);
+	destroy_workqueue(csidev->wq);
 
 	pm_runtime_disable(&pdev->dev);
 

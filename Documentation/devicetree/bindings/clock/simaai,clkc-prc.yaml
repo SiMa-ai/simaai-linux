@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/simaai,prc-modalix-clkc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SiMa.ai PRC Clock Controller
+
+maintainers:
+  - Bharanidharan Ramalingam <bharanidharan.ramalingam@sima.ai>
+
+description: |
+  The SiMa.ai PRC clock controller manages PLLs and gate clocks for
+  on-chip subsystems MLA (Machine Learning Accelerator) and ISP.
+  Each PLL is derived from the board reference oscillator, gate clocks select
+  a PLL as parent.
+
+  Please refer to clock-bindings.txt for common clock controller binding usage.
+
+properties:
+  compatible:
+    const: simaai,clkc-prc
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+    description: Reference oscillator input to all PLLs.
+
+  clock-names:
+    maxItems: 1
+
+  "#clock-cells":
+    const: 1
+    description: |
+      Index of the clock to consume. Use the constants from
+      <dt-bindings/clock/simaai,clkc-prc.h>:
+
+      Index  Define                    Description
+        0    SIMAAI_PRC_CLK_MLA_PLL   MLA PLL
+        1    SIMAAI_PRC_CLK_ISP_PLL   ISP PLL
+        2    SIMAAI_PRC_CLK_MLA_GATE  MLA clock gate
+        3    SIMAAI_PRC_CLK_ISP_GATE  ISP clock gate
+
+  simaai,ignore-unused:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Bitmask of clock indices that must remain enabled even when no consumer
+      claims them (CLK_IGNORE_UNUSED). Bit i corresponds to clock index i.
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - "#clock-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/simaai,clkc-prc.h>
+
+    clock-controller@ff00000 {
+      compatible = "simaai,clkc-prc";
+      reg = <0x0 0x0ff00000 0x0 0x758>;
+      clocks = <&ref_osc>;
+      simaai,ignore-unused = <0xf>;
+      #clock-cells = <1>;
+    };
+

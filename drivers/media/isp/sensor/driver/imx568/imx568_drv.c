@@ -61,7 +61,8 @@ static struct workqueue_struct *wq;
 extern struct platform_device *g_pdev;
 
 #define MAX_RAW_FRAMES			(5)
-extern int32_t get_calibrations_imx568( uint32_t wdr_mode, void *param );
+/* get_calibrations_imx568 removed — calibrations now arrive via the IPA
+ * push on MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB. */
 extern acamera_settings *get_settings_by_id(u8 ctx_id);
 extern  int8_t get_dma_index(uint32_t ctx_id);
 
@@ -892,8 +893,6 @@ void sensor_init_imx568( void **priv_ptr, uint8_t location, sensor_control_t *ct
     sensor_private_t *priv = *priv_ptr = priv_array + location;
     sensor_param_t *cfg = &priv->param;
 	int rc = -1;
-	acamera_settings *ctx_settings = get_settings_by_id(location);
-	u32 cdma_addr = 0;
 
     system_memset( cfg, 0, sizeof( *cfg ) );
 
@@ -955,35 +954,11 @@ void sensor_init_imx568( void **priv_ptr, uint8_t location, sensor_control_t *ct
 		return;
 	}
 
-	if (ctx_settings) {
-
-		ctx_settings->get_calibrations = get_calibrations_imx568;
-		cdma_addr = ctx_settings->isp_base;
-
-		// Enable Mesh Shading
-		acamera_isp_pipeline_bypass_mesh_shading_write(cdma_addr,0);
-		// Enable ISP Digital Gain
-		acamera_isp_pipeline_bypass_digital_gain_write(cdma_addr,0);
-		// Enable CAC
-		acamera_isp_pipeline_bypass_ca_correction_write(cdma_addr,0);
-		// Enable DPC
-		acamera_isp_pipeline_bypass_defect_pixel_write(cdma_addr,0);
-		acamera_isp_pipeline_bypass_white_balance_write(cdma_addr,0);
-		acamera_isp_pipeline_bypass_out_format_write(cdma_addr, 0);
-
-		acamera_isp_pipeline_bypass_sensor_offset_wdr_write( cdma_addr, 1 );
-		acamera_isp_pipeline_bypass_gamma_be_sq_write( cdma_addr, 1);
-		acamera_isp_pipeline_bypass_gamma_fe_sq_write( cdma_addr, 1);
-		// Black  level updated for IMX678 - 200 (dec) - 0xC8 (Hex)
-		// This offset will be effective only when white balance is enabled.
-		acamera_isp_offset_black_00_write( cdma_addr, 0xC8000 );
-		acamera_isp_offset_black_01_write( cdma_addr, 0xC8000 );
-		acamera_isp_offset_black_10_write( cdma_addr, 0xC8000);
-		acamera_isp_offset_black_11_write( cdma_addr, 0xC8000 );
-
-	} else {
-		LOG (LOG_ERR, "Failed to get the ctx pointer for ctx :%d", location);
-	}
+	/* ISP pipeline bypass is now driven by the IPA from the tuning
+	 * file's isp_config: block (MODALIX_ISP_V4L2_CID_ISP_BYPASS_CONFIG).
+	 * The black-level offset written here was dead — sensor_init() in
+	 * the sensor FSM overwrites it with OFFSET_BLACK_DEFAULT right after
+	 * this returns. */
 
     // Reset sensor during initialization
     sensor_hw_reset_enable();

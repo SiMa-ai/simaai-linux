@@ -333,10 +333,10 @@ int32_t acamera_isp_ctx_process_event( acamera_isp_ctx_ptr_t p_ictx )
 void acamera_isp_ctx_load_custom_settings( acamera_isp_ctx_ptr_t p_ictx )
 {
     assert( p_ictx );
-    if ( calib_mgr_lut_exists( p_ictx->calib_mgr_data, CALIBRATION_CUSTOM_SETTINGS ) ) {
+    if ( calib_mgr_lut_exists( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_CUSTOM_SETTINGS ) ) {
         LOG( LOG_NOTICE, "Loading custom settings CTX[%d]", p_ictx->context_id );
         const uint32_t *lut = calib_mgr_u32_lut_get( p_ictx->calib_mgr_data,
-                                                     CALIBRATION_CUSTOM_SETTINGS );
+                                                     MODALIX_ISP_CALIB_CUSTOM_SETTINGS );
         for ( ;; ) {
             const uint32_t offset = *lut++;
             const uint32_t value = *lut++;

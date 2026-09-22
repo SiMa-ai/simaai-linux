@@ -85,4 +85,4 @@ obj-$(CONFIG_RISCV_SBI_MPXY_MBOX)	+= riscv-sbi-mpxy-mbox.o
 
 obj-$(CONFIG_SIMAAI_MBOX)	+= simaai-mailbox.o simaai-mailbox-client.o
 
-obj-$(CONFIG_SIMAAI_HPI)	+= simaai-hpi.o
+obj-$(CONFIG_SIMAAI_HPI)	+= simaai-hpi.o simaai-hpi-client.o

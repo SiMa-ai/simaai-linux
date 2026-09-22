@@ -3,6 +3,8 @@
  * Copyright (c) 2024 SiMa ai
  */
 
+ #include <dt-bindings/clock/simaai,clkc-prc.h>
+
 / {
 	decoder: al5r@4180000 {
 		compatible = "al,al5r";
@@ -23,11 +25,19 @@
 	};
 
 	hpi: hpi-controller@0x0f0f1000 {
-	     compatible = "simaai,hpi-1.0";
-	     reg = <0x0 0x0f0f1000 0x0 0x1000>;
-	     interrupt-parent = <&gic>;
-	     interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
-	     status = "okay";
+		compatible = "simaai,hpi-1.0";
+		reg = <0x0 0x0f0f1000 0x0 0x1000>;
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
+		#mbox-cells = <1>;
+		status = "okay";
+	};
+
+	hpi_client {
+		compatible = "simaai,modalix-hpi-client";
+		mboxes = <&hpi 0>;
+		simaai,fixed-shmem = /bits/ 64 <0x1207500000 0x2200000>; // For old troot
+		status = "okay";
 	};
 
 	evxx_stu: evxx_stu@40d3000 {
@@ -81,6 +91,9 @@
 				0x0500f638
 				0x0500f838
 				0x0500fa38>;
+		clocks = <&clkc SIMAAI_PRC_CLK_MLA_PLL>, <&clkc SIMAAI_PRC_CLK_MLA_GATE>;
+		clock-names = "pll", "gate";
+		operating-points-v2 = <&mla_opp_table>;
 	};
 
 	ev74mb: mailbox@04090000 {
@@ -119,6 +132,8 @@
 		simaai,rx-fifo-depth = <128>;
 		simaai,max-users = <1>;
 		status = "okay";
+		clocks = <&clkc SIMAAI_PRC_CLK_MLA_GATE>;
+		clock-names = "gate";
 	};
 
 	m4_hp_client: m4_hp_mbox {
@@ -133,6 +148,8 @@
 		simaai,rx-fifo-depth = <128>;
 		simaai,max-users = <1>;
 		status = "okay";
+		clocks = <&clkc SIMAAI_PRC_CLK_MLA_GATE>;
+		clock-names = "gate";
 	};
 
 	isp: isp@0x04220000 {
@@ -145,5 +162,8 @@
 		dmas = <&axi_vdma0 0>, <&axi_vdma1 0>, <&axi_vdma2 0>, <&axi_vdma3 0>;
 		dma-names = "vdma0", "vdma1" ,"vdma2", "vdma3";
 		status = "okay";
+		clocks = <&clkc SIMAAI_PRC_CLK_ISP_PLL>, <&clkc SIMAAI_PRC_CLK_ISP_GATE>;
+		clock-names = "pll", "gate";
+		operating-points-v2 = <&isp_opp_table>;
 	};
 };

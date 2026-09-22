@@ -348,6 +348,7 @@ config ARCH_SEATTLE
 
 config ARCH_SIMAAI
 	bool "Sima.ai SoC Family"
+	select COMMON_CLK_SIMAAI_PRC
 	help
 	  This enables support for the SiMa.ai SoC Family.
 

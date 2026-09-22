@@ -17,67 +17,135 @@
 *
 */
 
-#include <linux/fs.h>
-#include <linux/kfifo.h>
-#include <linux/miscdevice.h>
-#include <uapi/linux/isp/isp_ioctl.h>
+/*
+ * Per-ctx calibration-storage bridge.
+ *
+ * Originally this file backed the /dev/isp_control_<N> char devices the
+ * IPA used for MODALIX_ISP_IOC_SET_CALIBRATION pushes and a
+ * kernel→user-space command/event RPC channel. Both roles moved off
+ * the chardev:
+ *
+ *   - calibration push is now a VIDIOC_S_EXT_CTRLS on the per-ctx
+ *     meta-stats node (MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB → s_ctrl
+ *     → modalix_isp_install_user_calibrations()),
+ *   - the kernel→IPA command/event dispatch (ctrl_channel_handle_api_*)
+ *     was never wired to an in-tree caller — grep showed zero kernel
+ *     producers — so it's deleted outright.
+ *
+ * What remains here:
+ *   - the per-ctx slot the firmware's calib_mgr read path consumes
+ *     (struct ctrl_channel_dev_context.user_calibrations);
+ *   - the cbs[]/custom_get_calib_ctxN dispatch the framework wires
+ *     into acamera_settings.get_calibrations at boot — the dispatcher
+ *     prefers the user-pushed blob and falls back to the old kernel-
+ *     baked get_calibrations_*() helper if no blob has been pushed
+ *     yet (SOCSW-5579 will retire that fallback);
+ *   - the shared modalix_isp_install_user_calibrations() helper that
+ *     the meta-stats V4L2 ctrl handler calls.
+ *
+ * The .c name is preserved to minimise Makefile churn — the file now
+ * acts as a small "calib bridge" connecting the meta-stats V4L2
+ * control to the firmware's calibration read path. No chardev is
+ * registered.
+ */
+
+#include <linux/jiffies.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/wait.h>
 #include "system_stdlib.h"
-#include "acamera_command_api.h"
 #include "acamera_ctrl_channel.h"
 #include "acamera_logger.h"
 #include "acamera_calib_mgr.h"
+#include "acamera_isp_config.h" /* system_isp_read_32/_write_32, reg 0xe040 */
+#include "acamera_isp_ctx.h"    /* acamera_settings */
 
-#define CTRL_CHANNEL_FIFO_INPUT_SIZE ( 4 * 1024 )
-#define CTRL_CHANNEL_FIFO_OUTPUT_SIZE ( 8 * 1024 )
+/* ISP pipeline bypass register (Mali "Pipeline" group). Reserved bits
+ * are never driven by the IPA and kept at their power-on value. */
+#define MODALIX_ISP_PIPELINE_BYPASS_OFFSET   0xe040u
+#define MODALIX_ISP_PIPELINE_BYPASS_RESERVED \
+	( BIT(0) | BIT(1) | BIT(23) | BIT(25) | BIT(26) )
 
-struct user_calibration_data {
-    ACameraCalibrations *calibrations;
-    int32_t ( *new_cb )( uint32_t wdr_mode, void *param );
-    int32_t ( *old_cb )( uint32_t wdr_mode, void *param );
-};
+extern acamera_settings *get_settings_by_id( u8 ctx_id );
+
+/* How long the FSM read path waits for the IPA to push the calibration
+ * blob before giving up with -ETIMEDOUT. The IPA pushes during
+ * IPAModalix::init() (well before any stream is started), so the wait
+ * normally returns immediately. The timeout exists so a missing or
+ * broken IPA surfaces a clean errno instead of hanging the FSM thread
+ * forever. */
+#define CALIB_PUSH_WAIT_MS  5000u
 
 struct ctrl_channel_dev_context {
-    uint8_t dev_inited;
-    int dev_minor_id;
-    char *dev_name;
-    int dev_opened;
-
-    struct miscdevice ctrl_dev;
-    struct mutex fops_lock;
-
-    struct kfifo ctrl_kfifo_in;
-    struct kfifo ctrl_kfifo_out;
-
-    struct ctrl_cmd_item cmd_item;
-
-    struct user_calibration_data user_calibrations[FIRMWARE_CONTEXT_NUMBER];
-    uint8_t num_of_contexts;
+    uint8_t              dev_inited;
+    uint8_t              ctx_id;
+    struct mutex         lock;
+    wait_queue_head_t    wq;
+    bool                 calib_ready;
+    ACameraCalibrations *calibrations;
 };
 
+static struct ctrl_channel_dev_context ctrl_channel_ctx[FIRMWARE_CONTEXT_NUMBER];
 
-static struct ctrl_channel_dev_context ctrl_channel_ctx;
+/* Block until the IPA has pushed a calibration blob for @p_ctx (or
+ * until the wait times out). Returns 0 when calibrations are ready,
+ * -ETIMEDOUT if the IPA never pushed inside CALIB_PUSH_WAIT_MS, or
+ * -ERESTARTSYS if interrupted. Safe to call from a kernel thread. */
+static int wait_for_calibrations( struct ctrl_channel_dev_context *p_ctx )
+{
+    long ret;
+
+    if ( READ_ONCE( p_ctx->calib_ready ) )
+        return 0;
+
+    ret = wait_event_interruptible_timeout(
+        p_ctx->wq,
+        READ_ONCE( p_ctx->calib_ready ),
+        msecs_to_jiffies( CALIB_PUSH_WAIT_MS ) );
+
+    if ( ret == 0 ) {
+        LOG( LOG_ERR, "ctx %u: timed out waiting for IPA to push calibrations",
+             p_ctx->ctx_id );
+        return -ETIMEDOUT;
+    }
+    if ( ret < 0 ) {
+        LOG( LOG_INFO, "ctx %u: interrupted while waiting for calibration push",
+             p_ctx->ctx_id );
+        return -ERESTARTSYS;
+    }
+    return 0;
+}
 
 #define REPEAT_16(x) x(0) x(1) x(2) x(3) x(4) x(5) x(6) x(7) x(8) x(9) x(10) x(11) x(12) x(13) x(14) x(15)
 #define ASSIGN_CALIB_CALLBACK(CTX) custom_get_calib_ctx##CTX,
 #define DEFINE_CALIB_CALLBACK(CTX) \
 static int32_t custom_get_calib_ctx##CTX(uint32_t wdr_mode, void *param) { \
-	if (param != NULL) { \
-		if (ctrl_channel_ctx.user_calibrations[CTX].calibrations != NULL) { \
-			ACameraCalibrations *c = (ACameraCalibrations *)param; \
-			ACameraCalibrations *user_c = ctrl_channel_ctx.user_calibrations[CTX].calibrations; \
-			int i; \
-			for (i = 0; i < CALIBRATION_TOTAL_SIZE; i++) { \
-				if (user_c->calibrations[i] != NULL && user_c->calibrations[i]->ptr != NULL) { \
-					c->calibrations[i] = user_c->calibrations[i]; \
-				} \
-			} \
-			LOG(LOG_INFO, "Wrote user calibrations for CTX %d (WDR Mode: %u)\n", CTX, wdr_mode); \
-			return 0; \
-		} else if (ctrl_channel_ctx.user_calibrations[CTX].old_cb) { \
-		return ctrl_channel_ctx.user_calibrations[CTX].old_cb(wdr_mode, param); \
+	struct ctrl_channel_dev_context *p_ctx = &ctrl_channel_ctx[CTX]; \
+	ACameraCalibrations *c, *user_c; \
+	int rc, i; \
+	if (param == NULL) \
+		return -EINVAL; \
+	rc = wait_for_calibrations(p_ctx); \
+	if (rc) \
+		return rc; \
+	mutex_lock(&p_ctx->lock); \
+	user_c = p_ctx->calibrations; \
+	if (user_c == NULL) { \
+		mutex_unlock(&p_ctx->lock); \
+		return -EAGAIN; \
+	} \
+	c = (ACameraCalibrations *)param; \
+	for (i = 0; i < MODALIX_ISP_CALIB_TOTAL_SIZE; i++) { \
+		LookupTable *u_lut = (LookupTable *)(uintptr_t)user_c->calibrations[i]; \
+		if (user_c->calibrations[i] != 0 && u_lut != NULL && u_lut->ptr != 0) { \
+			c->calibrations[i] = user_c->calibrations[i]; \
 		} \
 	} \
-	return -1; \
+	mutex_unlock(&p_ctx->lock); \
+	LOG(LOG_INFO, "Wrote user calibrations for CTX %d (WDR Mode: %u)", CTX, wdr_mode); \
+	return 0; \
 }
 
 REPEAT_16(DEFINE_CALIB_CALLBACK)
@@ -86,402 +154,227 @@ int32_t (*cbs[])( uint32_t wdr_mode, void *param ) = {
     REPEAT_16(ASSIGN_CALIB_CALLBACK)
 };
 
-static int ctrl_channel_fops_open( struct inode *inode, struct file *f )
+/**
+ * modalix_isp_install_user_calibrations() - V4L2-path entry point used
+ * by the meta-stats node's s_ctrl handler when the IPA writes
+ * MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB. Takes a copy of @data, patches
+ * the offset-form __aligned_u64 fields to kernel pointers in place,
+ * and atomically swaps the result into the per-ctx slot the
+ * cbs[]/custom_get_calib_ctxN dispatcher reads from. Returns 0 on
+ * success or a negative errno.
+ *
+ * The data is already in kernel memory when this is called (V4L2
+ * has done the user-space copy), so no copy_from_user is needed.
+ */
+int modalix_isp_install_user_calibrations( uint32_t ctx_id,
+                                           const void *data,
+                                           size_t      size )
 {
-    int rc;
-    struct ctrl_channel_dev_context *p_ctx = &ctrl_channel_ctx;
-    int minor = iminor( inode );
+    struct ctrl_channel_dev_context *p_ctx;
+    ACameraCalibrations             *kcalibs;
+    size_t                           hdr;
+    int                              i;
 
-    LOG( LOG_INFO, "client is opening..., minor: %d.", minor );
-
-    if ( minor != p_ctx->dev_minor_id ) {
-        LOG( LOG_CRIT, "Not matched ID, minor_id: %d, expected: %d(dev name: %s)", minor, p_ctx->dev_minor_id, p_ctx->dev_name );
-        return -ERESTARTSYS;
-    }
-
-    rc = mutex_lock_interruptible( &p_ctx->fops_lock );
-    if ( rc ) {
-        LOG( LOG_ERR, "Error: lock failed of dev: %s.", p_ctx->dev_name );
-        goto lock_failure;
-    }
-
-    if ( p_ctx->dev_opened ) {
-        LOG( LOG_ERR, "open(%s) failed, already opened.", p_ctx->dev_name );
-        rc = -EBUSY;
-    } else {
-        p_ctx->dev_opened = 1;
-        rc = 0;
-        LOG( LOG_INFO, "open(%s) succeed.", p_ctx->dev_name );
-
-        LOG( LOG_INFO, "Bf set, private_data: %p.", f->private_data );
-        f->private_data = p_ctx;
-        LOG( LOG_INFO, "Af set, private_data: %p.", f->private_data );
-    }
-
-    mutex_unlock( &p_ctx->fops_lock );
-
-lock_failure:
-    return rc;
-}
-
-static int ctrl_channel_fops_release( struct inode *inode, struct file *f )
-{
-    int rc;
-    struct ctrl_channel_dev_context *p_ctx = (struct ctrl_channel_dev_context *)f->private_data;
-
-    if ( p_ctx != &ctrl_channel_ctx ) {
-        LOG( LOG_ERR, "Invalid parameter: %p, expected: %p.", p_ctx, &ctrl_channel_ctx );
+    if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER || data == NULL || size == 0 ) {
         return -EINVAL;
     }
 
-    rc = mutex_lock_interruptible( &p_ctx->fops_lock );
-    if ( rc ) {
-        LOG( LOG_ERR, "Error: lock failed of dev: %s.", p_ctx->dev_name );
-        return rc;
+    p_ctx = &ctrl_channel_ctx[ctx_id];
+    if ( !p_ctx->dev_inited ) {
+        return -EAGAIN;
     }
 
-    if ( p_ctx->dev_opened ) {
-        p_ctx->dev_opened = 0;
-        f->private_data = NULL;
-        kfifo_reset( &p_ctx->ctrl_kfifo_in );
-        kfifo_reset( &p_ctx->ctrl_kfifo_out );
-        LOG( LOG_INFO, "close(%s) succeed, private_data: %p.", p_ctx->dev_name, p_ctx );
-    } else {
-        LOG( LOG_CRIT, "Fatal error: wrong state of dev: %s, dev_opened: %d.", p_ctx->dev_name, p_ctx->dev_opened );
-        rc = -EINVAL;
+    kcalibs = kmalloc( size, GFP_KERNEL );
+    if ( !kcalibs ) {
+        return -ENOMEM;
+    }
+    memcpy( kcalibs, data, size );
+
+    /* Patch offset -> kernel pointer in place. The blob crosses the V4L2
+     * boundary so it is untrusted: bounds-check every offset against
+     * `size` and reject a malformed/mismatched blob with -EINVAL rather
+     * than dereferencing a wild pointer. Wire form holds a byte offset in
+     * each __aligned_u64 slot; after patching it holds a real kernel
+     * pointer (same storage, two interpretations). */
+    hdr = sizeof( *kcalibs );
+    if ( size < hdr ) {
+        goto bad_blob;
     }
 
-    mutex_unlock( &p_ctx->fops_lock );
+    for ( i = 0; i < MODALIX_ISP_CALIB_TOTAL_SIZE; i++ ) {
+        uintptr_t    table_offset = (uintptr_t)kcalibs->calibrations[i];
+        LookupTable *table;
 
+        if ( !table_offset ) {
+            continue;
+        }
+
+        /* descriptor must sit after the root header, be 8-byte aligned,
+         * and fit wholly inside the blob */
+        if ( table_offset < hdr || ( table_offset & 0x7 ) ||
+             table_offset > size - sizeof( LookupTable ) ) {
+            goto bad_blob;
+        }
+
+        table = (LookupTable *)( (uint8_t *)kcalibs + table_offset );
+        kcalibs->calibrations[i] = (__u64)(uintptr_t)table;
+
+        if ( table->ptr ) {
+            uintptr_t data_offset = (uintptr_t)table->ptr;
+            size_t    data_bytes  = (size_t)table->rows * table->cols * table->width;
+
+            /* LUT data must also lie after the header and fit in the blob */
+            if ( data_offset < hdr || data_offset > size ||
+                 data_bytes > size - data_offset ) {
+                goto bad_blob;
+            }
+
+            table->ptr = (__u64)(uintptr_t)( (uint8_t *)kcalibs + data_offset );
+        }
+    }
+
+    mutex_lock( &p_ctx->lock );
+    if ( p_ctx->calibrations != NULL ) {
+        kfree( p_ctx->calibrations );
+    }
+    p_ctx->calibrations = kcalibs;
+    WRITE_ONCE( p_ctx->calib_ready, true );
+    mutex_unlock( &p_ctx->lock );
+
+    /* Wake any FSM thread that hit wait_for_calibrations before this
+     * push arrived. With SOCSW-5579 the kernel no longer has a baked-in
+     * default to fall back to, so a missing push would otherwise hang
+     * the read path. */
+    wake_up_interruptible( &p_ctx->wq );
+
+    LOG( LOG_DEBUG, "ctx %u: V4L2 install of calibration blob (%zu bytes)",
+         ctx_id, size );
     return 0;
+
+bad_blob:
+    kfree( kcalibs );
+    LOG( LOG_ERR, "ctx %u: rejected malformed calibration blob (%zu bytes)",
+         ctx_id, size );
+    return -EINVAL;
 }
+EXPORT_SYMBOL_GPL( modalix_isp_install_user_calibrations );
 
-static ssize_t ctrl_channel_fops_write( struct file *file, const char __user *buf, size_t count, loff_t *ppos )
+/* Apply the IPA's ISP pipeline bypass word to context @ctx_id's config
+ * space. Masked RMW so reserved bits keep their power-on value. The
+ * context's isp_base is the per-context CDMA config slot — the same base
+ * the ISP sensor drivers and FSMs use for pipeline writes. */
+int modalix_isp_apply_pipeline_bypass( uint32_t ctx_id, uint32_t bypass_word )
 {
-    int rc;
-    unsigned int copied;
-    struct ctrl_channel_dev_context *p_ctx = (struct ctrl_channel_dev_context *)file->private_data;
+	acamera_settings *s;
+	uint32_t          base, cur;
 
-    if ( p_ctx != &ctrl_channel_ctx ) {
-        LOG( LOG_ERR, "Invalid parameter: %p, expected: %p.", p_ctx, &ctrl_channel_ctx );
-        return -EINVAL;
-    }
-
-    if ( mutex_lock_interruptible( &p_ctx->fops_lock ) ) {
-        LOG( LOG_CRIT, "Fatal error: access lock failed." );
-        return -ERESTARTSYS;
-    }
-
-    rc = kfifo_from_user( &p_ctx->ctrl_kfifo_in, buf, count, &copied );
-
-    mutex_unlock( &p_ctx->fops_lock );
-
-    LOG( LOG_DEBUG, "wake up reader." );
-
-    return rc ? rc : copied;
-}
-
-static ssize_t ctrl_channel_fops_read( struct file *file, char __user *buf, size_t count, loff_t *ppos )
-{
-    int rc = 0;
-    unsigned int copied = 0;
-    struct ctrl_channel_dev_context *p_ctx = (struct ctrl_channel_dev_context *)file->private_data;
-
-    if ( p_ctx != &ctrl_channel_ctx ) {
-        LOG( LOG_ERR, "Invalid parameter: %p, expected: %p.", p_ctx, &ctrl_channel_ctx );
-        return -EINVAL;
-    }
-
-    if ( mutex_lock_interruptible( &p_ctx->fops_lock ) ) {
-        LOG( LOG_CRIT, "Fatal error: access lock failed." );
-        return -ERESTARTSYS;
-    }
-
-    if ( !kfifo_is_empty( &p_ctx->ctrl_kfifo_out ) ) {
-        rc = kfifo_to_user( &p_ctx->ctrl_kfifo_out, buf, count, &copied );
-    }
-
-    mutex_unlock( &p_ctx->fops_lock );
-
-    return rc ? rc : copied;
-}
-
-static long ctrl_channel_fops_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	struct ctrl_channel_dev_context *p_ctx = (struct ctrl_channel_dev_context *)file->private_data;
-	struct isp_calibration_data calib;
-	ACameraCalibrations *kcalibs;
-	int i;
-
-	LOG(LOG_ERR, "Entered IOCTL");
-	if (p_ctx != &ctrl_channel_ctx)
+	if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER ) {
 		return -EINVAL;
-
-	if (cmd == ISP_IOC_SET_CALIBRATION) {
-		if (copy_from_user(&calib, (void __user *)arg,
-			sizeof(calib))) return -EFAULT;
-
-		if (calib.ctx_id >= p_ctx->num_of_contexts || calib.size == 0)
-			return -EINVAL;
-
-		mutex_lock(&p_ctx->fops_lock);
-
-		if (p_ctx->user_calibrations[calib.ctx_id].calibrations != NULL)
-			kfree(p_ctx->user_calibrations[calib.ctx_id].calibrations);
-
-		kcalibs = kmalloc(calib.size, GFP_KERNEL);
-		if (!kcalibs) {
-			mutex_unlock(&p_ctx->fops_lock);
-			return -ENOMEM;
-		}
-
-		if (copy_from_user(kcalibs, calib.data, calib.size)) {
-			kfree(kcalibs);
-			p_ctx->user_calibrations[calib.ctx_id].calibrations = NULL;
-			mutex_unlock(&p_ctx->fops_lock);
-			return -EFAULT;
-		}
-
-		for (i = 0; i < CALIBRATION_TOTAL_SIZE; i++) {
-			if (kcalibs->calibrations[i]) {
-				uintptr_t table_offset = (uintptr_t)kcalibs->calibrations[i];
-				LookupTable *table = (LookupTable *)((uint8_t *)kcalibs + table_offset);
-				kcalibs->calibrations[i] = table;
-
-				if (table->ptr) {
-					uintptr_t data_offset = (uintptr_t)table->ptr;
-					table->ptr = (const void *)((uint8_t *)kcalibs + data_offset);
-				}
-			}
-		}
-
-		p_ctx->user_calibrations[calib.ctx_id].calibrations = kcalibs;
-		LOG(LOG_ERR, "Patched calibration data for CTX %u", calib.ctx_id);
-
-		mutex_unlock(&p_ctx->fops_lock);
-		return 0;
 	}
 
-	return -ENOTTY;
+	s = get_settings_by_id( (u8)ctx_id );
+	if ( !s ) {
+		return -ENODEV;
+	}
+
+	base = (uint32_t)s->isp_base;
+	cur  = system_isp_read_32( base + MODALIX_ISP_PIPELINE_BYPASS_OFFSET );
+	cur  = ( cur & MODALIX_ISP_PIPELINE_BYPASS_RESERVED ) |
+	       ( bypass_word & ~MODALIX_ISP_PIPELINE_BYPASS_RESERVED );
+	system_isp_write_32( base + MODALIX_ISP_PIPELINE_BYPASS_OFFSET, cur );
+
+	LOG( LOG_DEBUG, "ctx %u: applied ISP bypass 0x%08x (reg now 0x%08x)",
+	     ctx_id, bypass_word, cur );
+	return 0;
 }
+EXPORT_SYMBOL_GPL( modalix_isp_apply_pipeline_bypass );
 
-static struct file_operations isp_fops = {
-    .owner = THIS_MODULE,
-    .open = ctrl_channel_fops_open,
-    .release = ctrl_channel_fops_release,
-    .read = ctrl_channel_fops_read,
-    .write = ctrl_channel_fops_write,
-    .llseek = noop_llseek,
-    .unlocked_ioctl = ctrl_channel_fops_ioctl,
-};
-
-
-static int32_t ctrl_channel_write( const struct ctrl_cmd_item *p_cmd, const void *data, uint32_t data_size )
+/* Read back context @ctx_id's live ISP pipeline bypass word. */
+int modalix_isp_read_pipeline_bypass( uint32_t ctx_id, uint32_t *out )
 {
-    if ( !ctrl_channel_ctx.dev_inited ) {
-        LOG( LOG_ERR, "dev is not initialized, failed to write." );
-        return -1;
-    }
+	acamera_settings *s;
 
-    mutex_lock( &ctrl_channel_ctx.fops_lock );
+	if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER || !out ) {
+		return -EINVAL;
+	}
 
-    int32_t rc = kfifo_in( &ctrl_channel_ctx.ctrl_kfifo_out, p_cmd, sizeof( struct ctrl_cmd_item ) );
-    if ( data )
-        kfifo_in( &ctrl_channel_ctx.ctrl_kfifo_out, data, data_size );
+	s = get_settings_by_id( (u8)ctx_id );
+	if ( !s ) {
+		return -ENODEV;
+	}
 
-    mutex_unlock( &ctrl_channel_ctx.fops_lock );
-
-    return rc;
+	*out = system_isp_read_32( (uint32_t)s->isp_base +
+	                           MODALIX_ISP_PIPELINE_BYPASS_OFFSET );
+	return 0;
 }
-
+EXPORT_SYMBOL_GPL( modalix_isp_read_pipeline_bypass );
 
 int32_t ctrl_channel_init( acamera_settings *settings, uint8_t num_of_contexts )
 {
-    int32_t rc;
-    int i;
+    uint32_t i;
 
-    system_memset( &ctrl_channel_ctx, 0, sizeof( ctrl_channel_ctx ) );
-    ctrl_channel_ctx.ctrl_dev.name = CTRL_CHANNEL_DEV_NAME;
-    ctrl_channel_ctx.dev_name = CTRL_CHANNEL_DEV_NAME;
-    ctrl_channel_ctx.ctrl_dev.minor = MISC_DYNAMIC_MINOR;
-    ctrl_channel_ctx.ctrl_dev.fops = &isp_fops;
-    ctrl_channel_ctx.num_of_contexts = num_of_contexts;
-
-    for(i = 0; i < num_of_contexts; i++) {
-        ctrl_channel_ctx.user_calibrations[i].calibrations = NULL;
-	ctrl_channel_ctx.user_calibrations[i].old_cb = settings[i].get_calibrations;
-	settings[i].get_calibrations = cbs[i];
+    if ( num_of_contexts > FIRMWARE_CONTEXT_NUMBER ) {
+        LOG( LOG_ERR, "num_of_contexts (%u) exceeds FIRMWARE_CONTEXT_NUMBER (%u).",
+             num_of_contexts, FIRMWARE_CONTEXT_NUMBER );
+        return -EINVAL;
     }
 
-    rc = misc_register( &ctrl_channel_ctx.ctrl_dev );
-    if ( rc ) {
-        LOG( LOG_ERR, "Error: register ISP ctrl channel device failed, ret: %d.", rc );
-        return rc;
+    for ( i = 0; i < num_of_contexts; i++ ) {
+        struct ctrl_channel_dev_context *p_ctx = &ctrl_channel_ctx[i];
+
+        p_ctx->ctx_id = i;
+        mutex_init( &p_ctx->lock );
+        init_waitqueue_head( &p_ctx->wq );
+        p_ctx->calib_ready = false;
+        p_ctx->calibrations = NULL;
+
+        /* Route the firmware's get_calibrations read path through the
+         * cbs[i] dispatcher; cbs[i] blocks on wait_for_calibrations
+         * until the IPA pushes a blob via
+         * MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB. The kernel no longer
+         * carries a baked-in fallback — sensor/calibrations/*.o was
+         * removed from the Makefile and the runtime_initialization_
+         * settings.h .get_calibrations field is NULL. */
+        settings[i].get_calibrations = cbs[i];
+
+        p_ctx->dev_inited = 1;
     }
 
-    ctrl_channel_ctx.dev_minor_id = ctrl_channel_ctx.ctrl_dev.minor;
-    mutex_init( &ctrl_channel_ctx.fops_lock );
-
-    rc = kfifo_alloc( &ctrl_channel_ctx.ctrl_kfifo_in, CTRL_CHANNEL_FIFO_INPUT_SIZE, GFP_KERNEL );
-    if ( rc ) {
-        LOG( LOG_ERR, "Error: kfifo_in alloc failed, ret: %d.", rc );
-        goto failed_kfifo_in_alloc;
-    }
-
-    rc = kfifo_alloc( &ctrl_channel_ctx.ctrl_kfifo_out, CTRL_CHANNEL_FIFO_OUTPUT_SIZE, GFP_KERNEL );
-    if ( rc ) {
-        LOG( LOG_ERR, "Error: kfifo_out alloc failed, ret: %d.", rc );
-        goto failed_kfifo_out_alloc;
-    }
-
-    ctrl_channel_ctx.dev_inited = 1;
-
-    LOG( LOG_INFO, "ctrl_channel_dev_context(%s) init OK.", ctrl_channel_ctx.dev_name );
-
+    LOG( LOG_INFO, "calib bridge: initialised %u ctxs", num_of_contexts );
     return 0;
-
-failed_kfifo_out_alloc:
-    kfifo_free( &ctrl_channel_ctx.ctrl_kfifo_in );
-failed_kfifo_in_alloc:
-    misc_deregister( &ctrl_channel_ctx.ctrl_dev );
-
-    LOG( LOG_ERR, "Error: init failed for dev: %s.", ctrl_channel_ctx.ctrl_dev.name );
-    return rc;
 }
 
 void ctrl_channel_process( void )
 {
+    /* No-op. Retained for callsite stability in the user-space
+     * firmware port (which still ticks this from its main loop).
+     * The chardev's kfifo-out drain that used to live here was
+     * unused — zero in-tree producers — and was deleted with the
+     * rest of the chardev infrastructure. */
 }
 
 void ctrl_channel_deinit( void )
 {
-	int i;
-    if ( ctrl_channel_ctx.dev_inited ) {
-        kfifo_free( &ctrl_channel_ctx.ctrl_kfifo_in );
+    uint32_t i;
+    for ( i = 0; i < FIRMWARE_CONTEXT_NUMBER; i++ ) {
+        struct ctrl_channel_dev_context *p_ctx = &ctrl_channel_ctx[i];
 
-        kfifo_free( &ctrl_channel_ctx.ctrl_kfifo_out );
+        if ( !p_ctx->dev_inited )
+            continue;
 
-        misc_deregister( &ctrl_channel_ctx.ctrl_dev );
+        /* Clear the ready flag and wake every waiter so they exit
+         * cleanly with -EAGAIN / -ERESTARTSYS instead of hanging until
+         * the wait times out. */
+        WRITE_ONCE( p_ctx->calib_ready, false );
+        wake_up_interruptible_all( &p_ctx->wq );
 
-	for(i = 0; i < ctrl_channel_ctx.num_of_contexts; i++) {
-		if (ctrl_channel_ctx.user_calibrations[i].calibrations) {
-			kfree(ctrl_channel_ctx.user_calibrations[i].calibrations);
-			ctrl_channel_ctx.user_calibrations[i].calibrations = NULL;
-		}
-	}
+        mutex_lock( &p_ctx->lock );
+        if ( p_ctx->calibrations ) {
+            kfree( p_ctx->calibrations );
+            p_ctx->calibrations = NULL;
+        }
+        mutex_unlock( &p_ctx->lock );
 
-        LOG( LOG_INFO, "misc_deregister dev: %s.", ctrl_channel_ctx.ctrl_dev.name );
-    } else {
-        LOG( LOG_INFO, "dev not initialized, do nothing." );
+        p_ctx->dev_inited = 0;
     }
-}
-
-static uint8_t is_uf_needed_command( uint8_t command_type, uint8_t command, uint8_t direction )
-{
-    uint8_t rc = 0;
-
-    // We only support SET in user-FW.
-    if ( COMMAND_GET == direction )
-        return rc;
-
-    switch ( command_type ) {
-
-        // If we need to blacklist some commands add corresponding case statement
-
-    default:
-        rc = 1;
-        break;
-    }
-
-    return rc;
-}
-
-void ctrl_channel_handle_api_command( uint32_t ctx_id, uint8_t cmd_if_mode, uint8_t type, uint8_t command, uint32_t value, uint8_t direction )
-{
-    if ( !ctrl_channel_ctx.dev_inited ) {
-        LOG( LOG_ERR, "FW ctrl channel is not initialized." );
-        return;
-    }
-
-    if ( !ctrl_channel_ctx.dev_opened ) {
-        LOG( LOG_DEBUG, "FW ctrl channel is not opened, skip." );
-        return;
-    }
-
-    /* If user-FW is not needed this command, we do nothing */
-    if ( !is_uf_needed_command( type, command, direction ) ) {
-        return;
-    }
-
-    struct ctrl_cmd_item *p_cmd = &ctrl_channel_ctx.cmd_item;
-    p_cmd->cmd_category = CTRL_CMD_CATEGORY_API_COMMAND;
-    p_cmd->cmd_len = sizeof( struct ctrl_cmd_item );
-    p_cmd->cmd_ctx_id = ctx_id;
-    p_cmd->cmd_if_mode = cmd_if_mode;
-    p_cmd->cmd_type = type;
-    p_cmd->cmd_id = command;
-    p_cmd->cmd_direction = direction;
-    p_cmd->cmd_value = value;
-
-    LOG( LOG_INFO, "api_command: cmd_ctx_id: %u, cmd_if_mode: %u, cmd_type: %u, cmd_id: %u, cmd_direction: %u, cmd_value: %u.",
-         p_cmd->cmd_ctx_id, p_cmd->cmd_if_mode, p_cmd->cmd_type, p_cmd->cmd_id, p_cmd->cmd_direction, p_cmd->cmd_value );
-
-    ctrl_channel_write( p_cmd, NULL, 0 );
-}
-
-void ctrl_channel_handle_api_calibration( uint32_t ctx_id, uint8_t type, uint8_t id, uint8_t direction, void *data, uint32_t data_size )
-{
-    if ( !ctrl_channel_ctx.dev_inited ) {
-        LOG( LOG_ERR, "FW ctrl channel is not initialized." );
-        return;
-    }
-
-    if ( !ctrl_channel_ctx.dev_opened ) {
-        LOG( LOG_INFO, "FW ctrl channel is not opened, skip." );
-        return;
-    }
-
-    struct ctrl_cmd_item *p_cmd = &ctrl_channel_ctx.cmd_item;
-    p_cmd->cmd_category = CTRL_CMD_CATEGORY_API_CALIBRATION;
-    p_cmd->cmd_len = sizeof( struct ctrl_cmd_item ) + data_size;
-    p_cmd->cmd_ctx_id = ctx_id;
-    p_cmd->cmd_type = type;
-    p_cmd->cmd_id = id;
-    p_cmd->cmd_direction = direction;
-    p_cmd->cmd_value = data_size;
-
-    LOG( LOG_INFO, "api_calibration: cmd_ctx_id: %u, cmd_type: %u, cmd_id: %u, cmd_direction: %u, cmd_value: %u.",
-         p_cmd->cmd_ctx_id, p_cmd->cmd_type, p_cmd->cmd_id, p_cmd->cmd_direction, p_cmd->cmd_value );
-
-    ctrl_channel_write( p_cmd, data, data_size );
-}
-
-void ctrl_channel_handle_api_event( uint32_t ctx_id, uint8_t cmd_if_mode, uint32_t event_id )
-{
-    if ( !ctrl_channel_ctx.dev_inited ) {
-        LOG( LOG_ERR, "FW ctrl channel is not initialized." );
-        return;
-    }
-
-    if ( !ctrl_channel_ctx.dev_opened ) {
-        LOG( LOG_DEBUG, "FW ctrl channel is not opened, skip." );
-        return;
-    }
-
-    // If Command interface is not in passive mode - skip
-    if ( cmd_if_mode != CMD_IF_MODE_PASSIVE ) {
-        return;
-    }
-
-    struct ctrl_cmd_item *p_cmd = &ctrl_channel_ctx.cmd_item;
-    p_cmd->cmd_category = CTRL_CMD_CATEGORY_API_EVENT;
-    p_cmd->cmd_len = sizeof( struct ctrl_cmd_item );
-    p_cmd->cmd_ctx_id = ctx_id;
-    p_cmd->cmd_if_mode = cmd_if_mode;
-    p_cmd->cmd_value = event_id;
-
-    LOG( LOG_INFO, "api_event: cmd_ctx_id: %u, cmd_if_mode: %u, cmd_value: %u.",
-         p_cmd->cmd_ctx_id, p_cmd->cmd_if_mode, p_cmd->cmd_value );
-
-    ctrl_channel_write( p_cmd, NULL, 0 );
 }

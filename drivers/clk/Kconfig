@@ -182,6 +182,17 @@ config COMMON_CLK_SIMAAI_SIODIV
 	  provided by SIO for SPI, UART, I2C.
 	  When clock is not used, driver disables it.
 
+config COMMON_CLK_SIMAAI_PRC
+	tristate "Clock driver for SiMa.ai PRC Modalix SoC"
+	depends on OF
+	depends on HAS_IOMEM
+	depends on ARCH_SIMAAI || COMPILE_TEST
+	help
+	 This driver supports the PRC clock controller on SiMa.ai Modalix
+	 SoCs. It provides the rate-controllable PLLs and the peripheral
+	 gate clocks derived from them. Say Y if you want to control the
+	 PLLs and peripheral clocks on a Modalix SoC.
+
 config COMMON_CLK_BM1880
 	bool "Clock driver for Bitmain BM1880 SoC"
 	depends on ARCH_BITMAIN || COMPILE_TEST

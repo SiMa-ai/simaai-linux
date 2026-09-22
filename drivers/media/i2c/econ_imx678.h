@@ -29,32 +29,34 @@
 #define GAIN_CTRL_ID 		0x009A2009
 #define FRAMERATE_CTRL_ID 	0x009A200B
 #define EXPOSURE_FACTOR 	1000000
-#define SENSOR_PIXEL_CLOCK 	74250000
-#define GAIN_FACTOR 		10
-#define LOG2_GAIN_SHIFT 	18
+#define SENSOR_PIXEL_CLOCK 	74250000	/* MCU timing clock (594 MHz / 8); HMAX counts in it */
+/* Vendor firmware seeds every mode with this VMAX; HMAX derives from fps. */
+#define SENSOR_VMAX_SEED	2250
+#define GAIN_FACTOR_NUM		10	/* register unit: dB * (10/3) */
+#define GAIN_FACTOR_DEN		3
 
 #define IMX678_VBLANK_MIN       48
 
-#define SENSOR_MAX_INTEGRATION_TIME (11249) // Number of lines per frame - 1
-#define SENSOR_MIN_INTEGRATION_TIME (3)
+#define SENSOR_MAX_INTEGRATION_TIME (11249) // Number of lines per frame - 1 (sensor truth; informational only after the µs migration)
+#define SENSOR_MIN_INTEGRATION_TIME (3)     // (sensor truth; informational only after the µs migration)
 
 /* Exposure control */
-#define IMX678_EXPOSURE_MIN			SENSOR_MIN_INTEGRATION_TIME
-#define IMX678_EXPOSURE_MAX			SENSOR_MAX_INTEGRATION_TIME
-#define IMX678_EXPOSURE_STEP        (1)
-#define IMX678_EXPOSURE_DEFAULT     (2250)
+#define IMX678_EXPOSURE_MIN         (100)        /* µs */
+#define IMX678_EXPOSURE_MAX         (10*1000000U)    /* µs (10 second) */
+#define IMX678_EXPOSURE_STEP        (1)          /* µs */
+#define IMX678_EXPOSURE_DEFAULT     (16666)      /* µs ≈ 1/60 s */
 
-/* Analog gain control  0 to 30DB*/ 
-#define IMX678_ANA_GAIN_MAX_DB		(5)
-#define IMX678_ANA_GAIN_MIN			(0 << LOG2_GAIN_SHIFT)
-#define IMX678_ANA_GAIN_MAX			(IMX678_ANA_GAIN_MAX_DB << LOG2_GAIN_SHIFT)
+/* Analog gain control  0 to 30dB (IMX678 native analog gain range) */
+#define IMX678_ANA_GAIN_MAX_DB		(30)
+#define IMX678_ANA_GAIN_MIN			(0)
+#define IMX678_ANA_GAIN_MAX			((IMX678_ANA_GAIN_MAX_DB * GAIN_FACTOR_NUM) / GAIN_FACTOR_DEN)
 #define IMX678_ANA_GAIN_DEFAULT		IMX678_ANA_GAIN_MIN
 #define IMX678_ANA_GAIN_STEP		(1)
 
-/* Digital gain control  30dB to 72dB*/
-#define IMX678_DGTL_GAIN_MAX_DB		(3)
-#define IMX678_DGTL_GAIN_MIN		(0 << LOG2_GAIN_SHIFT)
-#define IMX678_DGTL_GAIN_MAX		(IMX678_DGTL_GAIN_MAX_DB << LOG2_GAIN_SHIFT)
+/* Digital gain control  0 to 42dB (applied on top of 30dB analog) */
+#define IMX678_DGTL_GAIN_MAX_DB		(42)
+#define IMX678_DGTL_GAIN_MIN		(0)
+#define IMX678_DGTL_GAIN_MAX		((IMX678_DGTL_GAIN_MAX_DB * GAIN_FACTOR_NUM) / GAIN_FACTOR_DEN)
 #define IMX678_DGTL_GAIN_DEFAULT 	IMX678_DGTL_GAIN_MIN
 #define IMX678_DGTL_GAIN_STEP		(1)
 

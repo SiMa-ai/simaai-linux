@@ -1651,6 +1651,19 @@ void block_invalidate_folio(struct folio *folio, size_t offset, size_t length)
 		next = bh->b_this_page;
 
 		/*
+		 * The buffers of a folio form a circular list terminated by
+		 * @head. A NULL link means the ring was corrupted or a buffer
+		 * was freed from under us (a teardown race seen when a raw
+		 * block device backed by buffer heads is released during
+		 * reboot). Walking it would dereference NULL and take the
+		 * machine down mid-shutdown, so bail out with a diagnostic
+		 * instead; the folio's buffers are about to be discarded
+		 * anyway.
+		 */
+		if (WARN_ON_ONCE(!next))
+			goto out;
+
+		/*
 		 * Are we still fully in range ?
 		 */
 		if (next_off > stop)

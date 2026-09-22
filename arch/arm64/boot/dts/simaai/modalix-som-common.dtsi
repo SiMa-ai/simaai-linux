@@ -1,0 +1,354 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 SiMa ai
+ */
+
+/ {
+	chosen {
+		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
+		linux,initrd-start = <0x10 0x7D000000>;
+		linux,initrd-end = <0x10 0x7E400000>;
+	};
+
+	aliases {
+		console = &uart12;
+		mmc0 = &nvs_sdhci0;
+		rtc0 = &pcf85063;
+	};
+
+	thermal-zones {
+		board {
+			polling-delay = <30000>;
+			polling-delay-passive = <5000>;
+			thermal-sensors = <&board_sensor>;
+
+			trips {
+				board_alert: board-alert {
+					temperature = <85000>;
+					hysteresis = <3000>;
+					type = "hot";
+				};
+				board_crit: board-crit {
+					temperature = <96000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&board_alert>;
+				};
+				map1 {
+					trip = <&board_crit>;
+				};
+			};
+		};
+	};
+	ptp_clk: ptpclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <100000000>;
+		clock-output-names = "ptpclk";
+	};
+};
+
+&sio10_clk {
+	simaai,ignore-unused = <0x100>;
+};
+
+&nvs_sdhci0 {
+	status = "okay";
+};
+
+&sio0 {
+	status = "okay";
+};
+
+&sio1 {
+	status = "okay";
+};
+
+&sio2 {
+	status = "okay";
+};
+
+&sio3 {
+	status = "okay";
+};
+
+&sio4 {
+	status = "okay";
+};
+
+&sio5 {
+	status = "okay";
+};
+
+&sio6 {
+	status = "okay";
+};
+
+&sio7 {
+	status = "okay";
+};
+
+&gpio10 {
+	pinctrl-0 = <&pins_gpio12_deafult>, <&pins_gpio13_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&gpio50 {
+	pinctrl-0 = <&pins_gpio56_deafult>, <&pins_gpio57_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&port1 {
+	snps,nr-gpios = <4>;
+	usb-hog {
+		gpio-hog;
+		gpios = <2 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "usb_uart12";
+	};
+
+	perst-hog {
+		gpio-hog;
+		gpios = <3 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "pcie_perst";
+	};
+};
+
+&gpio60 {
+	pinctrl-0 = <&pins_gpio60_deafult>, <&pins_gpio61_deafult>,
+		    <&pins_gpio62_deafult>, <&pins_gpio63_deafult>,
+		    <&pins_gpio64_deafult>, <&pins_gpio65_deafult>,
+		    <&pins_gpio66_deafult>, <&pins_gpio67_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&port6 {
+	uart-hog {
+		gpio-hog;
+		gpios = <0 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "usb_uart60";
+	};
+};
+
+&gpio70 {
+	pinctrl-0 = <&pins_gpio70_deafult>, <&pins_gpio71_deafult>,
+		    <&pins_gpio72_deafult>, <&pins_gpio73_deafult>,
+		    <&pins_gpio74_deafult>, <&pins_gpio75_deafult>,
+		    <&pins_gpio76_deafult>, <&pins_gpio77_deafult>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&xgmac0 {
+	clocks = <&eth_clk>, <&ptp_clk>;
+	clock-names = "stmmaceth", "ptp_ref";
+	phy-mode = "sgmii";
+	managed = "in-band-status";
+	snps,ps-speed = <1000>;
+	phy-handle = <&ethernet_phy0>;
+	status = "okay";
+	mdio0 {
+		compatible = "snps,dwmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ethernet_phy0: ethernet-phy@0 {
+			reg = <0>;
+		};
+	};
+};
+
+&i2c00 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&i2c01 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&i2c02 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&i2c23 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	board_sensor: temp@4c {
+		compatible = "national,lm96163";
+		reg = <0x4c>;
+		#thermal-sensor-cells = <0>;
+	};
+
+	eeprom@50 {
+		compatible = "atmel,24c128";
+		reg = <0x50>;
+		pagesize = <64>;
+		num-addresses = <1>;
+	};
+
+	pcf85063: rtc@51 {
+		compatible = "nxp,pcf85063a";
+		reg = <0x51>;
+	};
+
+	pmic@4d {
+		compatible = "irps5401";
+		reg = <0x4d>;
+		regulators {
+		    buck0_4d: buck0 {
+			regulator-name = "buck0-4d";
+			regulator-min-microvolt = <400000>;   /* 0.40 V */
+			regulator-max-microvolt = <700000>;   /* 0.70 V */
+			regulator-always-on;
+			regulator-boot-on;
+		    };
+		    buck1_4d: buck1 {
+			regulator-name = "buck1-4d";
+			regulator-min-microvolt = <650000>;   /* 0.65 V */
+			regulator-max-microvolt = <950000>;   /* 0.95 V */
+			regulator-always-on;
+			regulator-boot-on;
+		    };
+		    buck2_4d: buck2 {
+			regulator-name = "buck2-4d";
+			regulator-min-microvolt = <1500000>;  /* 1.50 V */
+			regulator-max-microvolt = <1850000>;  /* 1.85 V */
+			regulator-always-on;
+			regulator-boot-on;
+		    };
+		    buck3_4d: buck3 {
+			regulator-name = "buck3-4d";
+			regulator-min-microvolt = <3000000>;  /* 3.0 V  */
+			regulator-max-microvolt = <3350000>;  /* 3.35 V */
+			regulator-always-on;
+			regulator-boot-on;
+		    };
+		};
+	};
+
+	pmic@4f {
+		compatible = "irps5401";
+		reg = <0x4f>;
+		regulators {
+		    buck0_4f: buck0 {
+			regulator-name = "buck0-4f";
+			regulator-min-microvolt = <500000>;    /* 0.50 V */
+			regulator-max-microvolt = <800000>;    /* 0.80 V */
+			regulator-always-on;
+			regulator-boot-on;
+		    };
+		    buck1_4f: buck1 {
+			regulator-name = "buck1-4f";
+			regulator-min-microvolt = <1000000>;  /* 1.0 V  */
+			regulator-max-microvolt = <1350000>;  /* 1.35 V */
+			regulator-always-on;
+			regulator-boot-on;
+		    };
+		    buck2_4f: buck2 {
+			regulator-name = "buck2-4f";
+			regulator-min-microvolt = <350000>;  /* 0.35 V  */
+			regulator-max-microvolt = <550000>;  /* 0.55 V */
+			regulator-always-on;
+			regulator-boot-on;
+		    };
+		    buck3_4f: buck3 {
+			regulator-name = "buck3-4f";
+			regulator-min-microvolt = <800000>;  /* 0.8 V */
+			regulator-max-microvolt = <1100000>; /* 1.1 V */
+			regulator-always-on;
+			regulator-boot-on;
+		    };
+		};
+	};
+
+};
+
+/ {
+	regulator-virtual-consumer-buck0-4d {
+		compatible = "regulator-virtual-consumer";
+		default-supply = <&buck0_4d>;
+	};
+
+	regulator-virtual-consumer-buck1-4d {
+		compatible = "regulator-virtual-consumer";
+		default-supply = <&buck1_4d>;
+	};
+
+	regulator-virtual-consumer-buck2-4d {
+		compatible = "regulator-virtual-consumer";
+		default-supply = <&buck2_4d>;
+	};
+
+	regulator-virtual-consumer-buck3-4d {
+		compatible = "regulator-virtual-consumer";
+		default-supply = <&buck3_4d>;
+	};
+
+	regulator-virtual-consumer-buck0-4f {
+		compatible = "regulator-virtual-consumer";
+		default-supply = <&buck0_4f>;
+	};
+
+	regulator-virtual-consumer-buck1-4f {
+		compatible = "regulator-virtual-consumer";
+		default-supply = <&buck1_4f>;
+	};
+
+	regulator-virtual-consumer-buck2-4f {
+		compatible = "regulator-virtual-consumer";
+		default-supply = <&buck2_4f>;
+	};
+
+	regulator-virtual-consumer-buck3-4f {
+		compatible = "regulator-virtual-consumer";
+		default-supply = <&buck3_4f>;
+	};
+};
+
+&i2c52 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&uart12 {
+	status = "okay";
+};
+
+&gic_its0 {
+	status = "okay";
+};
+
+&pcie0_rc {
+	status = "okay";
+};
+
+&gic_its2 {
+	status = "okay";
+};
+
+&pcie2_rc {
+	status = "okay";
+};
+
+&gic_its3 {
+	status = "okay";
+};
+
+&pcie3_rc {
+	status = "okay";
+};
+

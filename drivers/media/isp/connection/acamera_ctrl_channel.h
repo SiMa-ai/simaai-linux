@@ -28,38 +28,47 @@ extern "C" {
 #include "acamera_configuration.h"
 #include "acamera_settings.h"
 
-#define CTRL_CHANNEL_DEV_NAME "isp_control"
-#define CTRL_CHANNEL_DEV_NODE_NAME "/dev/" CTRL_CHANNEL_DEV_NAME
-#define CTRL_CHANNEL_MAX_CMD_SIZE ( 8 * 1024 )
-
-
-enum ctrl_cmd_category {
-    CTRL_CMD_CATEGORY_API_COMMAND = 1,
-    CTRL_CMD_CATEGORY_API_CALIBRATION,
-    CTRL_CMD_CATEGORY_API_EVENT
-};
-
-struct ctrl_cmd_item {
-    /* command metadata */
-    uint32_t cmd_len;
-    uint8_t cmd_category;
-
-    /* command content */
-    uint8_t cmd_type;
-    uint8_t cmd_id;
-    uint8_t cmd_direction;
-    uint8_t cmd_if_mode;
-    uint32_t cmd_ctx_id;
-    uint32_t cmd_value;
-};
+/* Calibration-storage bridge. Backs the per-ctx calibration the kernel
+ * firmware's calib_mgr read path consumes; populated by the V4L2
+ * MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB control on the meta-stats node
+ * (s_ctrl handler delegates to modalix_isp_install_user_calibrations).
+ * The legacy /dev/isp_control_<N> chardev and its IOCTL/kfifo command
+ * surface were retired in the V4L2 META migration. */
 
 int32_t ctrl_channel_init( acamera_settings *settings, uint8_t num_of_contexts );
-void ctrl_channel_process( void );
-void ctrl_channel_deinit( void );
+void    ctrl_channel_deinit( void );
+void    ctrl_channel_process( void );  /* no-op; retained for callsite stability */
 
-void ctrl_channel_handle_api_command( uint32_t ctx_id, uint8_t cmd_if_mode, uint8_t command_type, uint8_t command, uint32_t value, uint8_t direction );
-void ctrl_channel_handle_api_calibration( uint32_t ctx_id, uint8_t type, uint8_t id, uint8_t direction, void *data, uint32_t data_size );
-void ctrl_channel_handle_api_event( uint32_t ctx_id, uint8_t cmd_if_mode, uint32_t event_id );
+/**
+ * modalix_isp_install_user_calibrations() - install a calibration blob
+ * into the per-ctx slot the cbs[]/calib_mgr_update() chain reads.
+ * Called from the meta-stats V4L2 s_ctrl handler when the IPA writes
+ * MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB.
+ *
+ * @ctx_id: which ISP context the blob targets.
+ * @data:   kernel-owned pointer to the offset-form blob.
+ * @size:   total blob byte count (≤ MODALIX_ISP_V4L2_CALIBRATION_BLOB_MAX).
+ *
+ * Takes a copy, patches the offset-form __aligned_u64 fields to kernel
+ * pointers in place, and atomically swaps it into the per-ctx slot.
+ * Returns 0 on success or a negative errno.
+ */
+int modalix_isp_install_user_calibrations( uint32_t ctx_id, const void *data, size_t size );
+
+/**
+ * modalix_isp_apply_pipeline_bypass() - apply the IPA's ISP pipeline
+ * bypass word (Mali reg 0xE040) to context @ctx_id. Masked RMW that
+ * preserves reserved bits. Called from the meta-stats V4L2 s_ctrl
+ * handler on MODALIX_ISP_V4L2_CID_ISP_BYPASS_CONFIG. Returns 0 or
+ * a negative errno.
+ */
+int modalix_isp_apply_pipeline_bypass( uint32_t ctx_id, uint32_t bypass_word );
+
+/**
+ * modalix_isp_read_pipeline_bypass() - read back the live bypass word
+ * for context @ctx_id into @out. Backs the G_EXT_CTRLS readback path.
+ */
+int modalix_isp_read_pipeline_bypass( uint32_t ctx_id, uint32_t *out );
 
 #ifdef __cplusplus
 }

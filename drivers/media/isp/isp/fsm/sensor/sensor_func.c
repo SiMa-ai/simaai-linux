@@ -282,10 +282,10 @@ void sensor_update_hw( sensor_fsm_ptr_t p_fsm )
 
     const uint32_t ldr_gain_log2 = get_context_param( p_ictx, STATUS_INFO_LDR_GAIN_LOG2_ID_PARAM );
 
-    const uint32_t idx_r = CALIBRATION_BLACK_LEVEL_R;
-    const uint32_t idx_b = CALIBRATION_BLACK_LEVEL_B;
-    const uint32_t idx_gr = CALIBRATION_BLACK_LEVEL_GR;
-    const uint32_t idx_gb = CALIBRATION_BLACK_LEVEL_GB;
+    const uint32_t idx_r = MODALIX_ISP_CALIB_BLACK_LEVEL_R;
+    const uint32_t idx_b = MODALIX_ISP_CALIB_BLACK_LEVEL_B;
+    const uint32_t idx_gr = MODALIX_ISP_CALIB_BLACK_LEVEL_GR;
+    const uint32_t idx_gb = MODALIX_ISP_CALIB_BLACK_LEVEL_GB;
 
     const uint32_t bl_r = calc_modulation_u16( again_log2, calib_mgr_mod16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), idx_r ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), idx_r ) );
     const uint32_t bl_b = calc_modulation_u16( again_log2, calib_mgr_mod16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), idx_b ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), idx_b ) );

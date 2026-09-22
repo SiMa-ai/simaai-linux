@@ -62,7 +62,8 @@
 			no-map;
 			reg = <0x0 0x600000 0x0 0x200000>;
 		};
-	};
+
+};
 
 	dmacpy: simaai,memcpy-manager {
 		compatible = "simaai,memcpy-manager";

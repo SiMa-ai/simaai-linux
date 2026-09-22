@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * A V4L2 driver for econ FPGA
- * Copyright (C) 2026, e-con Systems India Pvt Ltd
+ * Based on v4l2 econ FPGA driver
+ * Copyright (C) 2026, e-con systems
  */
 #include <linux/unaligned.h>
 #include <linux/clk.h>
@@ -50,7 +50,9 @@ static int fpga_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 //==============================================================
 //		MIPI TX PLL Calculations
 //==============================================================
-int get_pll_coefficients(uint8_t ref_clk, uint16_t target_rate, uint8_t *best_n, uint8_t *best_m, uint8_t *best_o, uint16_t *best_r) {
+int get_pll_coefficients(uint8_t ref_clk, uint16_t target_rate, uint8_t *best_n,
+		uint8_t *best_m, uint8_t *best_o, uint16_t *best_r)
+{
 
 	const uint8_t O_VALS[5] = {1, 2, 4, 8, 16};
 
@@ -66,26 +68,25 @@ int get_pll_coefficients(uint8_t ref_clk, uint16_t target_rate, uint8_t *best_n,
 		if ((uint32_t)ref_clk >= (24 * n_div) && (uint32_t)ref_clk <= (50 * n_div)) {
 			for (int odiv_idx = 0; odiv_idx < 5; odiv_idx++) {
 				uint32_t o_div = O_VALS[odiv_idx];
-				uint32_t m_div = ((uint32_t)target_rate * n_div * o_div + (uint32_t)ref_clk - 1) / (uint32_t)ref_clk;
+				uint32_t m_div = ((uint32_t)target_rate * n_div * o_div +
+						(uint32_t)ref_clk - 1) / (uint32_t)ref_clk;
 
 				if (m_div >= 16 && m_div <= 255) {
 					uint32_t fvco = ((uint32_t)ref_clk * m_div) / n_div;
 
 					if (fvco >= 1250 && fvco <= 2500) {
-
-						uint32_t cur_rate = ((uint32_t)ref_clk * m_div) / (n_div * o_div);
+						uint32_t cur_rate = ((uint32_t)ref_clk * m_div) /
+							(n_div * o_div);
 
 						if (cur_rate >= (uint32_t)target_rate) {
-							uint32_t cur_dist = cur_rate - (uint32_t)target_rate;
-
+							uint32_t cur_dist = cur_rate -
+								(uint32_t)target_rate;
 							if (cur_dist < pre_dist) {
 								pre_dist = cur_dist;
-
 								final_n = (uint8_t)n_div;
 								final_m = (uint8_t)m_div;
 								final_o = (uint8_t)o_div;
 								final_rate = cur_rate;
-
 								found_solution = 1;
 							}
 						}
@@ -105,7 +106,8 @@ int get_pll_coefficients(uint8_t ref_clk, uint16_t target_rate, uint8_t *best_n,
 	return 1;
 }
 
-int get_config_registers(int CN, int CM, int CO, struct ConfigRegisters *regs) {
+int get_config_registers(int CN, int CM, int CO, struct ConfigRegisters *regs)
+{
 	uint8_t n_encoded = 0;
 	uint8_t m_encoded = 0;
 	uint8_t o_encoded = 0;
@@ -163,9 +165,12 @@ int get_config_registers(int CN, int CM, int CO, struct ConfigRegisters *regs) {
 		0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F
 	};
 
-	if (CN >= 1 && CN <= 32)   n_encoded = n_lookup[CN];
-	if (CM >= 16 && CM <= 255) m_encoded = m_lookup[CM];
-	if (CO >= 1 && CO <= 16)   o_encoded = o_lookup[CO];
+	if (CN >= 1 && CN <= 32)
+		n_encoded = n_lookup[CN];
+	if (CM >= 16 && CM <= 255)
+		m_encoded = m_lookup[CM];
+	if (CO >= 1 && CO <= 16)
+		o_encoded = o_lookup[CO];
 
 	regs->reg1 = ((n_encoded & 0x01) << 3) | 0x04;
 	regs->reg2 = (n_encoded >> 1) & 0x0F;
@@ -176,12 +181,8 @@ int get_config_registers(int CN, int CM, int CO, struct ConfigRegisters *regs) {
 	return 0;
 }
 
-//==============================================================
-//		MIPI TX Calculations
-//==============================================================
-
-//===================== tLPX ===========================//
-int calculate_tLPX(uint8_t byte_clk_mhz, uint8_t *result) {
+int calculate_tLPX(uint8_t byte_clk_mhz, uint8_t *result)
+{
 
 	uint32_t val = ((uint32_t)byte_clk_mhz / 20) + 1;
 
@@ -191,15 +192,13 @@ int calculate_tLPX(uint8_t byte_clk_mhz, uint8_t *result) {
 	} else if (val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = (uint8_t)val;
-		return 0;
 	}
+	*result = (uint8_t)val;
+	return 0;
 }
-//======================================================//
 
-//===================== tCLKPREP ===========================//
-int calculate_tCLKPREP(uint8_t byte_clk_mhz, uint8_t *result) {
+int calculate_tCLKPREP(uint8_t byte_clk_mhz, uint8_t *result)
+{
 
 	uint32_t calc = ((uint32_t)byte_clk_mhz * 19) / 500;
 	uint32_t val = calc + 1;
@@ -210,62 +209,57 @@ int calculate_tCLKPREP(uint8_t byte_clk_mhz, uint8_t *result) {
 	} else if (val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = (uint8_t)val;
-		return 0;
 	}
+	*result = (uint8_t)val;
+	return 0;
 }
-//======================================================//
 
-//====================== tCLK_HSZERO ========================//
-int calculate_tCLK_HSZERO(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result) {
+int calculate_tCLK_HSZERO(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result)
+{
 
 	uint32_t numerator = (uint32_t)byte_clk_mhz * 131;
 	uint32_t denominator = 500;
 
 	uint32_t clk_hszero_gui_cycles = numerator / denominator;
 	uint32_t remainder = numerator % denominator;
-
-	if (remainder > 0) {
-		clk_hszero_gui_cycles = clk_hszero_gui_cycles + 1;
-	}
-
 	uint32_t final_val;
 
-	if (gear == 16) {
+	if (remainder > 0)
+		clk_hszero_gui_cycles = clk_hszero_gui_cycles + 1;
+
+	if (gear == 16)
 		final_val = clk_hszero_gui_cycles + 1;
-	} else {
+	else
 		final_val = clk_hszero_gui_cycles;
-	}
 
 	if (final_val > 255) {
 		*result = 255;
 		return 1;
-	}
-	else if (final_val < 1) {
+	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
 	}
-	else {
-		*result = (uint8_t)final_val;
-		return 0;
-	}
+	*result = (uint8_t)final_val;
+	return 0;
 }
-//=============================================================================//
 
-//============================= tCLKPRE ===================================//
-int calculate_tCLKPRE(uint8_t gear, uint8_t *result) {
+int calculate_tCLKPRE(uint8_t gear, uint8_t *result)
+{
 	uint32_t calc = 8 / (uint32_t)gear;
 	uint32_t rem = 8 % (uint32_t)gear;
+	uint8_t term1_ceil;
+	uint8_t clkpre_min;
+	uint8_t final_val;
+	uint8_t register_min;
 
-	if (rem > 0) {
+	if (rem > 0)
 		calc = calc + 1;
-	}
-	uint8_t term1_ceil = (uint8_t)(calc + 1);
 
-	uint8_t clkpre_min = (gear == 16) ? 2 : 1;
-	uint8_t final_val = (term1_ceil > clkpre_min) ? (term1_ceil - clkpre_min) : 1;
-	uint8_t register_min = (gear == 16) ? 2 : 1;
+	term1_ceil = (uint8_t)(calc + 1);
+
+	clkpre_min = (gear == 16) ? 2 : 1;
+	final_val = (term1_ceil > clkpre_min) ? (term1_ceil - clkpre_min) : 1;
+	register_min = (gear == 16) ? 2 : 1;
 
 	if (final_val > 255) {
 		*result = 255;
@@ -273,15 +267,13 @@ int calculate_tCLKPRE(uint8_t gear, uint8_t *result) {
 	} else if (final_val < register_min) {
 		*result = register_min;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//============================= tCLKPOST ===================================//
-int calculate_tCLKPOST(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result) {
+int calculate_tCLKPOST(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result)
+{
 	uint32_t denominator = 50 * (uint32_t)gear;
 	uint32_t numerator = ((uint32_t)byte_clk_mhz * 3 * (uint32_t)gear) + (52 * 50);
 
@@ -295,15 +287,13 @@ int calculate_tCLKPOST(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result) {
 	} else if (final_val < register_min) {
 		*result = register_min;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= tCLKTRAIL ====================================//
-int calculate_tCLKTRAIL(uint8_t byte_clk_mhz, uint8_t *result) {
+int calculate_tCLKTRAIL(uint8_t byte_clk_mhz, uint8_t *result)
+{
 	uint32_t term_floor = ((uint32_t)byte_clk_mhz * 3) / 50;
 	uint8_t final_val = (uint8_t)term_floor + 2;
 
@@ -313,15 +303,13 @@ int calculate_tCLKTRAIL(uint8_t byte_clk_mhz, uint8_t *result) {
 	} else if (final_val < 2) {
 		*result = 2;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= tCLKEXIT ====================================//
-int calculate_tCLKEXIT(uint8_t byte_clk_mhz, uint8_t *result) {
+int calculate_tCLKEXIT(uint8_t byte_clk_mhz, uint8_t *result)
+{
 	uint32_t term_floor = (uint32_t)byte_clk_mhz / 10;
 	uint8_t final_val = (uint8_t)term_floor + 2;
 
@@ -331,26 +319,24 @@ int calculate_tCLKEXIT(uint8_t byte_clk_mhz, uint8_t *result) {
 	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_DATPREP ====================================//
-int calculate_tDATPREP(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result) {
+int calculate_tDATPREP(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result)
+{
 	uint32_t denominator = 25 * (uint32_t)gear;
 	uint32_t numerator = ((uint32_t)byte_clk_mhz * (uint32_t)gear) + (4 * 25);
 
 	uint32_t calc = numerator / denominator;
 	uint32_t rem = numerator % denominator;
+	uint8_t final_val;
 
-	if (rem > 0) {
+	if (rem > 0)
 		calc = calc + 1;
-	}
 
-	uint8_t final_val = (uint8_t)calc;
+	final_val = (uint8_t)calc;
 
 	if (final_val > 255) {
 		*result = 255;
@@ -358,26 +344,24 @@ int calculate_tDATPREP(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result) {
 	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_DAT_HSZERO ====================================//
-int calculate_tDAT_HSZERO(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result) {
+int calculate_tDAT_HSZERO(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result)
+{
 	uint32_t denominator = 200 * (uint32_t)gear;
 	uint32_t numerator = ((uint32_t)byte_clk_mhz * 21 * (uint32_t)gear) + (6 * 200);
 
 	uint32_t term_ceil = numerator / denominator;
 	uint32_t rem = numerator % denominator;
+	uint8_t final_val;
 
-	if (rem > 0) {
+	if (rem > 0)
 		term_ceil = term_ceil + 1;
-	}
 
-	uint8_t final_val = (uint8_t)(term_ceil + 1);
+	final_val = (uint8_t)(term_ceil + 1);
 
 	if (final_val > 255) {
 		*result = 255;
@@ -385,27 +369,27 @@ int calculate_tDAT_HSZERO(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result) {
 	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_DATTRAIL ====================================//
-int calculate_tDATTRAIL(uint8_t byte_clk_mhz, uint16_t tx_line_rate_mbps, uint8_t gear, uint8_t *result) {
+int calculate_tDATTRAIL(uint8_t byte_clk_mhz, uint16_t tx_line_rate_mbps,
+		uint8_t gear, uint8_t *result)
+{
 	uint32_t denominator = 25 * (uint32_t)tx_line_rate_mbps;
 	uint32_t numerator = (uint32_t)byte_clk_mhz * ((2 * (uint32_t)tx_line_rate_mbps) + 828);
 
 	uint32_t e_cycles = numerator / denominator;
 	uint32_t rem = numerator % denominator;
+	uint8_t rtl_adjustment;
+	uint8_t final_val;
 
-	if (rem > 0) {
+	if (rem > 0)
 		e_cycles = e_cycles + 1;
-	}
 
-	uint8_t rtl_adjustment = (gear == 16) ? 1 : 2;
-	uint8_t final_val = (uint8_t)(e_cycles + rtl_adjustment);
+	rtl_adjustment = (gear == 16) ? 1 : 2;
+	final_val = (uint8_t)(e_cycles + rtl_adjustment);
 
 	if (final_val > 255) {
 		*result = 255;
@@ -413,15 +397,13 @@ int calculate_tDATTRAIL(uint8_t byte_clk_mhz, uint16_t tx_line_rate_mbps, uint8_
 	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_DATEXIT ====================================//
-int calculate_tDATEXIT(uint8_t byte_clk_mhz, uint8_t *result) {
+int calculate_tDATEXIT(uint8_t byte_clk_mhz, uint8_t *result)
+{
 	uint32_t term_floor = (uint32_t)byte_clk_mhz / 10;
 	uint8_t final_val = (uint8_t)term_floor + 2;
 
@@ -431,15 +413,14 @@ int calculate_tDATEXIT(uint8_t byte_clk_mhz, uint8_t *result) {
 	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_SKEWCAL_INIT ====================================//
-int calculate_tSKEWCAL_INIT(uint8_t byte_clk_mhz, uint16_t tx_line_rate_mbps, uint8_t gear, uint16_t *result) {
+int calculate_tSKEWCAL_INIT(uint8_t byte_clk_mhz, uint16_t tx_line_rate_mbps,
+		uint8_t gear, uint16_t *result)
+{
 	uint16_t final_val = (32768 / (uint16_t)gear) + 1;
 	uint16_t min_bound;
 	uint16_t max_bound;
@@ -458,41 +439,37 @@ int calculate_tSKEWCAL_INIT(uint8_t byte_clk_mhz, uint16_t tx_line_rate_mbps, ui
 	} else if (final_val < min_bound) {
 		*result = min_bound;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_SKEWCAL_PERIOD ====================================//
-int calculate_tSKEWCAL_PERIOD(uint8_t gear, uint16_t *result) {
+int calculate_tSKEWCAL_PERIOD(uint8_t gear, uint16_t *result)
+{
 	uint16_t final_val = (1024 / (uint16_t)gear) + 1;
 	uint16_t min_bound = 1;
 
 	if (final_val < min_bound) {
 		*result = min_bound;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_SKEWCAL_HSZERO ====================================//
-int calculate_tSKEWCAL_HSZERO(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result) {
+int calculate_tSKEWCAL_HSZERO(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *result)
+{
 	uint32_t denominator = 200 * (uint32_t)gear;
 	uint32_t numerator = ((uint32_t)byte_clk_mhz * 21 * (uint32_t)gear) + (6 * 200);
 
 	uint32_t term_ceil = numerator / denominator;
 	uint32_t rem = numerator % denominator;
+	uint8_t final_val;
 
-	if (rem > 0) {
+	if (rem > 0)
 		term_ceil = term_ceil + 1;
-	}
 
-	uint8_t final_val = (term_ceil > 2) ? (uint8_t)(term_ceil - 2) : 0;
+	final_val = (term_ceil > 2) ? (uint8_t)(term_ceil - 2) : 0;
 
 	if (final_val > 255) {
 		*result = 255;
@@ -500,15 +477,13 @@ int calculate_tSKEWCAL_HSZERO(uint8_t byte_clk_mhz, uint8_t gear, uint8_t *resul
 	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = final_val;
-		return 0;
 	}
+	*result = final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_CLK_SETTLE ====================================//
-int calculate_tclk_settle(uint8_t syncclk_mhz, uint8_t ns_target, uint8_t *result) {
+int calculate_tclk_settle(uint8_t syncclk_mhz, uint8_t ns_target, uint8_t *result)
+{
 	uint32_t final_val = ((uint32_t)ns_target * (uint32_t)syncclk_mhz) / 1000;
 
 	if (final_val > 63) {
@@ -517,27 +492,25 @@ int calculate_tclk_settle(uint8_t syncclk_mhz, uint8_t ns_target, uint8_t *resul
 	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = (uint8_t)final_val;
-		return 0;
 	}
+	*result = (uint8_t)final_val;
+	return 0;
 }
-//=============================================================================//
 
-//================================= T_HS_SETTLE ====================================//
-int calculate_tHS_SETTLE(uint8_t gear, uint8_t byteclk_mhz, uint8_t syncclk_mhz, uint8_t *result) {
+int calculate_tHS_SETTLE(uint8_t gear, uint8_t byteclk_mhz, uint8_t syncclk_mhz, uint8_t *result)
+{
 	// Target NS formula: 100 + 8000 / (byteclk * gear)
 	uint32_t ns_denominator = (uint32_t)byteclk_mhz * (uint32_t)gear;
 	uint32_t ns_numerator = (100 * ns_denominator) + 8000;
 
 	uint32_t t_data_settle_ns = ns_numerator / ns_denominator;
 	uint32_t ns_rem = ns_numerator % ns_denominator;
+	uint32_t final_val;
 
-	if (ns_rem > 0) {
+	if (ns_rem > 0)
 		t_data_settle_ns = t_data_settle_ns + 1;
-	}
 
-	uint32_t final_val = (t_data_settle_ns * (uint32_t)syncclk_mhz) / 1000;
+	final_val = (t_data_settle_ns * (uint32_t)syncclk_mhz) / 1000;
 
 	if (final_val > 63) {
 		*result = 255;
@@ -545,37 +518,34 @@ int calculate_tHS_SETTLE(uint8_t gear, uint8_t byteclk_mhz, uint8_t syncclk_mhz,
 	} else if (final_val < 1) {
 		*result = 1;
 		return 1;
-	} else {
-		*result = (uint8_t)final_val;
-		return 0;
 	}
+	*result = (uint8_t)final_val;
+	return 0;
 }
-//=============================================================================//
 
-
-int calculate_m_value(uint8_t reg_0B, uint8_t reg_0C, uint8_t reg_0D, uint8_t reg_0E, uint8_t *m_val)
+int calculate_m_value(uint8_t reg_0B, uint8_t reg_0C, uint8_t reg_0D,
+		uint8_t reg_0E, uint8_t *m_val)
 {
 	uint8_t m_value = 0;
 
-	if(((reg_0B & 0x08) >> 3)){
+	if ((reg_0B & 0x08) >> 3)
 		m_value = ((reg_0C & 0xF0) >> 4) | ((reg_0D & 0x0F) << 4);
-	} else {
+	else
 		m_value = (reg_0D & 0xF0) | (reg_0E & 0x0F);
-	}
 
 	*m_val = m_value;
 	return 0;
 }
 
-int calculate_n_value(uint8_t reg_0B, uint8_t reg_15, uint8_t reg_16, uint8_t reg_05, uint8_t reg_06, uint16_t *n_val)
+int calculate_n_value(uint8_t reg_0B, uint8_t reg_15, uint8_t reg_16, uint8_t reg_05,
+		uint8_t reg_06, uint16_t *n_val)
 {
 	uint16_t n_value = 0;
 
-	if(((reg_0B & 0x04) >> 2)){
-		n_value = ((reg_06 & 0x7F) << 1) | ((reg_05 & 0x80) >> 7) ;
-	} else {
-		n_value = ((reg_16 & 0x01) << 8) | (reg_15) ;
-	}
+	if ((reg_0B & 0x04) >> 2)
+		n_value = ((reg_06 & 0x7F) << 1) | ((reg_05 & 0x80) >> 7);
+	else
+		n_value = ((reg_16 & 0x01) << 8) | (reg_15);
 
 	*n_val = n_value;
 	return 0;
@@ -585,11 +555,10 @@ int calculate_f_value(uint8_t reg_0B, uint8_t reg_13, uint8_t reg_14, uint16_t *
 {
 	uint16_t f_value = 0;
 
-	if(((reg_0B & 0x04) >> 2)){
+	if ((reg_0B & 0x04) >> 2)
 		f_value = 0;
-	} else {
-		f_value = (reg_14 << 7) | (reg_13 >> 1) ;
-	}
+	else
+		f_value = (reg_14 << 7) | (reg_13 >> 1);
 
 	*f_val = f_value;
 	return 0;
@@ -599,23 +568,28 @@ int calculate_o_value(uint8_t reg_29, uint8_t reg_2A, uint8_t *o_val)
 {
 	uint8_t o_value = 0;
 
-	o_value = ((reg_2A & 0x0F) << 3) | ((reg_29 & 0xE0) >> 5) ;
+	o_value = ((reg_2A & 0x0F) << 3) | ((reg_29 & 0xE0) >> 5);
 
 	*o_val = o_value;
 	return 0;
 }
 
-int calculate_vco_frequency(uint16_t ref_clk, uint8_t m_val, uint16_t n_val, uint16_t f_val, uint8_t o_val, uint16_t *vco_freq)
+int calculate_vco_frequency(uint16_t ref_clk, uint8_t m_val, uint16_t n_val,
+		uint16_t f_val, uint8_t o_val, uint16_t *vco_freq)
 {
+	uint32_t fractional_multiplier;
+	uint32_t numerator;
+	uint32_t denominator;
+
 	if (m_val == 0) {
 		*vco_freq = 0;
 		return -1;
 	}
 
-	uint32_t fractional_multiplier = ((uint32_t)n_val * 4096) + (uint32_t)f_val;
-	uint32_t numerator = (uint32_t)ref_clk * fractional_multiplier;
+	fractional_multiplier = ((uint32_t)n_val * 4096) + (uint32_t)f_val;
+	numerator = (uint32_t)ref_clk * fractional_multiplier;
 
-	uint32_t denominator = (uint32_t)m_val * 4096;
+	denominator = (uint32_t)m_val * 4096;
 	*vco_freq = (uint16_t)(numerator / denominator);
 
 	return 0;
@@ -623,28 +597,32 @@ int calculate_vco_frequency(uint16_t ref_clk, uint8_t m_val, uint16_t n_val, uin
 
 int calculate_best_o_value(uint16_t vco_freq_mhz, uint8_t required_freq_mhz, uint8_t *new_o_val)
 {
+	uint32_t numerator;
+	uint32_t denominator;
+	uint32_t calculated_o;
+
 	if (required_freq_mhz == 0) {
 		*new_o_val = 127;
 		return 0;
 	}
 
-	uint32_t numerator = (uint32_t)vco_freq_mhz;
-	uint32_t denominator = (uint32_t)required_freq_mhz;
+	numerator = (uint32_t)vco_freq_mhz;
+	denominator = (uint32_t)required_freq_mhz;
 
-	uint32_t calculated_o = (numerator + (denominator / 2)) / denominator;
+	calculated_o = (numerator + (denominator / 2)) / denominator;
 
-	if (calculated_o < 1) {
+	if (calculated_o < 1)
 		*new_o_val = 1;
-	} else if (calculated_o > 127) {
+	else if (calculated_o > 127)
 		*new_o_val = 127;
-	} else {
+	else
 		*new_o_val = (uint8_t)calculated_o;
-	}
 
 	return 0;
 }
 
-int calculate_o_reg_value(uint8_t o_val, uint8_t reg_29, uint8_t reg_2A, uint8_t *reg_29_val, uint8_t *reg_2A_val)
+int calculate_o_reg_value(uint8_t o_val, uint8_t reg_29, uint8_t reg_2A,
+		uint8_t *reg_29_val, uint8_t *reg_2A_val)
 {
 	*reg_29_val = ((o_val & 0x07) << 5) | (reg_29 & 0x1F);
 	*reg_2A_val = (reg_2A & 0xF0) | ((o_val & 0xF8) >> 3);
@@ -652,88 +630,123 @@ int calculate_o_reg_value(uint8_t o_val, uint8_t reg_29, uint8_t reg_2A, uint8_t
 	return 0;
 }
 
-
-void calculate_tp_parameters(uint8_t tp_freq, uint8_t tp_fps, uint16_t tp_width, uint16_t tp_height, uint8_t bit_size, uint16_t *tp_front_porch, uint16_t *tp_back_porch, uint16_t *tp_h_blanking, uint32_t *tp_v_blanking)
+void calculate_tp_parameters(uint8_t tp_freq, uint8_t tp_fps, uint16_t tp_width,
+		uint16_t tp_height, uint8_t bit_size, uint16_t *tp_front_porch,
+		uint16_t *tp_back_porch, uint16_t *tp_h_blanking,
+		uint32_t *tp_v_blanking)
 {
 	uint32_t effective_freq_hz = (uint32_t)(tp_freq) * 1000000;
-
 	uint32_t line_active_clocks = (uint32_t)(tp_width * 10) / bit_size;
 	uint32_t h_blank_clocks     = line_active_clocks / 4;
 	uint32_t total_line_clocks  = line_active_clocks + h_blank_clocks;
-
 	uint32_t worst_case_budget = effective_freq_hz / tp_fps;
-
 	uint32_t active_frame_cycles = total_line_clocks * tp_height;
+	uint32_t porch_overhead;
+
 	*tp_front_porch = 250;
 	*tp_back_porch  = 250;
-	uint32_t porch_overhead = *tp_front_porch + *tp_back_porch;
+	porch_overhead = *tp_front_porch + *tp_back_porch;
 
-	if (worst_case_budget > (active_frame_cycles + porch_overhead)) {
+	if (worst_case_budget > (active_frame_cycles + porch_overhead))
 		*tp_v_blanking = worst_case_budget - active_frame_cycles - porch_overhead;
-	} else {
+	else
 		*tp_v_blanking = total_line_clocks;
-	}
 
 	*tp_h_blanking = (uint16_t)h_blank_clocks;
 }
 
-void calculate_rx_data_settle_cyc(uint8_t byteclk_mhz, uint8_t gear, uint8_t is_queue_fifo, uint8_t *dsettle_cnt) {
+void calculate_rx_data_settle_cyc(uint8_t byteclk_mhz, uint8_t gear,
+		uint8_t is_queue_fifo, uint8_t *dsettle_cnt)
+{
 	uint8_t dsettle_tmp = 0;
 	uint8_t dsettle_cnt_internal = 0;
 
 	if (gear == 8) {
-		if (byteclk_mhz > 12 && byteclk_mhz <= 16)       dsettle_tmp = 1;
-		else if (byteclk_mhz > 16 && byteclk_mhz < 26)   dsettle_tmp = 2;
-		else if (byteclk_mhz >= 26 && byteclk_mhz < 33)  dsettle_tmp = 3;
-		else if (byteclk_mhz >= 33 && byteclk_mhz < 40)  dsettle_tmp = 4;
-		else if (byteclk_mhz >= 40 && byteclk_mhz < 50)  dsettle_tmp = 5;
-		else if (byteclk_mhz >= 50 && byteclk_mhz < 55)  dsettle_tmp = 6;
-		else if (byteclk_mhz >= 55 && byteclk_mhz < 65)  dsettle_tmp = 7;
-		else if (byteclk_mhz >= 65 && byteclk_mhz < 70)  dsettle_tmp = 8;
-		else if (byteclk_mhz >= 70 && byteclk_mhz < 80)  dsettle_tmp = 9;
-		else if (byteclk_mhz >= 80 && byteclk_mhz < 89)  dsettle_tmp = 10;
-		else if (byteclk_mhz >= 89 && byteclk_mhz < 100) dsettle_tmp = 11;
-		else if (byteclk_mhz >= 100 && byteclk_mhz < 112) dsettle_tmp = 12;
-		else if (byteclk_mhz >= 112 && byteclk_mhz < 125) dsettle_tmp = 13;
-		else if (byteclk_mhz >= 125 && byteclk_mhz < 150) dsettle_tmp = 14;
-		else if (byteclk_mhz >= 150 && byteclk_mhz < 156) dsettle_tmp = 15;
-		else if (byteclk_mhz >= 156 && byteclk_mhz < 167) dsettle_tmp = 16;
-		else if (byteclk_mhz >= 167 && byteclk_mhz < 179) dsettle_tmp = 17;
-		else if (byteclk_mhz >= 179 && byteclk_mhz < 190) dsettle_tmp = 18;
-		else if (byteclk_mhz >= 190 && byteclk_mhz < 210) dsettle_tmp = 19;
-		else if (byteclk_mhz >= 210 && byteclk_mhz < 220) dsettle_tmp = 20;
-		else if (byteclk_mhz >= 220)                     dsettle_tmp = 21;
+		if (byteclk_mhz > 12 && byteclk_mhz <= 16)
+			dsettle_tmp = 1;
+		else if (byteclk_mhz > 16 && byteclk_mhz < 26)
+			dsettle_tmp = 2;
+		else if (byteclk_mhz >= 26 && byteclk_mhz < 33)
+			dsettle_tmp = 3;
+		else if (byteclk_mhz >= 33 && byteclk_mhz < 40)
+			dsettle_tmp = 4;
+		else if (byteclk_mhz >= 40 && byteclk_mhz < 50)
+			dsettle_tmp = 5;
+		else if (byteclk_mhz >= 50 && byteclk_mhz < 55)
+			dsettle_tmp = 6;
+		else if (byteclk_mhz >= 55 && byteclk_mhz < 65)
+			dsettle_tmp = 7;
+		else if (byteclk_mhz >= 65 && byteclk_mhz < 70)
+			dsettle_tmp = 8;
+		else if (byteclk_mhz >= 70 && byteclk_mhz < 80)
+			dsettle_tmp = 9;
+		else if (byteclk_mhz >= 80 && byteclk_mhz < 89)
+			dsettle_tmp = 10;
+		else if (byteclk_mhz >= 89 && byteclk_mhz < 100)
+			dsettle_tmp = 11;
+		else if (byteclk_mhz >= 100 && byteclk_mhz < 112)
+			dsettle_tmp = 12;
+		else if (byteclk_mhz >= 112 && byteclk_mhz < 125)
+			dsettle_tmp = 13;
+		else if (byteclk_mhz >= 125 && byteclk_mhz < 150)
+			dsettle_tmp = 14;
+		else if (byteclk_mhz >= 150 && byteclk_mhz < 156)
+			dsettle_tmp = 15;
+		else if (byteclk_mhz >= 156 && byteclk_mhz < 167)
+			dsettle_tmp = 16;
+		else if (byteclk_mhz >= 167 && byteclk_mhz < 179)
+			dsettle_tmp = 17;
+		else if (byteclk_mhz >= 179 && byteclk_mhz < 190)
+			dsettle_tmp = 18;
+		else if (byteclk_mhz >= 190 && byteclk_mhz < 210)
+			dsettle_tmp = 19;
+		else if (byteclk_mhz >= 210 && byteclk_mhz < 220)
+			dsettle_tmp = 20;
+		else if (byteclk_mhz >= 220)
+			dsettle_tmp = 21;
 	} else {
-		if (byteclk_mhz >= 9 && byteclk_mhz < 19)        dsettle_tmp = 1;
-		else if (byteclk_mhz >= 19 && byteclk_mhz < 31)  dsettle_tmp = 2;
-		else if (byteclk_mhz >= 31 && byteclk_mhz < 41)  dsettle_tmp = 3;
-		else if (byteclk_mhz >= 41 && byteclk_mhz < 50)  dsettle_tmp = 4;
-		else if (byteclk_mhz >= 50 && byteclk_mhz < 60)  dsettle_tmp = 5;
-		else if (byteclk_mhz >= 60 && byteclk_mhz < 70)  dsettle_tmp = 6;
-		else if (byteclk_mhz >= 70 && byteclk_mhz < 80)  dsettle_tmp = 7;
-		else if (byteclk_mhz >= 80 && byteclk_mhz < 85)  dsettle_tmp = 8;
-		else if (byteclk_mhz >= 85 && byteclk_mhz < 93)  dsettle_tmp = 9;
-		else if (byteclk_mhz >= 93 && byteclk_mhz < 105) dsettle_tmp = 10;
-		else if (byteclk_mhz >= 105 && byteclk_mhz < 113) dsettle_tmp = 11;
-		else if (byteclk_mhz >= 113 && byteclk_mhz < 125) dsettle_tmp = 12;
-		else if (byteclk_mhz >= 125 && byteclk_mhz < 136) dsettle_tmp = 13;
-		else if (byteclk_mhz >= 136)                     dsettle_tmp = 14;
+		if (byteclk_mhz >= 9 && byteclk_mhz < 19)
+			dsettle_tmp = 1;
+		else if (byteclk_mhz >= 19 && byteclk_mhz < 31)
+			dsettle_tmp = 2;
+		else if (byteclk_mhz >= 31 && byteclk_mhz < 41)
+			dsettle_tmp = 3;
+		else if (byteclk_mhz >= 41 && byteclk_mhz < 50)
+			dsettle_tmp = 4;
+		else if (byteclk_mhz >= 50 && byteclk_mhz < 60)
+			dsettle_tmp = 5;
+		else if (byteclk_mhz >= 60 && byteclk_mhz < 70)
+			dsettle_tmp = 6;
+		else if (byteclk_mhz >= 70 && byteclk_mhz < 80)
+			dsettle_tmp = 7;
+		else if (byteclk_mhz >= 80 && byteclk_mhz < 85)
+			dsettle_tmp = 8;
+		else if (byteclk_mhz >= 85 && byteclk_mhz < 93)
+			dsettle_tmp = 9;
+		else if (byteclk_mhz >= 93 && byteclk_mhz < 105)
+			dsettle_tmp = 10;
+		else if (byteclk_mhz >= 105 && byteclk_mhz < 113)
+			dsettle_tmp = 11;
+		else if (byteclk_mhz >= 113 && byteclk_mhz < 125)
+			dsettle_tmp = 12;
+		else if (byteclk_mhz >= 125 && byteclk_mhz < 136)
+			dsettle_tmp = 13;
+		else if (byteclk_mhz >= 136)
+			dsettle_tmp = 14;
 	}
 
 	dsettle_cnt_internal = dsettle_tmp;
 	/*
-	   if (dsettle_tmp < 3) {
-	   dsettle_cnt_internal = 0;
-	   } else {
-	   dsettle_cnt_internal = dsettle_tmp - 3;
-	   }
-	   */
+	 * if (dsettle_tmp < 3)
+	 *	dsettle_cnt_internal = 0;
+	 * else
+	 *	dsettle_cnt_internal = dsettle_tmp - 3;
+	 */
 
-	if (byteclk_mhz <= 30 && is_queue_fifo) {
+	if (byteclk_mhz <= 30 && is_queue_fifo)
 		*dsettle_cnt = dsettle_cnt_internal + 3;
-	} else {
+	else
 		*dsettle_cnt = dsettle_cnt_internal;
-	}
 }
 
 static int fpga_config_mipi_speed(struct i2c_client *client, uint16_t val)
@@ -741,33 +754,28 @@ static int fpga_config_mipi_speed(struct i2c_client *client, uint16_t val)
 	uint8_t CN;
 	uint8_t CM;
 	uint8_t CO;
-
 	uint8_t tclk_settle;
 	uint8_t ths_settle;
-
-	uint16_t tx_target_speed = val;
+	uint16_t tx_target_speed;
 	uint16_t tx_actual_speed = 0;
-
 	uint8_t data8b = 0;
-	uint16_t rx_target_speed = tx_target_speed;
+	uint16_t rx_target_speed;
 	uint8_t rx_speed_control0;
 	uint8_t rx_speed_control1;
-	uint8_t rx_byte_clk = rx_target_speed/gear;
+	uint8_t rx_byte_clk;
 	uint8_t tclk_settle0;
 	uint8_t tclk_settle1;
 	uint8_t tclk_settle2;
 	uint8_t ths_settle0;
 	uint8_t ths_settle1;
-	uint8_t required_pll_freq = test_pattern ? tx_byte_clk : rx_byte_clk ;
 
-	uint16_t n_val;
-	uint16_t f_val;
-	uint8_t m_val;
-	uint8_t o_val;
-	uint16_t vco_freq;
-	uint8_t new_o_val;
-	uint8_t reg_29_val;
-	uint8_t reg_2A_val;
+	tx_target_speed = val;
+	// TX MIPI speed should be multiple of 24
+	if (tx_target_speed % 24 != 0)
+		tx_target_speed = ((tx_target_speed / 24) + 1) * 24;
+
+	rx_target_speed = tx_target_speed;
+	rx_byte_clk = rx_target_speed / gear;
 
 	// TX Speed
 	fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x08, tx_target_speed & 0xFF);
@@ -775,7 +783,7 @@ static int fpga_config_mipi_speed(struct i2c_client *client, uint16_t val)
 
 	get_pll_coefficients(tx_ref_clk, tx_target_speed, &CN, &CM, &CO, &tx_actual_speed);
 
-	tx_byte_clk = (tx_actual_speed / gear) ;
+	tx_byte_clk = (tx_actual_speed / gear);
 	get_config_registers(CN, CM, CO, &config_registers);
 
 	fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0A, tx_actual_speed & 0xFF);
@@ -786,7 +794,7 @@ static int fpga_config_mipi_speed(struct i2c_client *client, uint16_t val)
 	fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0B, &data8b);
 	tx_actual_speed = tx_actual_speed | (data8b << 8);
 
-	printk("FPGA TX actual speed: %d\n", tx_actual_speed);
+	dev_info(&client->dev, "FPGA TX actual speed: %d\n", tx_actual_speed);
 
 	//config_registers.reg1 -> TX PLL Parameter 1 -> 0x20
 	//config_registers.reg2 -> TX PLL Parameter 2 -> 0x21
@@ -803,7 +811,7 @@ static int fpga_config_mipi_speed(struct i2c_client *client, uint16_t val)
 	calculate_tLPX(tx_byte_clk, &mipitx_parameters.t_lpx);
 	calculate_tCLKPREP(tx_byte_clk, &mipitx_parameters.t_clkprep);
 	calculate_tCLK_HSZERO(tx_byte_clk, gear, &mipitx_parameters.t_clk_hszero);
-	calculate_tCLKPRE(gear,&mipitx_parameters.t_clkpre);
+	calculate_tCLKPRE(gear, &mipitx_parameters.t_clkpre);
 	calculate_tCLKPOST(tx_byte_clk, gear, &mipitx_parameters.t_clkpost);
 	calculate_tCLKTRAIL(tx_byte_clk, &mipitx_parameters.t_clktrail);
 	calculate_tCLKEXIT(tx_byte_clk, &mipitx_parameters.t_clkexit);
@@ -811,8 +819,9 @@ static int fpga_config_mipi_speed(struct i2c_client *client, uint16_t val)
 	calculate_tDAT_HSZERO(tx_byte_clk, gear, &mipitx_parameters.t_dat_hszero);
 	calculate_tDATTRAIL(tx_byte_clk, tx_target_speed, gear, &mipitx_parameters.t_dattrail);
 	calculate_tDATEXIT(tx_byte_clk, &mipitx_parameters.t_datexit);
-	calculate_tSKEWCAL_INIT(tx_byte_clk, tx_target_speed, gear, &mipitx_parameters.t_skewcal_init);
-	calculate_tSKEWCAL_PERIOD(gear,&mipitx_parameters.t_skewcal_period);
+	calculate_tSKEWCAL_INIT(tx_byte_clk, tx_target_speed, gear,
+			&mipitx_parameters.t_skewcal_init);
+	calculate_tSKEWCAL_PERIOD(gear, &mipitx_parameters.t_skewcal_period);
 	calculate_tSKEWCAL_HSZERO(tx_byte_clk, gear, &mipitx_parameters.t_skewcal_hszero);
 
 	// mipitx_parameters.t_lpx                   -> TX_LPX              -> 0x25
@@ -831,8 +840,6 @@ static int fpga_config_mipi_speed(struct i2c_client *client, uint16_t val)
 	// mipitx_parameters.t_skewcal_period & 0xFF -> TX_SKEWCAL_PERIOD_0 -> 0x32
 	// mipitx_parameters.t_skewcal_period >> 8   -> TX_SKEWCAL_PERIOD_1 -> 0x33
 	// mipitx_parameters.t_skewcal_hszero        -> TX_SKEWCAL_HSZERO   -> 0x34
-
-
 
 	fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x25, mipitx_parameters.t_lpx);
 	fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x26, mipitx_parameters.t_clkprep);
@@ -856,10 +863,10 @@ static int fpga_config_mipi_speed(struct i2c_client *client, uint16_t val)
 	calculate_tclk_settle(rx_ref_clk, ns_target, &tclk_settle);
 	calculate_tHS_SETTLE(gear, rx_byte_clk, rx_ref_clk, &ths_settle);
 
-	rx_speed_control0 = (rx_target_speed <= 1500) ? 2 : 0 ;
-	rx_speed_control1 = (rx_target_speed <= 1500) ? 8 : 0 ;
+	rx_speed_control0 = (rx_target_speed <= 1500) ? 2 : 0;
+	rx_speed_control1 = (rx_target_speed <= 1500) ? 8 : 0;
 
-	tclk_settle0 = (((tclk_settle & 1)<<3) | ((lanes-1)<<1));
+	tclk_settle0 = (((tclk_settle & 1) << 3) | ((lanes-1) << 1));
 	tclk_settle1 = ((tclk_settle >> 1) & 15);
 	tclk_settle2 = ((tclk_settle >> 5) & 1);
 	ths_settle0  = ((ths_settle & 3) << 2);
@@ -907,7 +914,10 @@ static int configure_test_pattern_mode(struct i2c_client *client, uint8_t mode)
 	fpga_config_mipi_speed(client, fpga_tp_modes[mode].tp_speed);
 
 	tp_freq = tx_byte_clk;
-	calculate_tp_parameters(tp_freq, fpga_tp_modes[mode].tp_fps, fpga_tp_modes[mode].tp_width, fpga_tp_modes[mode].tp_height, bit_size, &tp_front_porch, &tp_back_porch, &tp_h_blanking, &tp_v_blanking);
+	calculate_tp_parameters(tp_freq, fpga_tp_modes[mode].tp_fps,
+			fpga_tp_modes[mode].tp_width, fpga_tp_modes[mode].tp_height,
+			bit_size, &tp_front_porch, &tp_back_porch, &tp_h_blanking,
+			&tp_v_blanking);
 
 	fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x60, fpga_tp_modes[mode].tp_fps);
 	fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x62, (fpga_tp_modes[mode].tp_width & 0x00FF));
@@ -930,7 +940,7 @@ static int configure_test_pattern_mode(struct i2c_client *client, uint8_t mode)
 	return 0;
 }
 
-static void read_fpga_tx_status(struct i2c_client * client)
+static void read_fpga_tx_status(struct i2c_client *client)
 {
 	uint8_t DT_1, DT_2, DT_3, DT_4;
 	uint8_t tx_fifo_overflow;
@@ -960,14 +970,14 @@ static void read_fpga_tx_status(struct i2c_client * client)
 	fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x19, &data8b);
 	tx_wc = tx_wc | (data8b << 24);
 
-	printk("1st unique data type: 0x%X\n", DT_1);
-	printk("2nd unique data type: 0x%X\n", DT_2);
-	printk("3rd unique data type: 0x%X\n", DT_3);
-	printk("4th unique data type: 0x%X\n", DT_4);
-	printk("TX FPS: %d\n", tx_fps);
-	printk("TX Overflow: %d\n", tx_fifo_overflow);
-	printk("TX Line count: 0x%X\n", tx_lc);
-	printk("TX Word count: 0x%X\n", tx_wc);
+	dev_info(&client->dev, "TX 1st unique data type: 0x%X\n", DT_1);
+	dev_info(&client->dev, "TX 2nd unique data type: 0x%X\n", DT_2);
+	dev_info(&client->dev, "TX 3rd unique data type: 0x%X\n", DT_3);
+	dev_info(&client->dev, "TX 4th unique data type: 0x%X\n", DT_4);
+	dev_info(&client->dev, "TX FPS: %d\n", tx_fps);
+	dev_info(&client->dev, "TX Overflow: %d\n", tx_fifo_overflow);
+	dev_info(&client->dev, "TX Line count: 0x%X\n", tx_lc);
+	dev_info(&client->dev, "TX Word count: 0x%X\n", tx_wc);
 }
 
 static void read_fpga_rx_status(struct i2c_client *client)
@@ -1005,19 +1015,19 @@ static void read_fpga_rx_status(struct i2c_client *client)
 	fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x4B, &data8b);
 	rx_wc = rx_wc | (data8b << 24);
 
-	printk("1st unique data type: 0x%X\n", DT_1);
-	printk("2nd unique data type: 0x%X\n", DT_2);
-	printk("3rd unique data type: 0x%X\n", DT_3);
-	printk("4th unique data type: 0x%X\n", DT_4);
-	printk("5th unique data type: 0x%X\n", DT_5);
-	printk("6th unique data type: 0x%X\n", DT_6);
-	printk("7th unique data type: 0x%X\n", DT_7);
-	printk("8th unique data type: 0x%X\n", DT_8);
-	printk("RX CRC: %d\n", rx_crc);
-	printk("RX ECC: %d\n", rx_ecc);
-	printk("RX FPS: %d\n", rx_fps);
-	printk("RX Line count: 0x%X\n", rx_lc);
-	printk("RX Word count: 0x%X\n", rx_wc);
+	dev_info(&client->dev, "RX 1st unique data type: 0x%X\n", DT_1);
+	dev_info(&client->dev, "RX 2nd unique data type: 0x%X\n", DT_2);
+	dev_info(&client->dev, "RX 3rd unique data type: 0x%X\n", DT_3);
+	dev_info(&client->dev, "RX 4th unique data type: 0x%X\n", DT_4);
+	dev_info(&client->dev, "RX 5th unique data type: 0x%X\n", DT_5);
+	dev_info(&client->dev, "RX 6th unique data type: 0x%X\n", DT_6);
+	dev_info(&client->dev, "RX 7th unique data type: 0x%X\n", DT_7);
+	dev_info(&client->dev, "RX 8th unique data type: 0x%X\n", DT_8);
+	dev_info(&client->dev, "RX CRC: %d\n", rx_crc);
+	dev_info(&client->dev, "RX ECC: %d\n", rx_ecc);
+	dev_info(&client->dev, "RX FPS: %d\n", rx_fps);
+	dev_info(&client->dev, "RX Line count: 0x%X\n", rx_lc);
+	dev_info(&client->dev, "RX Word count: 0x%X\n", rx_wc);
 }
 
 static int fpga_get_ctrl(struct v4l2_ctrl *ctrl)
@@ -1029,171 +1039,171 @@ static int fpga_get_ctrl(struct v4l2_ctrl *ctrl)
 	uint8_t data8b;
 
 	switch (ctrl->id) {
-		case V4L2_CID_FPGA_MIPI_TX_CLK_MODE:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0C, &data8b);
-			ctrl->val = data8b;
-			break;
+	case V4L2_CID_FPGA_MIPI_TX_CLK_MODE:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0C, &data8b);
+		ctrl->val = data8b;
+		break;
 
-		case V4L2_CID_FPGA_MIPI_RX_CLK_MODE:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3A, &data8b);
-			ctrl->val = data8b;
-			break;
+	case V4L2_CID_FPGA_MIPI_RX_CLK_MODE:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3A, &data8b);
+		ctrl->val = data8b;
+		break;
 
-		case V4L2_CID_FPGA_MIPI_SPEED:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0A, &data8b);
-			ctrl->val = data8b & 0xFF;
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0B, &data8b);
-			ctrl->val = ctrl->val | (data8b << 8);
-			break;
+	case V4L2_CID_FPGA_MIPI_SPEED:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0A, &data8b);
+		ctrl->val = data8b & 0xFF;
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0B, &data8b);
+		ctrl->val = ctrl->val | (data8b << 8);
+		break;
 
-		case V4L2_CID_FPGA_MIPI_FILTER_DT1:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0D, &data8b);
-			ctrl->val = data8b;
-			break;
+	case V4L2_CID_FPGA_MIPI_FILTER_DT1:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0D, &data8b);
+		ctrl->val = data8b;
+		break;
 
-		case V4L2_CID_FPGA_MIPI_FILTER_DT2:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0E, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_MIPI_FILTER_DT3:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0F, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_MIPI_FILTER_DT4:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x10, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_TPG_MODE:
-			ctrl->val = fpga->curr_tp_mode;
-			break;
-		case V4L2_CID_FPGA_TPG_ENABLE:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x05, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_READ_RX_STATUS:
-			read_fpga_rx_status(client);
-			break;
-		case V4L2_CID_FPGA_READ_TX_STATUS:
-			read_fpga_tx_status(client);
-			break;
-		case V4L2_CID_FPGA_MIPI_DT_FILTER_FIRST:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x11, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_MIPI_DT_FILTER_LAST:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x12, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_DT1:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3B, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_DT2:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3C, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_DT3:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3D, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_DT4:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3E, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_DT5:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3F, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_DT6:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x40, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_DT7:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x41, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_DT8:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x42, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_FPS:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x45, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_CRC:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x43, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_ECC:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x44, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_RX_READ_LC:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x46, &data8b);
-			ctrl->val = data8b & 0xFF;
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x47, &data8b);
-			ctrl->val = ctrl->val | (data8b << 8);
-			break;
-		case V4L2_CID_FPGA_RX_READ_WC:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x48, &data8b);
-			ctrl->val = data8b & 0xFF;
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x49, &data8b);
-			ctrl->val = ctrl->val | (data8b << 8);
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x4A, &data8b);
-			ctrl->val = ctrl->val | (data8b << 16);
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x4B, &data8b);
-			ctrl->val = ctrl->val | (data8b << 24);
-			break;
-		case V4L2_CID_FPGA_TX_READ_DT1:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1B, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_TX_READ_DT2:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1C, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_TX_READ_DT3:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1D, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_TX_READ_DT4:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1E, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_TX_READ_FPS:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x13, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_TX_READ_FIFO_OVERFLOW:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1A, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_TX_READ_LC:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x14, &data8b);
-			ctrl->val = data8b & 0xFF;
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x15, &data8b);
-			ctrl->val = ctrl->val | (data8b << 8);
-			break;
-		case V4L2_CID_FPGA_TX_READ_WC:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x16, &data8b);
-			ctrl->val = data8b & 0xFF;
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x17, &data8b);
-			ctrl->val = ctrl->val | (data8b << 8);
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x18, &data8b);
-			ctrl->val = ctrl->val | (data8b << 16);
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x19, &data8b);
-			ctrl->val = ctrl->val | (data8b << 24);
-			break;
-		case V4L2_CID_FPGA_TX_STREAMING_CTRL:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x03, &data8b);
-			ctrl->val = data8b;
-			break;
-		case V4L2_CID_FPGA_VC_SELECT:
-			fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x04, &data8b);
-			ctrl->val = data8b;
-			break;
-		default:
-			return -EINVAL;
+	case V4L2_CID_FPGA_MIPI_FILTER_DT2:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0E, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_MIPI_FILTER_DT3:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0F, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_MIPI_FILTER_DT4:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x10, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_TPG_MODE:
+		ctrl->val = fpga->curr_tp_mode;
+		break;
+	case V4L2_CID_FPGA_TPG_ENABLE:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x05, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_READ_RX_STATUS:
+		read_fpga_rx_status(client);
+		break;
+	case V4L2_CID_FPGA_READ_TX_STATUS:
+		read_fpga_tx_status(client);
+		break;
+	case V4L2_CID_FPGA_MIPI_DT_FILTER_FIRST:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x11, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_MIPI_DT_FILTER_LAST:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x12, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_DT1:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3B, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_DT2:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3C, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_DT3:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3D, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_DT4:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3E, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_DT5:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x3F, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_DT6:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x40, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_DT7:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x41, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_DT8:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x42, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_FPS:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x45, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_CRC:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x43, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_ECC:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x44, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_RX_READ_LC:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x46, &data8b);
+		ctrl->val = data8b & 0xFF;
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x47, &data8b);
+		ctrl->val = ctrl->val | (data8b << 8);
+		break;
+	case V4L2_CID_FPGA_RX_READ_WC:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x48, &data8b);
+		ctrl->val = data8b & 0xFF;
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x49, &data8b);
+		ctrl->val = ctrl->val | (data8b << 8);
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x4A, &data8b);
+		ctrl->val = ctrl->val | (data8b << 16);
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x4B, &data8b);
+		ctrl->val = ctrl->val | (data8b << 24);
+		break;
+	case V4L2_CID_FPGA_TX_READ_DT1:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1B, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_TX_READ_DT2:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1C, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_TX_READ_DT3:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1D, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_TX_READ_DT4:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1E, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_TX_READ_FPS:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x13, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_TX_READ_FIFO_OVERFLOW:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x1A, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_TX_READ_LC:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x14, &data8b);
+		ctrl->val = data8b & 0xFF;
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x15, &data8b);
+		ctrl->val = ctrl->val | (data8b << 8);
+		break;
+	case V4L2_CID_FPGA_TX_READ_WC:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x16, &data8b);
+		ctrl->val = data8b & 0xFF;
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x17, &data8b);
+		ctrl->val = ctrl->val | (data8b << 8);
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x18, &data8b);
+		ctrl->val = ctrl->val | (data8b << 16);
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x19, &data8b);
+		ctrl->val = ctrl->val | (data8b << 24);
+		break;
+	case V4L2_CID_FPGA_TX_STREAMING_CTRL:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x03, &data8b);
+		ctrl->val = data8b;
+		break;
+	case V4L2_CID_FPGA_VC_SELECT:
+		fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x04, &data8b);
+		ctrl->val = data8b;
+		break;
+	default:
+		return -EINVAL;
 	}
 	return ret;
 }
@@ -1206,63 +1216,63 @@ static int fpga_set_ctrl(struct v4l2_ctrl *ctrl)
 	int ret = 0;
 
 	switch (ctrl->id) {
-		case V4L2_CID_FPGA_MIPI_TX_CLK_MODE:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0C, ctrl->val);
-			// Update shadow register
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x07, 0x1);
-			break;
+	case V4L2_CID_FPGA_MIPI_TX_CLK_MODE:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0C, ctrl->val);
+		// Update shadow register
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x07, 0x1);
+		break;
 
-		case V4L2_CID_FPGA_MIPI_RX_CLK_MODE:
-			// Write MIPI Speed registers and then clock mode
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x3A, ctrl->val);
-			// Update shadow register
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x07, 0x1);
-			break;
+	case V4L2_CID_FPGA_MIPI_RX_CLK_MODE:
+		// Write MIPI Speed registers and then clock mode
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x3A, ctrl->val);
+		// Update shadow register
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x07, 0x1);
+		break;
 
-		case V4L2_CID_FPGA_MIPI_SPEED:
-			fpga_config_mipi_speed(client, ctrl->val);
-			break;
+	case V4L2_CID_FPGA_MIPI_SPEED:
+		fpga_config_mipi_speed(client, ctrl->val);
+		break;
 
-		case V4L2_CID_FPGA_MIPI_FILTER_DT1:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0D, ctrl->val);
-			break;
+	case V4L2_CID_FPGA_MIPI_FILTER_DT1:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0D, ctrl->val);
+		break;
 
-		case V4L2_CID_FPGA_MIPI_FILTER_DT2:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0E, ctrl->val);
-			break;
-		case V4L2_CID_FPGA_MIPI_FILTER_DT3:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0F, ctrl->val);
-			break;
-		case V4L2_CID_FPGA_MIPI_FILTER_DT4:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x10, ctrl->val);
-			break;
-		case V4L2_CID_FPGA_TPG_MODE:
-			configure_test_pattern_mode(client, ctrl->val);
-			fpga->curr_tp_mode = ctrl->val;
-			break;
-		case V4L2_CID_FPGA_TPG_ENABLE:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x05, ctrl->val);
-			break;
-		case V4L2_CID_FPGA_READ_RX_STATUS:
-			//read_fpga_rx_status(client);
-			break;
-		case V4L2_CID_FPGA_READ_TX_STATUS:
-			//read_fpga_tx_status(client);
-			break;
-		case V4L2_CID_FPGA_MIPI_DT_FILTER_FIRST:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x11, ctrl->val);
-			break;
-		case V4L2_CID_FPGA_MIPI_DT_FILTER_LAST:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x12, ctrl->val);
-			break;
-		case V4L2_CID_FPGA_TX_STREAMING_CTRL:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x03, ctrl->val);
-			break;
-		case V4L2_CID_FPGA_VC_SELECT:
-			fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x04, ctrl->val);
-			break;
-		default:
-			return -EINVAL;
+	case V4L2_CID_FPGA_MIPI_FILTER_DT2:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0E, ctrl->val);
+		break;
+	case V4L2_CID_FPGA_MIPI_FILTER_DT3:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0F, ctrl->val);
+		break;
+	case V4L2_CID_FPGA_MIPI_FILTER_DT4:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x10, ctrl->val);
+		break;
+	case V4L2_CID_FPGA_TPG_MODE:
+		configure_test_pattern_mode(client, ctrl->val);
+		fpga->curr_tp_mode = ctrl->val;
+		break;
+	case V4L2_CID_FPGA_TPG_ENABLE:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x05, ctrl->val);
+		break;
+	case V4L2_CID_FPGA_READ_RX_STATUS:
+		//read_fpga_rx_status(client);
+		break;
+	case V4L2_CID_FPGA_READ_TX_STATUS:
+		//read_fpga_tx_status(client);
+		break;
+	case V4L2_CID_FPGA_MIPI_DT_FILTER_FIRST:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x11, ctrl->val);
+		break;
+	case V4L2_CID_FPGA_MIPI_DT_FILTER_LAST:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x12, ctrl->val);
+		break;
+	case V4L2_CID_FPGA_TX_STREAMING_CTRL:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x03, ctrl->val);
+		break;
+	case V4L2_CID_FPGA_VC_SELECT:
+		fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x04, ctrl->val);
+		break;
+	default:
+		return -EINVAL;
 	}
 
 	return ret;
@@ -1273,18 +1283,23 @@ static const struct v4l2_ctrl_ops fpga_ctrl_ops = {
 	.g_volatile_ctrl = fpga_get_ctrl,
 };
 
+static const struct v4l2_subdev_core_ops fpga_core_ops = {
+	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
+	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
+};
+
 static const struct v4l2_subdev_video_ops fpga_video_ops = {
 	//.s_stream = fpga_set_stream,
 };
 
 static const struct v4l2_subdev_ops fpga_subdev_ops = {
+	.core = &fpga_core_ops,
 	.video = &fpga_video_ops,
 };
 
 static const struct v4l2_subdev_internal_ops fpga_internal_ops = {
 	.open = fpga_open,
 };
-
 
 static const struct of_device_id fpga_dt_ids[] = {
 	{ .compatible = "econ,fpga"},
@@ -1604,7 +1619,7 @@ static const struct v4l2_ctrl_config fpga_mipi_ctrls[] = {
 	},
 	{
 		.ops = &fpga_ctrl_ops,
-		.id = V4L2_CID_FPGA_RX_READ_DT3,
+		.id = V4L2_CID_FPGA_TX_READ_DT3,
 		.name = "MIPI TX DT3",
 		.type = V4L2_CTRL_TYPE_INTEGER,
 		.min = 0,
@@ -1693,7 +1708,7 @@ static const struct v4l2_ctrl_config fpga_mipi_ctrls[] = {
 	},
 };
 
-static int fpga_mipi_init (struct i2c_client *client, struct fpga *fpga)
+static int fpga_mipi_init(struct i2c_client *client, struct fpga *fpga)
 {
 	struct device *dev = &client->dev;
 	struct device_node *node = dev->of_node;
@@ -1706,78 +1721,64 @@ static int fpga_mipi_init (struct i2c_client *client, struct fpga *fpga)
 	int ret = 0;
 
 	ret = of_property_read_u32(node, "mipi_tx_clockmode", &tx_mipi_clockmode);
-	if (ret < 0) {
-	    dev_err(dev, "Error in getting mipi tx clock mode\n");
-	}
+	if (ret < 0)
+		dev_err(dev, "Error in getting mipi tx clock mode\n");
 
 	ret = of_property_read_u32(node, "mipi_speed", &rx_mipi_speed);
-	if (ret < 0) {
-	    dev_err(dev, "Error in getting mipi speed\n");
-	}
+	if (ret < 0)
+		dev_err(dev, "Error in getting mipi speed\n");
 
 	// Configure TX clock mode
 	ret = fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0C, tx_mipi_clockmode);
-	if (ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	ret = of_property_read_u32(node, "mipi_rx_clockmode", &rx_mipi_clockmode);
-	if (ret < 0) {
-	    dev_err(dev, "Error in getting mipi rx clock mode\n");
-	}
+	if (ret < 0)
+		dev_err(dev, "Error in getting mipi rx clock mode\n");
 
 	// Configure RX clock mode
 	ret = fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x3A, rx_mipi_clockmode);
-	if (ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	// Configure RX & TX MIPI datarate
 	ret = fpga_config_mipi_speed(client, rx_mipi_speed);
-	if (ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	// Configure MIPI data type filters
 	ret = of_property_read_u32(node, "mipi_filter_dt1", &rx_mipi_filter_dt1);
-	if (ret < 0) {
-	    dev_err(dev, "Error in getting mipi filter dt1\n");
-	}
+	if (ret < 0)
+		dev_err(dev, "Error in getting mipi filter dt1\n");
 
 	ret = fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0D, rx_mipi_filter_dt1);
-	if (ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	ret = of_property_read_u32(node, "mipi_filter_dt2", &rx_mipi_filter_dt2);
-	if (ret < 0) {
-	    dev_err(dev, "Error in getting mipi filter dt2\n");
-	}
+	if (ret < 0)
+		dev_err(dev, "Error in getting mipi filter dt2\n");
 
 	ret = fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0E, rx_mipi_filter_dt2);
-	if (ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	ret = of_property_read_u32(node, "mipi_filter_dt3", &rx_mipi_filter_dt3);
-	if (ret < 0) {
-	    dev_err(dev, "Error in getting mipi filter dt3\n");
-	}
+	if (ret < 0)
+		dev_err(dev, "Error in getting mipi filter dt3\n");
 
 	ret = fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x0F, rx_mipi_filter_dt3);
-	if (ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	ret = of_property_read_u32(node, "mipi_filter_dt4", &rx_mipi_filter_dt4);
-	if (ret < 0) {
-	    dev_err(dev, "Error in getting mipi filter dt4\n");
-	}
+	if (ret < 0)
+		dev_err(dev, "Error in getting mipi filter dt4\n");
 
 	ret = fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x10, rx_mipi_filter_dt4);
-	if (ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 	// Update shadow register
 	ret = fpga_write_reg(client, FPGA_SLAVE_ADDR, 0x07, 0x1);
@@ -1789,6 +1790,7 @@ static int fpga_mipi_init (struct i2c_client *client, struct fpga *fpga)
 
 	return 0;
 }
+
 /* Initialize control handlers */
 static int fpga_init_controls(struct fpga *fpga)
 {
@@ -1797,11 +1799,11 @@ static int fpga_init_controls(struct fpga *fpga)
 	int ret;
 
 	ctrl_hdlr = &fpga->ctrl_handler;
-	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 16);
+	ret = v4l2_ctrl_handler_init(ctrl_hdlr, ARRAY_SIZE(fpga_mipi_ctrls) + 1);
 	if (ret)
 		return ret;
 
-	for (i=0; i < ARRAY_SIZE(fpga_mipi_ctrls); i++) {
+	for (i = 0; i < ARRAY_SIZE(fpga_mipi_ctrls); i++) {
 		v4l2_ctrl_new_custom(&fpga->ctrl_handler,
 				&fpga_mipi_ctrls[i],
 				NULL);
@@ -1809,7 +1811,7 @@ static int fpga_init_controls(struct fpga *fpga)
 
 	if (ctrl_hdlr->error) {
 		ret = ctrl_hdlr->error;
-		printk( "%s control init failed (%d)\n",
+		pr_err("%s control init failed (%d)\n",
 				__func__, ret);
 		goto error;
 	}
@@ -1821,6 +1823,7 @@ error:
 	v4l2_ctrl_handler_free(ctrl_hdlr);
 	return ret;
 }
+
 static int fpga_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -1879,45 +1882,42 @@ static int fpga_probe(struct i2c_client *client)
 	toggle_gpio_fpga(fpga_nreset_gpio, 1);
 
 	err = fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x01, &fpga_major_ver);
-	if (err)
-	{
-		dev_err(&client->dev, "Unable to read FPGA Major FW Version %s(%d)",__func__, __LINE__);
+	if (err) {
+		dev_err(&client->dev, "Unable to read FPGA Major FW Version %s(%d)",
+				__func__, __LINE__);
 		goto fpga_fw_update;
 	}
 	err = fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x02, &fpga_minor_ver);
-	if (err)
-	{
-		dev_err(&client->dev, "Unable to read FPGA Minor FW Version %s(%d)",__func__, __LINE__);
+	if (err) {
+		dev_err(&client->dev, "Unable to read FPGA Minor FW Version %s(%d)",
+				__func__, __LINE__);
 		goto fpga_fw_update;
 	}
 
-	dev_info(&client->dev, "Econ FPGA Firmware version: V%d.%d\n",fpga_major_ver, fpga_minor_ver);
+	dev_info(&client->dev, "Econ FPGA Firmware version: V%d.%d\n",
+			fpga_major_ver, fpga_minor_ver);
 
-	if(fpga_major_ver != FPGA_MAJOR_FW_VERSION || fpga_minor_ver != FPGA_MINOR_FW_VERSION)
-	{
+	if (fpga_major_ver != FPGA_MAJOR_FW_VERSION || fpga_minor_ver != FPGA_MINOR_FW_VERSION) {
 fpga_fw_update:
 		dev_info(&client->dev, "FPGA Firmware version Mismatch, Programming FPGA via I2C\n");
 
 		/* Assreting PROGRAMN Pin to LOW for I2C Boot */
 		dev_info(&client->dev, "Asserting FPGA_nPROGRAM low");
-		gpio_direction_output(fpga_nprogram_gpio,0);
+		gpiod_direction_output(fpga_nprogram_gpio, 0);
 		msleep(100);
 
 		err = fpga_init(client);
-		if(err != 0)
-		{
+		if (err != 0) {
 			dev_err(&client->dev, "FPGA Init Failed - %d\n", err);
 			return -ENODEV;
 		}
-		else
-			dev_info(&client->dev, "FPGA Booted Successfully\n");
+		dev_info(&client->dev, "FPGA Booted Successfully\n");
 
 		msleep(100);
 
 		dev_info(&client->dev, "Writing Data for SPI Boot\n");
 		err =  write_spi_data_to_fpga(client);
-		if(err)
-		{
+		if (err) {
 			dev_err(&client->dev, "FPGA SPI Data Write Failed - %d\n", err);
 
 			toggle_gpio_fpga(fpga_nprogram_gpio, 1);
@@ -1936,19 +1936,20 @@ fpga_fw_update:
 		fpga_major_ver = 0;
 		fpga_minor_ver = 0;
 		err = fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0001, &fpga_major_ver);
-		if (err)
-		{
-			dev_err(&client->dev, "Unable to read FPGA Major FW Version %s(%d)",__func__, __LINE__);
+		if (err) {
+			dev_err(&client->dev, "Unable to read FPGA Major FW Version %s(%d)",
+					__func__, __LINE__);
 			return err;
 		}
 		err = fpga_read_reg(client, FPGA_SLAVE_ADDR, 0x0002, &fpga_minor_ver);
-		if (err)
-		{
-			dev_err(&client->dev, "Unable to read FPGA Minor FW Version %s(%d)",__func__, __LINE__);
+		if (err) {
+			dev_err(&client->dev, "Unable to read FPGA Minor FW Version %s(%d)",
+					__func__, __LINE__);
 			return err;
 		}
 
-		dev_info(&client->dev, "Econ FPGA Firmware version: V%d.%d\n",fpga_major_ver, fpga_minor_ver);
+		dev_info(&client->dev, "Econ FPGA Firmware version: V%d.%d\n",
+				fpga_major_ver, fpga_minor_ver);
 	}
 
 	v4l2_i2c_subdev_init(&fpga->sd, client, &fpga_subdev_ops);
@@ -1957,7 +1958,7 @@ fpga_fw_update:
 	if (ret)
 		return ret;
 
-	fpga->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	fpga->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
 	fpga->sd.internal_ops = &fpga_internal_ops;
 	fpga->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
@@ -1999,7 +2000,6 @@ err_ctrl_init:
 	return ret;
 }
 
-
 static void fpga_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
@@ -2037,4 +2037,4 @@ module_i2c_driver(fpga_i2c_driver);
 MODULE_AUTHOR("Kishore Kumar <kishore.kumar@e-consystems.com>");
 MODULE_DESCRIPTION("e-con FPGA driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.3");
+MODULE_VERSION("1.4");

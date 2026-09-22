@@ -26,18 +26,12 @@
 #include "bitop.h"
 #include "util_crc16.h" //fast ccitt
 #if defined( ISP_HAS_SBUF_FSM )
-#include "sbuf.h"
+#include "isp-v4l2-meta-stats.h"
 #endif
 
-/** Size of a single set of histogram data (there are multiple of those in the hardware) in u32.*/
-#define HISTOGRAM_BUFFER_SIZE ( ( ISP_METERING_HISTOGRAM_SIZE_BINS / 2 ) + ISP_METERING_HISTOGRAM_TAIL_SIZE_REGS )
-
-#if STATISTICS_BUFFER_DATA_LOCALLY
-/** Local buffer for histogram data, For certain systems this can improve
- * performance as it saves us from having to read memory twice. Once for
- * checksum, second for processing. */
-static uint32_t l_histogram_set_buffer[HISTOGRAM_BUFFER_SIZE] = {0};
-#endif
+/* HISTOGRAM_BUF_LEN moved to histogram_fsm.h so the per-context buffer
+ * can be sized as a struct member. Local synonym kept for readability. */
+#define HISTOGRAM_BUFFER_SIZE HISTOGRAM_BUF_LEN
 
 static int get_mem_hist_id( histogram_fsm_const_ptr_t p_fsm )
 {
@@ -56,8 +50,7 @@ static uint32_t histogram_read( histogram_fsm_const_ptr_t p_fsm, const size_t in
 {
 #if STATISTICS_BUFFER_DATA_LOCALLY
     (void)histmem_offset; // On a locally buffered version just ignore the offset.
-    (void)p_fsm;          // Ditto.
-    return l_histogram_set_buffer[index];
+    return p_fsm->hist_buf[index];
 #else
     return system_isp_read_32(
         ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base +
@@ -115,7 +108,9 @@ static void ae_read_full_histogram_data( histogram_fsm_ptr_t p_fsm, const uint16
          (int)ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id, (int)ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, histmem_offset );
 
 #if STATISTICS_BUFFER_DATA_LOCALLY
-    system_isp_mem_read( l_histogram_set_buffer,
+    /* Snapshot into the per-context p_fsm->hist_buf so concurrent stats
+     * reads on other ISP contexts don't share a scratch buffer. */
+    system_isp_mem_read( p_fsm->hist_buf,
                          ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base +
                              ACAMERA_HISTOGRAM_MEM_BASE_ADDR +
                              histmem_offset,
@@ -143,37 +138,12 @@ static void ae_read_full_histogram_data( histogram_fsm_ptr_t p_fsm, const uint16
         p_fsm->fullhist_sum = sum;
         p_fsm->hist_ready_mask |= BIT( 0 );
 
-#if defined( ISP_HAS_SBUF_FSM ) // Send data to user-space.
-        sbuf_ae_t *p_sbuf_ae;
-        struct sbuf_item sbuf;
-        uint32_t fw_id = ACAMERA_FSM_GET_FW_ID( p_fsm );
-
-        system_memset( &sbuf, 0, sizeof( sbuf ) );
-        sbuf.buf_type = SBUF_TYPE_AE;
-        sbuf.buf_status = SBUF_STATUS_DATA_EMPTY;
-
-        if ( sbuf_get_item( fw_id, &sbuf ) ) {
-            LOG( LOG_ERR, "Error: Failed to get sbuf, return." );
-            return;
-        }
-
-        p_sbuf_ae = (sbuf_ae_t *)sbuf.buf_base;
-        LOG( LOG_DEBUG, "Get sbuf ok, idx: %u, status: %u, addr: %p.", sbuf.buf_idx, sbuf.buf_status, sbuf.buf_base );
-
-        /* NOTE: the size should match. */
-        system_memcpy( p_sbuf_ae->stats_data, &p_fsm->fullhist[0], sizeof( p_sbuf_ae->stats_data ) );
-        p_sbuf_ae->histogram_sum = sum;
-        LOG( LOG_DEBUG, "histsum: histogram_sum: %u.", p_sbuf_ae->histogram_sum );
-
-        /* Read done, set the buffer back for future using. */
-        sbuf.buf_status = SBUF_STATUS_DATA_DONE;
-
-        if ( sbuf_set_item( fw_id, &sbuf ) ) {
-            LOG( LOG_ERR, "Error: Failed to set sbuf, return." );
-            return;
-        }
-        LOG( LOG_DEBUG, "Set sbuf ok, idx: %u, status: %u, addr: %p.", sbuf.buf_idx, sbuf.buf_status, sbuf.buf_base );
-#endif // defined(ISP_HAS_SBUF_FSM)
+        /* Publish AE histogram + sum to the V4L2 META_CAPTURE queue.
+         * Replaces the legacy sbuf get_item / set_item dance: with
+         * the user-space chardev gone, there's no consumer of the
+         * sbuf ring slot, so the indirection drops out. */
+        modalix_meta_stats_publish_ae( ACAMERA_FSM_GET_FW_ID( p_fsm ),
+                                       p_fsm->fullhist, sum );
     }
 }
 
@@ -211,12 +181,22 @@ void histogram_config( histogram_fsm_ptr_t p_fsm )
 
 void histogram_reload_calibration( histogram_fsm_ptr_t p_fsm )
 {
-    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_STATISTICS_CONFIG ) ) {
-        const uint32_t *config = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_STATISTICS_CONFIG );
-        acamera_isp_metering_black_level_awb_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, *config++ );
-        acamera_isp_metering_white_level_awb_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, *config );
+    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_STATISTICS_CONFIG ) ) {
+        const uint32_t *config = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_STATISTICS_CONFIG );
+        const uint32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
+        acamera_isp_metering_black_level_awb_write( isp_base, config[0] );
+        acamera_isp_metering_white_level_awb_write( isp_base, config[1] );
+        /* Optional AWB pixel-qualification ratio window (G/R, G/B in u4.8).
+         * The HW default [64..511] caps ratios at 2.0, which excludes green-
+         * strong sensors entirely at the raw stats tap. */
+        if ( calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_STATISTICS_CONFIG ) >= 6 ) {
+            acamera_isp_metering_cr_ref_min_awb_write( isp_base, config[2] );
+            acamera_isp_metering_cr_ref_max_awb_write( isp_base, config[3] );
+            acamera_isp_metering_cb_ref_min_awb_write( isp_base, config[4] );
+            acamera_isp_metering_cb_ref_max_awb_write( isp_base, config[5] );
+        }
     } else {
-        LOG( LOG_ERR, "CALIBRATION_STATISTICS_CONFIG is missing, module will not be configured correctly!" );
+        LOG( LOG_ERR, "MODALIX_ISP_CALIB_STATISTICS_CONFIG is missing, module will not be configured correctly!" );
     }
 
     configure_histogram_neq_lut( p_fsm, get_mem_hist_id( p_fsm ) );

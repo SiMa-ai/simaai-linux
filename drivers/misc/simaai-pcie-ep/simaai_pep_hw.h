@@ -239,6 +239,12 @@ struct si_pep_dma_ll_ctx {
 	enum si_dma_dir dir;
 	struct si_pep_dma_ll_delem *dma_ll;
 	dma_addr_t p_dma_ll;
+	/*
+	 * cached: dma_ll belongs to the owning queue's reusable buffer and
+	 * must not be freed, only released by clearing *ll_busy.
+	 */
+	bool cached;
+	unsigned long *ll_busy;
 	size_t size;
 	size_t nents;
 	size_t tsize;

@@ -9,6 +9,7 @@
 #include <linux/bitops.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
+#include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/preempt.h>
 #include <linux/highmem.h>
@@ -248,6 +249,34 @@ static irqreturn_t dw_spi_transfer_handler(struct dw_spi *dws)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t dw_spi_enh_handler(struct dw_spi *dws)
+{
+	u16 irq_status = dw_readl(dws, DW_SPI_ISR);
+
+	if (dw_spi_check_status(dws, false)) {
+		spi_finalize_current_transfer(dws->host);
+		return IRQ_HANDLED;
+	}
+
+	if (irq_status & DW_SPI_INT_RXFI) {
+		dw_reader(dws);
+		if (dws->rx_len <= dw_readl(dws, DW_SPI_RXFTLR))
+			dw_writel(dws, DW_SPI_RXFTLR, dws->rx_len - 1);
+	}
+
+	if (irq_status & DW_SPI_INT_TXEI)
+		dw_writer(dws);
+
+	if (!dws->tx_len && dws->rx_len) {
+		dw_spi_mask_intr(dws, DW_SPI_INT_TXEI);
+	} else if (!dws->rx_len && !dws->tx_len) {
+		dw_spi_mask_intr(dws, 0xff);
+		spi_finalize_current_transfer(dws->host);
+	}
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t dw_spi_irq(int irq, void *dev_id)
 {
 	struct spi_controller *host = dev_id;
@@ -257,8 +286,15 @@ static irqreturn_t dw_spi_irq(int irq, void *dev_id)
 	if (!irq_status)
 		return IRQ_NONE;
 
-	if (!host->cur_msg) {
+	if (!host->cur_msg && dws->transfer_handler ==
+	    dw_spi_transfer_handler) {
 		dw_spi_mask_intr(dws, 0xff);
+		return IRQ_HANDLED;
+	}
+	if ((dws->transfer_handler == dw_spi_enh_handler &&
+	     !dws->rx_len && !dws->tx_len)) {
+		dw_spi_mask_intr(dws, 0xff);
+		spi_finalize_current_transfer(host);
 		return IRQ_HANDLED;
 	}
 
@@ -317,7 +353,7 @@ void dw_spi_update_config(struct dw_spi *dws, struct spi_device *spi,
 {
 	struct dw_spi_chip_data *chip = spi_get_ctldata(spi);
 	u32 cr0 = chip->cr0;
-	u32 speed_hz;
+	u32 speed_hz, spi_ctrlr0;
 	u16 clk_div;
 
 	/* CTRLR0[ 4/3: 0] or CTRLR0[ 20: 16] Data Frame Size */
@@ -330,10 +366,22 @@ void dw_spi_update_config(struct dw_spi *dws, struct spi_device *spi,
 		/* CTRLR0[11:10] Transfer Mode */
 		cr0 |= FIELD_PREP(DW_HSSI_CTRLR0_TMOD_MASK, cfg->tmode);
 
+	if (dw_spi_ver_is_ge(dws, HSSI, 103A)) {
+		cr0 &= ~DW_HSSI_CTRLR0_SPI_FRF_MASK;
+		cr0 |= FIELD_PREP(DW_HSSI_CTRLR0_SPI_FRF_MASK,
+				  cfg->spi_frf);
+	} else if (dw_spi_ver_is_ge(dws, PSSI, 400A)) {
+		cr0 &= ~DW_PSSI_CTRLR0_SPI_FRF_MASK;
+		cr0 |= FIELD_PREP(DW_PSSI_CTRLR0_SPI_FRF_MASK,
+				  cfg->spi_frf);
+	}
+
 	dw_writel(dws, DW_SPI_CTRLR0, cr0);
 
 	if (cfg->tmode == DW_SPI_CTRLR0_TMOD_EPROMREAD ||
-	    cfg->tmode == DW_SPI_CTRLR0_TMOD_RO)
+	    cfg->tmode == DW_SPI_CTRLR0_TMOD_RO ||
+	    (cfg->tmode == DW_SPI_CTRLR0_TMOD_TO &&
+	     cfg->spi_frf != DW_SPI_CTRLR0_SPI_FRF_STD_SPI))
 		dw_writel(dws, DW_SPI_CTRLR1, cfg->ndf ? cfg->ndf - 1 : 0);
 
 	/* Note DW APB SSI clock divider doesn't support odd numbers */
@@ -350,10 +398,41 @@ void dw_spi_update_config(struct dw_spi *dws, struct spi_device *spi,
 		dw_writel(dws, DW_SPI_RX_SAMPLE_DLY, chip->rx_sample_dly);
 		dws->cur_rx_sample_dly = chip->rx_sample_dly;
 	}
+
+	if (cfg->spi_frf != DW_SPI_CTRLR0_SPI_FRF_STD_SPI) {
+		spi_ctrlr0 = DW_SPI_SPI_CTRLR0_CLK_STRETCH_EN;
+		spi_ctrlr0 |= FIELD_PREP(DW_SPI_SPI_CTRLR0_WAIT_CYCLE_MASK,
+					 cfg->wait_c);
+		spi_ctrlr0 |= FIELD_PREP(DW_SPI_SPI_CTRLR0_INST_L_MASK,
+					 cfg->inst_l);
+		spi_ctrlr0 |= FIELD_PREP(DW_SPI_SPI_CTRLR0_ADDR_L_MASK,
+					 cfg->addr_l);
+		spi_ctrlr0 |= cfg->trans_t;
+		if (cfg->dtr) {
+			/* OPI DTR: instruction + addr/data on both clock edges */
+			spi_ctrlr0 |= DW_SPI_SPI_CTRLR0_SPI_DDR_EN |
+				      DW_SPI_SPI_CTRLR0_INST_DDR_EN;
+			/* reads are strobed by DQS */
+			if (cfg->tmode == DW_SPI_CTRLR0_TMOD_RO ||
+			    cfg->tmode == DW_SPI_CTRLR0_TMOD_EPROMREAD)
+				spi_ctrlr0 |= DW_SPI_SPI_CTRLR0_SPI_RXDS_EN;
+		}
+		dw_writel(dws, DW_SPI_SPI_CTRLR0, spi_ctrlr0);
+	} else {
+		/*
+		 * Standard SPI op: clear SPI_CTRLR0 so a leftover enhanced-mode
+		 * setting (clock stretching, wait cycles) from a previous
+		 * dual/quad/octal op does not corrupt this transfer. Without
+		 * this, the CLK_STRETCH_EN bit persists and breaks the next
+		 * single-line command (e.g. WREN fails to latch WEL).
+		 */
+		dw_writel(dws, DW_SPI_SPI_CTRLR0, 0);
+	}
 }
 EXPORT_SYMBOL_NS_GPL(dw_spi_update_config, "SPI_DW_CORE");
 
-static void dw_spi_irq_setup(struct dw_spi *dws)
+static void dw_spi_irq_setup(struct dw_spi *dws,
+			     irqreturn_t (*t_handler)(struct dw_spi *))
 {
 	u16 level;
 	u8 imask;
@@ -365,9 +444,17 @@ static void dw_spi_irq_setup(struct dw_spi *dws)
 	 */
 	level = min_t(unsigned int, dws->fifo_len / 2, dws->tx_len);
 	dw_writel(dws, DW_SPI_TXFTLR, level);
+
+	/*
+	 * In enhanced mode if we are reading then tx_len is 0 as we
+	 * have nothing to transmit. Calculate DW_SPI_RXFTLR with
+	 * rx_len.
+	 */
+	if (t_handler == dw_spi_enh_handler)
+		level = min_t(u16, dws->fifo_len / 2, dws->rx_len);
 	dw_writel(dws, DW_SPI_RXFTLR, level - 1);
 
-	dws->transfer_handler = dw_spi_transfer_handler;
+	dws->transfer_handler = t_handler;
 
 	imask = DW_SPI_INT_TXEI | DW_SPI_INT_TXOI |
 		DW_SPI_INT_RXUI | DW_SPI_INT_RXOI | DW_SPI_INT_RXFI;
@@ -419,6 +506,7 @@ static int dw_spi_transfer_one(struct spi_controller *host,
 		.tmode = DW_SPI_CTRLR0_TMOD_TR,
 		.dfs = transfer->bits_per_word,
 		.freq = transfer->speed_hz,
+		.spi_frf = DW_SPI_CTRLR0_SPI_FRF_STD_SPI,
 	};
 	int ret;
 
@@ -457,7 +545,7 @@ static int dw_spi_transfer_one(struct spi_controller *host,
 	else if (dws->irq == IRQ_NOTCONNECTED)
 		return dw_spi_poll_transfer(dws, transfer);
 
-	dw_spi_irq_setup(dws);
+	dw_spi_irq_setup(dws, dw_spi_transfer_handler);
 
 	return 1;
 }
@@ -473,12 +561,39 @@ static void dw_spi_handle_err(struct spi_controller *host,
 	dw_spi_reset_chip(dws);
 }
 
+static int dw_spi_adjust_enh_mem_op_size(struct spi_mem *mem, struct spi_mem_op *op)
+{
+	op->data.nbytes = clamp_val(op->data.nbytes, 0, DW_SPI_NDF_MASK + 1);
+
+	return 0;
+}
+
 static int dw_spi_adjust_mem_op_size(struct spi_mem *mem, struct spi_mem_op *op)
 {
 	if (op->data.dir == SPI_MEM_DATA_IN)
 		op->data.nbytes = clamp_val(op->data.nbytes, 0, DW_SPI_NDF_MASK + 1);
 
 	return 0;
+}
+
+static bool dw_spi_supports_enh_mem_op(struct spi_mem *mem,
+				       const struct spi_mem_op *op)
+{
+	if (op->addr.nbytes != 0 && op->addr.buswidth != 1 &&
+	    op->addr.buswidth != op->data.buswidth)
+		return false;
+
+	if (op->cmd.buswidth != 1 && op->cmd.buswidth != op->addr.buswidth &&
+	    op->cmd.buswidth != op->data.buswidth)
+		return false;
+
+	if (op->dummy.nbytes != 0 && op->data.dir == SPI_MEM_DATA_OUT)
+		return false;
+
+	if (op->dummy.nbytes != 0 && op->dummy.nbytes / op->dummy.buswidth > 4)
+		return false;
+
+	return spi_mem_default_supports_op(mem, op);
 }
 
 static bool dw_spi_supports_mem_op(struct spi_mem *mem,
@@ -607,34 +722,26 @@ static int dw_spi_write_then_read(struct dw_spi *dws, struct spi_device *spi)
 	return 0;
 }
 
-static inline bool dw_spi_ctlr_busy(struct dw_spi *dws)
+static inline int dw_spi_ctlr_busy(struct dw_spi *dws)
 {
-	return dw_readl(dws, DW_SPI_SR) & DW_SPI_SR_BUSY;
+	u32 sr;
+
+	/*
+	 * Wait for the controller to finish transmitting, SSI_BUSY reflects the
+	 * shift register, so polling it gives true shift-complete with no fixed
+	 * delay. Generous timeout so a stuck busy flag degrades to slow, not hung.
+	 */
+	return readl_relaxed_poll_timeout(dws->regs + DW_SPI_SR, sr,
+			!(sr & DW_SPI_SR_BUSY),
+			1, 100 * USEC_PER_MSEC);
 }
 
 static int dw_spi_wait_mem_op_done(struct dw_spi *dws)
 {
-	int retry = DW_SPI_WAIT_RETRIES;
-	struct spi_delay delay;
-	unsigned long ns, us;
-	u32 nents;
+	int ret;
 
-	nents = dw_readl(dws, DW_SPI_TXFLR);
-	ns = NSEC_PER_SEC / dws->current_freq * nents;
-	ns *= dws->n_bytes * BITS_PER_BYTE;
-	if (ns <= NSEC_PER_USEC) {
-		delay.unit = SPI_DELAY_UNIT_NSECS;
-		delay.value = ns;
-	} else {
-		us = DIV_ROUND_UP(ns, NSEC_PER_USEC);
-		delay.unit = SPI_DELAY_UNIT_USECS;
-		delay.value = clamp_val(us, 0, USHRT_MAX);
-	}
-
-	while (dw_spi_ctlr_busy(dws) && retry--)
-		spi_delay_exec(&delay, NULL);
-
-	if (retry < 0) {
+	ret = dw_spi_ctlr_busy(dws);
+	if (ret) {
 		dev_err(&dws->host->dev, "Mem op hanged up\n");
 		return -EIO;
 	}
@@ -644,8 +751,17 @@ static int dw_spi_wait_mem_op_done(struct dw_spi *dws)
 
 static void dw_spi_stop_mem_op(struct dw_spi *dws, struct spi_device *spi)
 {
-	dw_spi_enable_chip(dws, 0);
+	u32 sr;
+
+	dw_spi_wait_mem_op_done(dws);
+
+	/* SER=0: drive CS high while enabled */
 	dw_spi_set_cs(spi, true);
+
+	/* Toggling SSIENR flushes both the TX and RX FIFOs
+	 * and resets the transfer state machine.
+	 */
+	dw_spi_enable_chip(dws, 0);
 	dw_spi_enable_chip(dws, 1);
 }
 
@@ -660,7 +776,7 @@ static void dw_spi_stop_mem_op(struct dw_spi *dws, struct spi_device *spi)
 static int dw_spi_exec_mem_op(struct spi_mem *mem, const struct spi_mem_op *op)
 {
 	struct dw_spi *dws = spi_controller_get_devdata(mem->spi->controller);
-	struct dw_spi_cfg cfg;
+	struct dw_spi_cfg cfg = {0};
 	unsigned long flags;
 	int ret;
 
@@ -749,6 +865,164 @@ static int dw_spi_exec_mem_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	return ret;
 }
 
+static void dw_spi_init_enh_mem_buf(struct dw_spi *dws, const struct spi_mem_op *op)
+{
+	unsigned int i, j;
+	u8 *out;
+
+	out = dws->buf;
+	for (i = 0; i < DW_SPI_BUF_SIZE; ++i)
+		out[i] = 0;
+
+	for (i = 0, j = op->cmd.nbytes; i < op->cmd.nbytes; ++i, --j)
+		out[i] = DW_SPI_GET_BYTE(op->cmd.opcode, op->cmd.nbytes - j);
+
+	for (j = op->addr.nbytes, i = dws->reg_io_width; j > 0; ++i, --j)
+		out[i] = DW_SPI_GET_BYTE(op->addr.val, op->addr.nbytes - j);
+
+	dws->n_bytes = 1;
+	if (op->data.dir == SPI_MEM_DATA_IN) {
+		dws->rx = op->data.buf.in;
+		dws->rx_len = op->data.nbytes;
+		dws->tx = NULL;
+		dws->tx_len = 0;
+	} else if (op->data.dir == SPI_MEM_DATA_OUT) {
+		dws->tx_len = op->data.nbytes;
+		dws->tx = (void *)op->data.buf.out;
+		dws->rx = NULL;
+		dws->rx_len = 0;
+	} else {
+		dws->rx = NULL;
+		dws->rx_len = 0;
+		dws->tx = NULL;
+		dws->tx_len = 0;
+	}
+}
+
+static void dw_spi_enh_write_cmd_addr(struct dw_spi *dws, const struct spi_mem_op *op)
+{
+	void *buf = dws->buf;
+	u32 txw;
+
+	/* Send cmd as 32 bit value */
+	if (buf) {
+		txw = *(u32 *)(buf);
+		dw_write_io_reg(dws, DW_SPI_DR, txw);
+		buf += dws->reg_io_width;
+		if (op->addr.nbytes) {
+			txw = *(u32 *)(buf);
+			dw_write_io_reg(dws, DW_SPI_DR, txw);
+			if (op->addr.nbytes > 4) {
+				/* address more than 32bit */
+				buf += dws->reg_io_width;
+				txw = *(u32 *)(buf);
+				dw_write_io_reg(dws, DW_SPI_DR, txw);
+			}
+		}
+	}
+}
+
+static int dw_spi_try_enh_mem_op(struct spi_mem *mem, const struct spi_mem_op *op)
+{
+	struct spi_controller *ctlr = mem->spi->controller;
+	struct dw_spi *dws = spi_controller_get_devdata(ctlr);
+	struct dw_spi_cfg cfg;
+	int ret = 0;
+	unsigned long long ms;
+
+	switch (op->data.buswidth) {
+	case 2:
+		cfg.spi_frf = DW_SPI_CTRLR0_SPI_FRF_DUAL_SPI;
+		break;
+	case 4:
+		cfg.spi_frf = DW_SPI_CTRLR0_SPI_FRF_QUAD_SPI;
+		break;
+	case 8:
+		cfg.spi_frf = DW_SPI_CTRLR0_SPI_FRF_OCT_SPI;
+		break;
+	default:
+		return dw_spi_exec_mem_op(mem, op);
+	}
+
+	/* Collect cmd and addr into a single buffer */
+	dw_spi_init_enh_mem_buf(dws, op);
+
+	cfg.dfs = 8;
+	cfg.freq = clamp(mem->spi->max_speed_hz, 0U, dws->max_mem_freq);
+	cfg.ndf = op->data.nbytes;
+	if (op->data.dir == SPI_MEM_DATA_IN)
+		cfg.tmode = DW_SPI_CTRLR0_TMOD_RO;
+	else
+		cfg.tmode = DW_SPI_CTRLR0_TMOD_TO;
+	if (op->data.buswidth == op->addr.buswidth &&
+	    op->data.buswidth == op->cmd.buswidth)
+		cfg.trans_t = DW_SPI_SPI_CTRLR0_TRANS_TYPE_TT2;
+	else if (op->data.buswidth == op->addr.buswidth)
+		cfg.trans_t = DW_SPI_SPI_CTRLR0_TRANS_TYPE_TT1;
+	else
+		cfg.trans_t = DW_SPI_SPI_CTRLR0_TRANS_TYPE_TT0;
+
+	cfg.addr_l = clamp(op->addr.nbytes * 2, 0, 0xf);
+	if (op->cmd.nbytes > 1)
+		cfg.inst_l = DW_SPI_SPI_CTRLR0_INST_L_INST_L16;
+	else if (op->cmd.nbytes == 1)
+		cfg.inst_l = DW_SPI_SPI_CTRLR0_INST_L_INST_L8;
+	else
+		cfg.inst_l = DW_SPI_SPI_CTRLR0_INST_L_INST_L0;
+
+	cfg.wait_c = (op->dummy.nbytes * (BITS_PER_BYTE / op->dummy.buswidth));
+	cfg.dtr = op->cmd.dtr;
+
+	dw_spi_enable_chip(dws, 0);
+
+	dw_spi_update_config(dws, mem->spi, &cfg);
+
+	dw_spi_mask_intr(dws, 0xff);
+	reinit_completion(&ctlr->xfer_completion);
+	dw_spi_enable_chip(dws, 1);
+
+	dw_spi_enh_write_cmd_addr(dws, op);
+	dw_spi_set_cs(mem->spi, false);
+	dw_spi_irq_setup(dws, dw_spi_enh_handler);
+
+	/* Use timeout calculation from spi_transfer_wait() */
+	ms = 8LL * MSEC_PER_SEC * (dws->rx_len ? dws->rx_len : dws->tx_len);
+	do_div(ms, dws->current_freq);
+
+	/*
+	 * Increase it twice and add 200 ms tolerance, use
+	 * predefined maximum in case of overflow.
+	 */
+	ms += ms + 200;
+	if (ms > UINT_MAX)
+		ms = UINT_MAX;
+
+	ms = wait_for_completion_timeout(&ctlr->xfer_completion,
+					 msecs_to_jiffies(ms));
+
+	dw_spi_stop_mem_op(dws, mem->spi);
+
+	if (ms == 0)
+		ret = -EIO;
+
+	return ret;
+}
+
+static int dw_spi_exec_enh_mem_op(struct spi_mem *mem, const struct spi_mem_op *op)
+{
+	struct spi_controller *ctlr = mem->spi->controller;
+	struct dw_spi *dws = spi_controller_get_devdata(ctlr);
+	int retry, ret = -EIO;
+
+	for (retry = 0; retry < DW_SPI_WAIT_RETRIES && ret != 0; retry++)
+		ret = dw_spi_try_enh_mem_op(mem, op);
+
+	if (retry == DW_SPI_WAIT_RETRIES)
+		dev_err(&dws->host->dev, "Retry of enh_mem_op failed\n");
+
+	return ret;
+}
+
 /*
  * Initialize the default memory operations if a glue layer hasn't specified
  * custom ones. Direct mapping operations will be preserved anyway since DW SPI
@@ -762,9 +1036,15 @@ static void dw_spi_init_mem_ops(struct dw_spi *dws)
 {
 	if (!dws->mem_ops.exec_op && !(dws->caps & DW_SPI_CAP_CS_OVERRIDE) &&
 	    !dws->set_cs) {
-		dws->mem_ops.adjust_op_size = dw_spi_adjust_mem_op_size;
-		dws->mem_ops.supports_op = dw_spi_supports_mem_op;
-		dws->mem_ops.exec_op = dw_spi_exec_mem_op;
+		if (dws->caps & DW_SPI_CAP_EMODE) {
+			dws->mem_ops.exec_op = dw_spi_exec_enh_mem_op;
+			dws->mem_ops.supports_op = dw_spi_supports_enh_mem_op;
+			dws->mem_ops.adjust_op_size = dw_spi_adjust_enh_mem_op_size;
+		} else {
+			dws->mem_ops.exec_op = dw_spi_exec_mem_op;
+			dws->mem_ops.supports_op = dw_spi_supports_mem_op;
+			dws->mem_ops.adjust_op_size = dw_spi_adjust_mem_op_size;
+		}
 		if (!dws->max_mem_freq)
 			dws->max_mem_freq = dws->max_freq;
 	}
@@ -896,7 +1176,71 @@ static void dw_spi_hw_init(struct device *dev, struct dw_spi *dws)
 
 static const struct spi_controller_mem_caps dw_spi_mem_caps = {
 	.per_op_freq = true,
+	.dtr = true,
 };
+
+static u16 detect_enh_mode(struct dw_spi *dws)
+{
+	u16 mode = 0;
+	u32 tmp_spi_ctrlr0, tmp_ctrlr0, tmpdual, tmpquad, tmpoct;
+
+	if (dw_spi_ver_is_ge(dws, HSSI, 103A)) {
+		tmpdual = FIELD_PREP(DW_HSSI_CTRLR0_SPI_FRF_MASK,
+				     DW_SPI_CTRLR0_SPI_FRF_DUAL_SPI);
+		tmpquad = FIELD_PREP(DW_HSSI_CTRLR0_SPI_FRF_MASK,
+				     DW_SPI_CTRLR0_SPI_FRF_QUAD_SPI);
+		tmpoct = FIELD_PREP(DW_HSSI_CTRLR0_SPI_FRF_MASK,
+				    DW_SPI_CTRLR0_SPI_FRF_OCT_SPI);
+	} else if (dw_spi_ver_is_ge(dws, PSSI, 400A)) {
+		tmpdual = FIELD_PREP(DW_PSSI_CTRLR0_SPI_FRF_MASK,
+				     DW_SPI_CTRLR0_SPI_FRF_DUAL_SPI);
+		tmpquad = FIELD_PREP(DW_PSSI_CTRLR0_SPI_FRF_MASK,
+				     DW_SPI_CTRLR0_SPI_FRF_QUAD_SPI);
+		tmpoct = FIELD_PREP(DW_PSSI_CTRLR0_SPI_FRF_MASK,
+				    DW_SPI_CTRLR0_SPI_FRF_OCT_SPI);
+	} else {
+		return DW_SPI_CTRLR0_SPI_FRF_STD_SPI;
+	}
+
+	tmp_ctrlr0 = dw_readl(dws, DW_SPI_CTRLR0);
+	tmp_spi_ctrlr0 = dw_readl(dws, DW_SPI_SPI_CTRLR0);
+	dw_spi_enable_chip(dws, 0);
+
+	/* test clock stretching */
+	dw_writel(dws, DW_SPI_SPI_CTRLR0, DW_SPI_SPI_CTRLR0_CLK_STRETCH_EN);
+	if ((DW_SPI_SPI_CTRLR0_CLK_STRETCH_EN & dw_readl(dws, DW_SPI_SPI_CTRLR0)) !=
+	    DW_SPI_SPI_CTRLR0_CLK_STRETCH_EN)
+		/*
+		 * If clock stretching is not enabled then do not use
+		 * enhanced mode.
+		 */
+		goto disable_enh;
+
+	/* test dual mode */
+	dw_writel(dws, DW_SPI_CTRLR0, tmpdual);
+	if ((tmpdual & dw_readl(dws, DW_SPI_CTRLR0)) == tmpdual)
+		mode |= SPI_TX_DUAL | SPI_RX_DUAL;
+
+	/* test quad mode */
+	dw_writel(dws, DW_SPI_CTRLR0, tmpquad);
+	if ((tmpquad & dw_readl(dws, DW_SPI_CTRLR0)) == tmpquad)
+		mode |= SPI_TX_QUAD | SPI_RX_QUAD;
+
+	/* test octal mode */
+	dw_writel(dws, DW_SPI_CTRLR0, tmpoct);
+	if ((tmpoct & dw_readl(dws, DW_SPI_CTRLR0)) == tmpoct)
+		mode |= SPI_TX_OCTAL | SPI_RX_OCTAL;
+
+	if (mode)
+		dws->caps |= DW_SPI_CAP_EMODE;
+
+disable_enh:
+	dw_writel(dws, DW_SPI_CTRLR0, tmp_ctrlr0);
+	dw_writel(dws, DW_SPI_SPI_CTRLR0, tmp_spi_ctrlr0);
+	dw_spi_enable_chip(dws, 1);
+
+	return mode;
+}
 
 int dw_spi_add_host(struct device *dev, struct dw_spi *dws)
 {
@@ -927,10 +1271,11 @@ int dw_spi_add_host(struct device *dev, struct dw_spi *dws)
 		goto err_free_host;
 	}
 
-	dw_spi_init_mem_ops(dws);
-
 	host->use_gpio_descriptors = true;
 	host->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LOOP;
+	host->mode_bits |= detect_enh_mode(dws);
+	dw_spi_init_mem_ops(dws);
+
 	if (dws->caps & DW_SPI_CAP_DFS32)
 		host->bits_per_word_mask = SPI_BPW_RANGE_MASK(4, 32);
 	else

@@ -9,6 +9,7 @@
 #include <linux/platform_device.h>
 #include <linux/property.h>
 #include <linux/slab.h>
+#include <linux/timer.h>
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/dmaengine.h>
@@ -35,9 +36,96 @@ struct vdma_channel {
 	unsigned int 			buf_count;
 	bool				streaming;
 	bool				enabled;
+	struct timer_list		fwd_timer;	/* frame watchdog */
+	unsigned int			fwd_fires;	/* consecutive watchdog fires */
 	struct dma_interleaved_template	xt;
 	struct data_chunk 		sgl;
+	/*
+	 * frame_size is the live buffer size (incl. metadata); the DMA provider
+	 * owns the throwaway scratch buffer it loops on when no user buffer is
+	 * queued, so user buffers complete to userspace immediately.
+	 */
+	size_t				frame_size;
 };
+
+/* Provided by dw-axi-dmac (built-in); arms/disarms the per-channel scratch loop.
+ * The provider allocates and owns the throwaway buffer -- pass the frame size. */
+int dw_axi_dma_arm_scratch(struct dma_chan *dchan, size_t size);
+void dw_axi_dma_disarm_scratch(struct dma_chan *dchan);
+int dw_axi_dma_quiesce_for_overflow(struct dma_chan *dchan);
+int dw_axi_dma_resume_after_overflow(struct dma_chan *dchan);
+int dw_axi_dma_inject_halt(struct dma_chan *dchan);	/* test injector */
+
+/* Provided by dwc-mipi-csi2 (the upstream CSI subdev); registers the DMA
+ * quiesce/resume callbacks used by the CSI IPI-overflow recovery (SOCSW-5392). */
+int dwc_csi_register_overflow_recovery(struct v4l2_subdev *sd,
+				       void (*quiesce)(void *data),
+				       void (*resume)(void *data), void *data);
+void dwc_csi_trigger_overflow_recovery(struct v4l2_subdev *sd);
+
+/* CSI IPI-overflow recovery parks the DMA across the CSI reset and restarts
+ * it after, via these thunks. */
+static void vdma_dma_quiesce(void *dma_chan)
+{
+	dw_axi_dma_quiesce_for_overflow((struct dma_chan *)dma_chan);
+}
+
+static void vdma_dma_resume(void *dma_chan)
+{
+	dw_axi_dma_resume_after_overflow((struct dma_chan *)dma_chan);
+}
+
+/* frame-watchdog timeout in ms, 0 = off. */
+static unsigned int frame_watchdog_ms = 5000;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(frame_watchdog_ms, uint, 0644);
+MODULE_PARM_DESC(frame_watchdog_ms, "frame-watchdog timeout in ms (0 = disabled)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
+/* Max consecutive recovery attempts before giving up. 0 = infinite (never give
+ * up, keep recovering as long as the stall persists). The counter is reset to 0
+ * on every completed frame, so it counts *consecutive* failures, not lifetime. */
+static unsigned int frame_watchdog_max_retry = 3;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(frame_watchdog_max_retry, uint, 0644);
+MODULE_PARM_DESC(frame_watchdog_max_retry,
+		 "max consecutive watchdog recovery attempts before giving up (0 = infinite)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
+/*
+ * Test knob: skip arming the DMA scratch fallback so the DMA runs out of
+ * descriptors mid-stream and the CSI IPI overflows (SOCSW-5392) — used to
+ * validate the IPI-overflow recovery. Default off.
+ */
+static bool scratch_disable;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(scratch_disable, bool, 0644);
+MODULE_PARM_DESC(scratch_disable, "skip DMA scratch arm (force mid-stream IPI overflow; test only)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
+/*
+ * Test injector: writing to this param halts the active channel's DMA the way
+ * descriptor-exhaustion does (clears the scratch LLI_VALID), deterministically
+ * reproducing the wedge so IPI-only vs full recovery can be compared. The
+ * active channel's dma_chan is published here at stream-on.
+ */
+static struct dma_chan *g_inject_dma;
+
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+static int dma_inject_halt_set(const char *val, const struct kernel_param *kp)
+{
+	struct dma_chan *dc = READ_ONCE(g_inject_dma);
+
+	if (!dc)
+		return -ENODEV;
+	return dw_axi_dma_inject_halt(dc);
+}
+static const struct kernel_param_ops dma_inject_halt_ops = {
+	.set = dma_inject_halt_set,
+};
+module_param_cb(dma_inject_halt, &dma_inject_halt_ops, NULL, 0644);
+MODULE_PARM_DESC(dma_inject_halt, "write to halt the active DMA (force the wedge; test only)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
 
 struct vdma_dev {
 	struct device			*dev;
@@ -200,12 +288,43 @@ static void vdma_v4l2_notifier_unregister(struct vdma_dev *dev)
 	v4l2_async_nf_cleanup(&dev->nf);
 }
 
+static void vdma_frame_watchdog(struct timer_list *t)
+{
+	struct vdma_channel *chan = timer_container_of(chan, t, fwd_timer);
+
+	if (!chan->streaming || !frame_watchdog_ms)
+		return;
+
+	chan->fwd_fires++;
+
+	/* Finite budget exhausted (max_retry == 0 means infinite -> never here). */
+	if (frame_watchdog_max_retry &&
+	    chan->fwd_fires > frame_watchdog_max_retry) {
+		if (chan->fwd_fires == frame_watchdog_max_retry + 1)
+			dev_err(chan->dev->dev,
+				"ch%u: frame watchdog: stalled after %u recovery attempts; giving up (restart the stream)\n",
+				chan->id, frame_watchdog_max_retry);
+		return;	/* stop re-arming; a completed frame re-arms via fill_buffer */
+	}
+
+	dev_warn(chan->dev->dev,
+		 "ch%u: frame watchdog: no frame in %u ms, recovery attempt #%u%s\n",
+		 chan->id, frame_watchdog_ms, chan->fwd_fires,
+		 frame_watchdog_max_retry ? "" : " (infinite)");
+
+	if (chan->ep_sd)
+		dwc_csi_trigger_overflow_recovery(chan->ep_sd);
+
+	mod_timer(&chan->fwd_timer, jiffies + msecs_to_jiffies(frame_watchdog_ms));
+}
+
 static int vdma_enable_channel(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  u32 pad, u64 streams_mask)
 {
 	struct vdma_dev *dev = subdev_to_vdma_dev(sd);
 	struct vdma_channel *chan;
+	struct vdma_channel *remote;
 	u32 other_pad;
 	u32 other_stream;
 	int ret = 0;
@@ -225,17 +344,65 @@ static int vdma_enable_channel(struct v4l2_subdev *sd,
 		goto unlock;
 	}
 
+	/* Reset before the DMA/source start so the first buffer is sequence 0. */
+	chan->sequence = 0;
+
+	/*
+	 * Arm the per-channel scratch buffer before the DMA starts and before the
+	 * sensor pushes, so the channel always has a destination: it loops on the
+	 * scratch when no user buffer is queued, which lets user buffers complete to
+	 * userspace immediately (one frame each). The scratch is required for
+	 * continuous capture without holding user buffers — fail the stream if it
+	 * cannot be set up.
+	 */
+	if (scratch_disable)
+		dev_warn(dev->dev, "scratch DISABLED (test): DMA will run out of "
+			 "descriptors -> mid-stream IPI overflow expected\n");
+	if (!scratch_disable && chan->frame_size) {
+		ret = dw_axi_dma_arm_scratch(chan->dma, chan->frame_size);
+		if (ret) {
+			dev_err(dev->dev, "scratch arm failed: %d", ret);
+			goto unlock;
+		}
+	}
+
+	/*
+	 * Let the upstream CSI's IPI-overflow recovery (SOCSW-5392) un-stick this
+	 * DMA channel: register the resume callback now that dma + scratch are up.
+	 */
+	if (chan->ep_sd)
+		dwc_csi_register_overflow_recovery(chan->ep_sd, vdma_dma_quiesce,
+						   vdma_dma_resume, chan->dma);
+
+	WRITE_ONCE(g_inject_dma, chan->dma);	/* test injector target */
+
 	dma_async_issue_pending(chan->dma);
 
-	chan = &dev->channels[other_pad];
-	ret = v4l2_subdev_enable_streams(chan->ep_sd, chan->ep_pad, BIT(other_stream));
+	/* The upstream feeding this source pad is the routed sink channel. */
+	remote = &dev->channels[other_pad];
+	ret = v4l2_subdev_enable_streams(remote->ep_sd, remote->ep_pad,
+					 BIT(other_stream));
 	if (ret) {
 		dev_err(dev->dev, "Failed to enable stream on EP subdevice: %d", ret);
+		/* DMA already issued above; drain it before vb2 frees the buffers
+		 * (else fill_buffer completes freed buffers -> use-after-free).
+		 * terminate_sync also tears down the scratch/RELOAD state and frees
+		 * the provider-owned scratch buffer. */
+		dmaengine_terminate_sync(chan->dma);
+		cmpxchg(&g_inject_dma, chan->dma, NULL);	/* retract only our own */
+		if (chan->ep_sd)
+			dwc_csi_register_overflow_recovery(chan->ep_sd, NULL,
+							   NULL, NULL);
 		goto unlock;
 	}
 
-	chan->sequence = 0;
 	chan->streaming = true;
+
+	/* arm the frame watchdog; fill_buffer re-arms it on every frame. */
+	chan->fwd_fires = 0;
+	if (frame_watchdog_ms)
+		mod_timer(&chan->fwd_timer,
+			  jiffies + msecs_to_jiffies(frame_watchdog_ms));
 
 unlock:
 	mutex_unlock(&chan->lock);
@@ -249,6 +416,7 @@ static int vdma_disable_channel(struct v4l2_subdev *sd,
 {
 	struct vdma_dev *dev = subdev_to_vdma_dev(sd);
 	struct vdma_channel *chan;
+	struct vdma_channel *remote;
 	u32 other_pad;
 	u32 other_stream;
 	int ret = 0;
@@ -268,15 +436,28 @@ static int vdma_disable_channel(struct v4l2_subdev *sd,
 		goto unlock;
 	}
 
-	ret = v4l2_subdev_disable_streams(chan->ep_sd, chan->ep_pad, BIT(other_stream));
+	/* disarm the watchdog before teardown so it can't fire while frames stop. */
+	chan->streaming = false;
+	timer_delete_sync(&chan->fwd_timer);
 
+	/* The upstream feeding this source pad is the routed sink channel. */
+	remote = &dev->channels[other_pad];
+	ret = v4l2_subdev_disable_streams(remote->ep_sd, remote->ep_pad,
+					  BIT(other_stream));
 	if (ret) {
 		dev_err(dev->dev, "Cannot disable streams: %d", ret);
 		goto unlock;
 	}
 
+	/* terminate_sync stops the DMA, tears down the scratch/RELOAD state and
+	 * frees the provider-owned scratch buffer. */
 	dmaengine_terminate_sync(chan->dma);
-	chan->streaming = false;
+
+	cmpxchg(&g_inject_dma, chan->dma, NULL);	/* retract only our own */
+
+	/* Stop the CSI from resuming a channel that is going away. */
+	if (chan->ep_sd)
+		dwc_csi_register_overflow_recovery(chan->ep_sd, NULL, NULL, NULL);
 
 unlock:
 	mutex_unlock(&chan->lock);
@@ -284,11 +465,12 @@ unlock:
 };
 
 static int vdma_set_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_state *sd_state,
-		struct v4l2_subdev_format *sdformat)
+			struct v4l2_subdev_state *sd_state,
+			struct v4l2_subdev_format *sdformat)
 {
 	struct vdma_dev *dev = subdev_to_vdma_dev(sd);
-	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_mbus_framefmt *sink_fmt, *src_fmt;
+	struct vdma_channel *chan;
 
 	/*
 	 * The VDMA can't transcode in any way, the source format can't be
@@ -297,21 +479,41 @@ static int vdma_set_fmt(struct v4l2_subdev *sd,
 	if (sdformat->pad >= VDMA_CHANNELS)
 		return v4l2_subdev_get_fmt(sd, sd_state, sdformat);
 
-	fmt = v4l2_subdev_state_get_format(sd_state, sdformat->pad,
-			sdformat->stream);
-	if (!fmt)
+	sink_fmt = v4l2_subdev_state_get_format(sd_state, sdformat->pad,
+						sdformat->stream);
+	if (!sink_fmt)
 		return -EINVAL;
-
-	*fmt = sdformat->format;
+	*sink_fmt = sdformat->format;
 
 	/* Propagate the format from sink stream to source stream */
-	fmt = v4l2_subdev_state_get_opposite_stream_format(sd_state, sdformat->pad,
-			sdformat->stream);
-	if (!fmt)
+	src_fmt = v4l2_subdev_state_get_opposite_stream_format(sd_state,
+							       sdformat->pad,
+							       sdformat->stream);
+	if (!src_fmt)
 		return -EINVAL;
+	*src_fmt = sdformat->format;
 
-	*fmt = sdformat->format;
-	dev->channels[sdformat->pad].fmt = sdformat->format;
+	if (sdformat->which != V4L2_SUBDEV_FORMAT_ACTIVE)
+		return 0;
+
+	chan = &dev->channels[sdformat->pad];
+	chan->fmt = sdformat->format;
+
+	if (chan->ep_sd) {
+		struct v4l2_subdev_format up = *sdformat;
+		struct v4l2_subdev_state *ust;
+		int ret = -ENODEV;
+
+		ust = v4l2_subdev_lock_and_get_active_state(chan->ep_sd);
+		if (ust) {
+			ret = v4l2_subdev_routing_find_opposite_end(&ust->routing,
+					chan->ep_pad, sdformat->stream,
+					&up.pad, &up.stream);
+			v4l2_subdev_unlock_state(ust);
+		}
+		if (!ret)
+			v4l2_subdev_call_state_active(chan->ep_sd, pad, set_fmt, &up);
+	}
 
 	return 0;
 }
@@ -337,11 +539,41 @@ static void fill_buffer(void *param, const struct dmaengine_result *result)
 	if (unlikely(result->result != DMA_TRANS_NOERROR))
 		done = VB2_BUF_STATE_ERROR;
 
+	/*
+	 * The CSI/IPI appends a per-frame metadata trailer (excluded from the
+	 * payload). When present, its status field flags a bad frame — report it
+	 * as an error rather than handing torn data to userspace.
+	 */
+	if (done == VB2_BUF_STATE_DONE &&
+	    buf->size >= VDMA_FRAME_METADATA_SIZE) {
+		void *vaddr = vb2_plane_vaddr(&buf->vb.vb2_buf, 0);
+
+		if (vaddr) {
+			const struct vdma_frame_meta *meta =
+				vaddr + buf->size - VDMA_FRAME_METADATA_SIZE;
+
+			if (le32_to_cpu(meta->magic) == VDMA_FRAME_META_MAGIC &&
+			    le16_to_cpu(meta->status) == 0) {
+				dev_dbg_ratelimited(chan->dev->dev,
+					"ch%u: bad frame (seq %u) per metadata status\n",
+					chan->id, le16_to_cpu(meta->sequence));
+				done = VB2_BUF_STATE_ERROR;
+			}
+		}
+	}
+
 	buf->vb.field = chan->fmt.field;
 	buf->vb.sequence = chan->sequence++;
 	buf->vb.vb2_buf.timestamp = ktime_get_ns();
 	vb2_set_plane_payload(&buf->vb.vb2_buf, 0, buf->size - VDMA_FRAME_METADATA_SIZE);
 	vb2_buffer_done(&buf->vb.vb2_buf, done);
+
+	/* a frame completed -> pipeline is alive: clear escalation + re-arm. */
+	if (frame_watchdog_ms && chan->streaming) {
+		chan->fwd_fires = 0;
+		mod_timer(&chan->fwd_timer,
+			  jiffies + msecs_to_jiffies(frame_watchdog_ms));
+	}
 }
 
 void vdma_buffer_queue(struct vb2_buffer *vb)
@@ -354,6 +586,8 @@ void vdma_buffer_queue(struct vb2_buffer *vb)
 	mutex_lock(&chan->lock);
 	chan->xt.dst_start = vb2_dma_contig_plane_dma_addr(vb, 0);
 	chan->xt.sgl[0].size = buf->size;
+	/* Remember the live buffer size so stream-on can size the scratch buffer. */
+	chan->frame_size = buf->size;
 
 	desc = dmaengine_prep_interleaved_dma(chan->dma, &chan->xt,
 		DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
@@ -544,6 +778,7 @@ static int vdma_probe(struct platform_device *pdev)
 		}
 		vdma_parse_sink_dt_endpoint(dev, chan);
 		mutex_init(&chan->lock);
+		timer_setup(&chan->fwd_timer, vdma_frame_watchdog, 0);
 	}
 
 	ret = vdma_v4l2_register(dev);

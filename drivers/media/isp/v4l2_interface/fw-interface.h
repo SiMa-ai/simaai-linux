@@ -244,4 +244,15 @@ int fw_intf_get_register_source( uint32_t ctx_id, int *ret_val );
 int fw_intf_get_register_size( uint32_t ctx_id, int *ret_val );
 int fw_intf_get_register_address( uint32_t ctx_id, int *ret_val );
 int fw_intf_get_register_value( uint32_t ctx_id, int *ret_val );
+
+/* Struct-shaped accessors backing the V4L2 SENSOR_INFO_BLOB compound
+ * control + the three CMOS_*_LOG2 scalars. They wrap the general
+ * router commands CMD_ID_SENSOR_INFO / CMD_ID_CMOS_*. Caller supplies
+ * the output buffer; sizes must match the corresponding kernel
+ * struct exactly (sizeof(acamera_cmd_sensor_info) for the blob). */
+int fw_intf_get_sensor_info_blob( uint32_t ctx_id, void *out, size_t out_sz );
+int fw_intf_get_cmos_max_exposure_log2( uint32_t ctx_id, int *ret_val );
+int fw_intf_get_cmos_again_log2( uint32_t ctx_id, int *ret_val );
+int fw_intf_get_cmos_dgain_log2( uint32_t ctx_id, int *ret_val );
+
 #endif

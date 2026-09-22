@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/i2c/econ,imx568-gmsl.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: e-con Systems IMX568 GMSL camera module
+
+maintainers:
+  - Nileshkumar Raghuvanshi <nileshkumar.raghuvanshi@gmail.com>
+
+description: |-
+  The e-con Systems camera module is built around the Sony IMX568 1/1.8-inch
+  global-shutter CMOS image sensor paired with an on-board MCU/ISP. The module
+  is connected over a GMSL serializer/deserializer link (MAX9295A serializer and
+  MAX96716A deserializer) and presents a MIPI CSI-2 output to the host. The MCU
+  is controlled over I2C and its firmware is loaded from the rootfs at probe
+  time.
+
+allOf:
+  - $ref: /schemas/media/video-interface-devices.yaml#
+
+properties:
+  compatible:
+    const: econ,imx568-gmsl
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    items:
+      - const: xclk
+
+  VANA-supply:
+    description: Analog (3.3V) supply.
+
+  VDIG-supply:
+    description: Digital core (1.1V) supply.
+
+  VDDL-supply:
+    description: Interface (1.8V) supply.
+
+  reset-gpios:
+    description: Reference to the GPIO connected to the MCU reset pin.
+    maxItems: 1
+
+  boot-gpios:
+    description: Reference to the GPIO connected to the MCU boot pin.
+    maxItems: 1
+
+  cam_fw_name:
+    $ref: /schemas/types.yaml#/definitions/string
+    description:
+      Name of the MCU firmware binary to request from the rootfs at probe time.
+
+  camera_mipi_lanes:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [2, 4]
+    description: Number of MIPI CSI-2 data lanes used between the module and host.
+
+  port:
+    $ref: /schemas/graph.yaml#/$defs/port-base
+    additionalProperties: false
+    description: MIPI CSI-2 source port.
+
+    properties:
+      endpoint:
+        $ref: /schemas/media/video-interfaces.yaml#
+        unevaluatedProperties: false
+
+        properties:
+          data-lanes:
+            minItems: 2
+            maxItems: 4
+
+          link-frequencies: true
+          clock-lanes: true
+          clock-continuous: true
+          remote-endpoint: true
+
+        required:
+          - data-lanes
+          - link-frequencies
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - port
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        camera@42 {
+            compatible = "econ,imx568-gmsl";
+            reg = <0x42>;
+            clocks = <&imx568_clk>;
+            clock-names = "xclk";
+            VANA-supply = <&imx568_vana>;
+            VDIG-supply = <&imx568_vdig>;
+            VDDL-supply = <&imx568_vddl>;
+            camera_mipi_lanes = <2>;
+            cam_fw_name = "imx568_cam_fw_gmsl.bin";
+
+            port {
+                imx568_out: endpoint {
+                    clock-lanes = <0>;
+                    data-lanes = <1 2>;
+                    link-frequencies = /bits/ 64 <594000000>;
+                    remote-endpoint = <&csi_in>;
+                    clock-continuous;
+                };
+            };
+        };
+    };
+...

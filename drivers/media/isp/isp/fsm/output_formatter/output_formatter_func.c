@@ -771,8 +771,8 @@ static int32_t output_formatter_config_format( output_formatter_fsm_ptr_t p_fsm 
 
 static void output_formatter_rgb_lut_reload( output_formatter_fsm_ptr_t p_fsm )
 {
-    const uint32_t *gamma_lut = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_GAMMA );
-    const uint32_t gamma_lut_len = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_GAMMA );
+    const uint32_t *gamma_lut = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA );
+    const uint32_t gamma_lut_len = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA );
 
     uint32_t i;
     for ( i = 0; i < ( gamma_lut_len - 1 ); i++ ) {

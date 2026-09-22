@@ -23,13 +23,12 @@ static ssize_t dphy_reset_show(struct device *dev,
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-	char buffer[15];
 
 	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 0);
 	usleep_range(100, 200);
 	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 1);
 
-	return strscpy(buf, buffer, PAGE_SIZE);
+	return sysfs_emit(buf, "dphy reset done\n");
 }
 
 static ssize_t dphy_freq_store(struct device *dev,
@@ -81,17 +80,14 @@ static ssize_t dphy_addr_store(struct device *dev,
 	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
 	unsigned long val;
 	int ret;
-	u8 addr, payload;
+	u8 addr;
 
-	ret = kstrtoul(buf, 32, &val);
+	ret = kstrtoul(buf, 16, &val);
 	if (ret < 0)
 		return ret;
 
-	payload = (u16)val;
-	addr = (u16)(val >> 16);
+	addr = (u8)(val >> 16);
 
-	dev_info(dev, "addr 0x%lX\n", val);
-	dev_info(dev, "payload: 0x%X\n", addr);
 	dev_info(dev, "Addr [0x%x] -> 0x%x\n", (unsigned int)addr,
 		 dw_dphy_te_read(dphy, addr));
 
@@ -188,14 +184,12 @@ static ssize_t dw_dphy_g118_settle_store(struct device *dev,
 	if (ret < 0)
 		return ret;
 
-	if ((lp_time > 1) && (lp_time < 10000))
+	if ((lp_time > 1) && (lp_time < 10000)) {
 		dphy->lp_time = lp_time;
-	else {
+	} else {
 		pr_info("Invalid Value configuring for 1000 ns\n");
 		dphy->lp_time = 1000;
 	}
-
-	dphy->lp_time = lp_time;
 
 	return count;
 }
@@ -222,6 +216,19 @@ static DEVICE_ATTR_RW(idelay);
 static DEVICE_ATTR_RW(len_config);
 static DEVICE_ATTR_RW(dw_dphy_g118_settle);
 
+static struct attribute *dw_dphy_attrs[] = {
+	&dev_attr_dphy_reset.attr,
+	&dev_attr_dphy_freq.attr,
+	&dev_attr_dphy_addr.attr,
+#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
+	&dev_attr_idelay.attr,
+#endif
+	&dev_attr_len_config.attr,
+	&dev_attr_dw_dphy_g118_settle.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(dw_dphy);
+
 static struct phy_ops dw_dphy_ops = {
 	.init = dw_dphy_init,
 	.reset = dw_dphy_reset,
@@ -247,15 +254,15 @@ static int dw_dphy_rx_probe(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	dphy->base_address = devm_ioremap(dev, res->start, resource_size(res));
-	if (IS_ERR(dphy->base_address)) {
+	if (!dphy->base_address) {
 		dev_err(dev, "error requesting base address\n");
-		return PTR_ERR(dphy->base_address);
+		return -ENOMEM;
 	}
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	dphy->glue_base_address = devm_ioremap(dev, res->start, resource_size(res));
-	if (IS_ERR(dphy->glue_base_address)) {
+	if (!dphy->glue_base_address) {
 		dev_err(dev, "error requesting glue reg base address for dphy\n");
-		return PTR_ERR(dphy->glue_base_address);
+		return -ENOMEM;
 	}
 
 #if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
@@ -298,7 +305,6 @@ static int dw_dphy_rx_probe(struct platform_device *pdev)
 	}
 
 	dev_set_drvdata(dev, dphy);
-	spin_lock_init(&dphy->slock);
 
 	phy = devm_phy_create(dev, NULL, &dw_dphy_ops);
 	if (IS_ERR(phy)) {
@@ -318,15 +324,6 @@ static int dw_dphy_rx_probe(struct platform_device *pdev)
 	dphy->lp_time = 1000; /* 1000 ns */
 	dphy->lanes_config = dw_dphy_setup_config(dphy);
 	dev_dbg(dev, "rx-dphy created\n");
-
-	device_create_file(&pdev->dev, &dev_attr_dphy_reset);
-	device_create_file(&pdev->dev, &dev_attr_dphy_freq);
-	device_create_file(&pdev->dev, &dev_attr_dphy_addr);
-#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-	device_create_file(&pdev->dev, &dev_attr_idelay);
-#endif
-	device_create_file(&pdev->dev, &dev_attr_len_config);
-	device_create_file(&pdev->dev, &dev_attr_dw_dphy_g118_settle);
 	dev_info(dev, "rx-dphy done!!! \n");
 
 	return 0;
@@ -344,6 +341,7 @@ static struct platform_driver dw_dphy_rx_driver =
 		  .of_match_table = dw_dphy_rx_of_match,
 		  .name = "snps-dphy-rx",
 		  .owner = THIS_MODULE,
+		  .dev_groups = dw_dphy_groups,
 	  } };
 module_platform_driver(dw_dphy_rx_driver);
 

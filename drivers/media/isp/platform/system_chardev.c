@@ -25,11 +25,15 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
+#include <linux/pm_runtime.h>
+#include <linux/platform_device.h>
 #include "system_stdlib.h"
 #include "acamera_logger.h"
 
 #define SYSTEM_CHARDEV_FIFO_SIZE 4096
 #define SYSTEM_CHARDEV_NAME "ac_isp"
+
+extern struct platform_device *g_pdev;
 
 struct isp_dev_context {
     uint8_t dev_inited;
@@ -84,12 +88,23 @@ static int isp_fops_open( struct inode *inode, struct file *f )
         rc = -EBUSY;
     } else {
         p_ctx->dev_opened = 1;
-        rc = 0;
-        LOG( LOG_INFO, "Open(%s) succeed.", p_ctx->dev_name );
+	/* Since the ACT tool can run anytime using devmem for it to not
+	 * fail we take the PM refcount here and tool needs to be updated
+	 * to call open systemcall to ac_isp to take effect
+	 * */
+        rc = pm_runtime_resume_and_get( &g_pdev->dev );
+        if ( rc < 0 ) {
+	    p_ctx->dev_opened = 0;
+            LOG( LOG_ERR, "Failed to resume ISP, ret: %d.", rc );
+            rc = -EACCES;
+        } else {
+            rc = 0;
+            LOG( LOG_INFO, "Open(%s) succeed.", p_ctx->dev_name );
 
-        LOG( LOG_DEBUG, "Bf set, private_data: %p.", f->private_data );
-        f->private_data = p_ctx;
-        LOG( LOG_DEBUG, "Af set, private_data: %p.", f->private_data );
+            LOG( LOG_DEBUG, "Bf set, private_data: %p.", f->private_data );
+            f->private_data = p_ctx;
+            LOG( LOG_DEBUG, "Af set, private_data: %p.", f->private_data );
+	}
     }
 
     mutex_unlock( &p_ctx->fops_lock );
@@ -119,6 +134,7 @@ static int isp_fops_release( struct inode *inode, struct file *f )
         f->private_data = NULL;
         kfifo_reset( &p_ctx->isp_kfifo_in );
         kfifo_reset( &p_ctx->isp_kfifo_out );
+	pm_runtime_put( &g_pdev->dev );
     } else {
         LOG( LOG_CRIT, "Fatal error: wrong state of dev: %s, dev_opened: %d.", p_ctx->dev_name, p_ctx->dev_opened );
         rc = -EINVAL;

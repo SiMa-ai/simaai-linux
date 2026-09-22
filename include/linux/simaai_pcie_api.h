@@ -44,6 +44,8 @@
 #define SI_DEV_REM_RESCAN _IO(SI_CMD, 0x22)
 #define SI_DEV_SBRESET _IO(SI_CMD, 0x23)
 #define SI_HW_GETINFO _IOR(SI_CMD, 0x24, struct si_hwinfo)
+#define SI_GET_BUF_ALLOC_MODE _IOR(SI_CMD, 0x25, __u32)
+#define SI_BUFF_ENROLL _IOW(SI_CMD, 0x26, struct si_buf_enroll)
 
 /* Commands that has work on both sides */
 #define SI_CREATE_MWQ _IOW(SI_CMD, 0x10, struct si_qcmd_param)
@@ -178,6 +180,32 @@ enum si_buffer_addr_type {
 	SI_BUF_ADDR_SGE_LIST,
 	SI_BUF_ADDR_MAX
 };
+
+/*
+ * Source of the ring buffers backing the queues. Reported to userspace via
+ * SI_GET_BUF_ALLOC_MODE so the library knows whether it must allocate and
+ * enroll its own buffers.
+ */
+enum si_buf_alloc_mode {
+	SI_BUF_ALLOC_KERNEL = 0,
+	SI_BUF_ALLOC_USER = 1,
+};
+
+/*
+ * Enroll a userspace-allocated dma-buf (e.g. udmabuf) as one of the ring
+ * buffers of a queue. Only valid when the driver is in SI_BUF_ALLOC_USER mode.
+ *
+ * The slot identified by (qid, idx) is filled with the buffer behind fd. The
+ * driver finalises the queue (RQE setup if RX, SoC create command) on enroll
+ * of the last buffer.
+ */
+struct si_buf_enroll {
+	__u32 qid;	/* Target queue id */
+	__u32 idx;	/* Buffer slot index, in [0, ctx->entries) */
+	__u32 btype;	/* One of enum si_buffer_type */
+	__s32 fd;	/* Userspace dma-buf / udmabuf file descriptor */
+	__u32 size;	/* Buffer size in bytes, must match queue bsize */
+} __aligned(4) __packed;
 
 #define SI_NUM_BUFS_MAX	16
 

@@ -75,8 +75,37 @@ struct axi_dma_chan {
 	u64				completed;
 	u64				dropped;
 	u64				reported;
-	
+
+	/*
+	 * Video-mode scratch fallback: a per-channel throwaway buffer the channel
+	 * loops on whenever no user buffer is queued, so user buffers complete to
+	 * userspace immediately instead of being held. Armed by the capture driver
+	 * via dw_axi_dma_arm_scratch(). Idle drain runs in RELOAD multiblock mode
+	 * (reload_looping) -- the HW reruns the single scratch block with no LLI
+	 * fetch/writeback, so no self-invalidation (SOCSW-5392); active capture is a
+	 * ring whose tail turns around through the single scratch block.
+	 */
+	bool				has_scratch;
+	bool				reload_looping;	/* idle scratch running in RELOAD mode */
+	bool				reload_exit_pending; /* leave RELOAD at the next frame boundary */
+	bool				ovf_quiesced;	/* parked for CSI IPI-overflow recovery */
+	struct axi_dma_hw_desc		*scratch_a;	/* the single scratch block */
+	void				*scratch_vaddr;	/* provider-owned throwaway buffer */
+	dma_addr_t			scratch_dma;
+	size_t				scratch_size;
 };
+
+/* Video-mode scratch fallback, called by the simaai vdma capture driver.
+ * The provider allocates and owns the throwaway buffer; pass the frame size. */
+int dw_axi_dma_arm_scratch(struct dma_chan *dchan, size_t size);
+void dw_axi_dma_disarm_scratch(struct dma_chan *dchan);
+
+/*
+ * Re-validate the (scratch) descriptors and request the channel to resume after
+ * the DMA FSM halted on a shadow-LLI-invalid error (SOCSW-5392). Used by the CSI
+ * IPI-overflow recovery path. Returns 0 on success, -ENODEV if no scratch.
+ */
+int dw_axi_dma_resume_after_overflow(struct dma_chan *dchan);
 
 struct dw_axi_dma {
 	struct dma_device	dma;

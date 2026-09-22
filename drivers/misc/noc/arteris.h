@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: (GPL-2.0+ OR MIT) */
+/*
+ * Copyright (c) 2025 Sima ai
+ *
+ * Author: Abhimanyu G <abhimanyu.g@sima.ai>
+ */
+
 #ifndef ARTERIS
 #define ARTERIS
 
@@ -85,35 +92,36 @@
 #define PKT_PROBE_COUNTER_X_VAL(x) ((x * 0x10) + 0x20C)
 
 //PKT probe Fields
+#define PROBE_MAIN_CTL_ALARMEN (1 << 4)
 #define PROBE_MAIN_CTL_STATEN (1 << 3)
 #define PROBE_MAIN_CTL_PAYLOADEN (1 << 2)
 #define PROBE_CFG_CTL_GLOBAL_EN (1 << 0)
 
 
 struct transactionFilter {
-  void __iomem  *reg;
-  const char *label;
+	void __iomem  *reg;
+	const char *label;
 };
 
 struct transactionProfiler {
-  void __iomem *reg;
-  u32 nObsSel; //1 or 2
+	void __iomem *reg;
+	u32 nObsSel; //1 or 2
 };
 
 struct transactionProbe {
-  void __iomem *reg;
-  const char *label;
-  u32 nFilters;
-  u32 nCounters;
-  struct transactionProfiler profiler;
-  struct transactionFilter fltDesc[MAX_TRANSACTION_STAT_FILTER_PER_PROBE];
+	void __iomem *reg;
+	const char *label;
+	u32 nFilters;
+	u32 nCounters;
+	struct transactionProfiler profiler;
+	struct transactionFilter fltDesc[MAX_TRANSACTION_STAT_FILTER_PER_PROBE];
 };
 
 struct packetProbe {
-  void __iomem *reg;
-  u32 probeId;
-  const char *label;
-  u32 nCounters;
+	void __iomem *reg;
+	u32 probeId;
+	const char *label;
+	u32 nCounters;
 };
 
 #endif //ARTERIS

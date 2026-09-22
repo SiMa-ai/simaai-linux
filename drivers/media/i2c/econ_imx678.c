@@ -366,30 +366,28 @@ static int32_t cam_set_exposure(struct imx678 *imx678, uint64_t exp)
 	return ret;
 }
 
-#define AGAIN_PRECISION 12
-#define LOG10_2_AGAIN_PREC ( 1233 ) // log10(2) << AGAIN_PRECISION
-#define LOG_TO_DB ( 20 )
-#define SENSOR_AGAIN_STEP_UP ( 10 )
-#define SENSOR_AGAIN_STEP_DOWN ( 3 )
-#define NORMALISE_FACTOR (LOG2_GAIN_SHIFT - AGAIN_PRECISION)
-#define CONVERSION_FACTOR (((LOG10_2_AGAIN_PREC * LOG_TO_DB * SENSOR_AGAIN_STEP_UP) / SENSOR_AGAIN_STEP_DOWN) >> NORMALISE_FACTOR)
-#define NORMALISE_REG_FACTOR ( 2 * AGAIN_PRECISION )
+
+/* The MCU has one total-gain control: 0..IMX678_ANA_GAIN_MAX is analog, anything
+ * above it is digital stacked on the full analog ceiling. Write analog+digital as
+ * one value — writing either channel on its own drops the other's contribution. */
+static int32_t sensor_apply_total_gain( struct imx678 *imx678 )
+{
+	int32_t total = ( imx678->again > 0 ? imx678->again : 0 ) +
+			( imx678->dgain > 0 ? imx678->dgain : 0 );
+
+	return cam_set_gain (imx678, (uint64_t)total);
+}
 
 static int32_t sensor_set_analogue_gain( struct imx678 *imx678, int32_t gain )
 {
-    uint32_t a_gain;
+	int32_t prev = imx678->again;
 	int32_t ret = 0;
 
-	if (imx678->again != gain) {
-		// Conversion of log2_gain value to corresponded sensor gain value in dB
-		a_gain = (gain * CONVERSION_FACTOR) >> NORMALISE_REG_FACTOR;
-		// Conversion of dB to Gain Values to parse to the MCU to configure sensor
-		a_gain = (a_gain * 3)/10;
-		a_gain = a_gain * GAIN_FACTOR;
-		ret = cam_set_gain (imx678, (uint64_t)a_gain);
-		if (ret == 0) {
-			imx678->again = gain;
-		}
+	if (prev != gain) {
+		imx678->again = gain;
+		ret = sensor_apply_total_gain (imx678);
+		if (ret != 0)
+			imx678->again = prev;
 	}
 
     return ret;
@@ -397,36 +395,30 @@ static int32_t sensor_set_analogue_gain( struct imx678 *imx678, int32_t gain )
 
 static int32_t sensor_set_digital_gain( struct imx678 *imx678, int32_t gain )
 {
-    uint32_t d_gain;
-    int32_t ret = 0;
-	
-	if (imx678->dgain != gain) {
-		// Conversion of log2_gain value to corresponded sensor gain value in dB
-		d_gain = (gain * CONVERSION_FACTOR) >> NORMALISE_REG_FACTOR;
-		// Conversion of dB to Gain Values to parse to the MCU to configure sensor
-		d_gain = ((d_gain * 3)/10) + 30; // 30 - Adding Sensor Analog Gain maximum: 30dB
-		d_gain = (d_gain * GAIN_FACTOR);
-		ret = cam_set_gain (imx678, (uint64_t)d_gain);
-		if (ret == 0){
-			imx678->dgain = gain;
-		}
+	int32_t prev = imx678->dgain;
+	int32_t ret = 0;
+
+	if (prev != gain) {
+		imx678->dgain = gain;
+		ret = sensor_apply_total_gain (imx678);
+		if (ret != 0)
+			imx678->dgain = prev;
 	}
 
 	return ret;
 }
 
-static int32_t sensor_set_exposure( struct imx678 *imx678, uint32_t integration_time)
+static int32_t sensor_set_exposure( struct imx678 *imx678, uint32_t exposure_us)
 {
-    uint64_t exp = 0;
     int32_t ret = 0;
 
-    if (imx678->integration_time != integration_time) {
-		// Conversion of lines to exposure time (us)
-		exp = (uint64_t)(integration_time) * (imx678->cam_frmfmt[imx678->frmfmt_mode].hmax);
-		exp = (exp * EXPOSURE_FACTOR)/ SENSOR_PIXEL_CLOCK;
-		ret = cam_set_exposure (imx678, exp);
+    if (imx678->integration_time != exposure_us) {
+		dev_dbg(&imx678->i2c_client->dev,
+			 "imx678 exposure: %u us (prev=%u us)\n",
+			 exposure_us, imx678->integration_time);
+		ret = cam_set_exposure (imx678, exposure_us);
 		if (ret == 0) {
-			imx678->integration_time = integration_time;
+			imx678->integration_time = exposure_us;
 		}
     }
 
@@ -441,12 +433,14 @@ static int imx678_set_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 		case V4L2_CID_ANALOGUE_GAIN:
+			dev_dbg(&client->dev, "DBG: imx678 analogue gain = %d\n", ctrl->val);
 			ret = sensor_set_analogue_gain(imx678, ctrl->val);
 			break;
     	case V4L2_CID_EXPOSURE:
 			ret = sensor_set_exposure(imx678, ctrl->val);
 			break;
     	case V4L2_CID_DIGITAL_GAIN:
+			dev_dbg(&client->dev, "DBG: imx678 digital gain = %d\n", ctrl->val);
 			ret = sensor_set_digital_gain(imx678, ctrl->val);
 			break;
 	}
@@ -734,6 +728,21 @@ static int imx678_set_pad_format(struct v4l2_subdev *sd,
 
 	mutex_unlock(&imx678->mutex);
 
+	/* Report true per-mode pixel rate and nominal VBLANK; VBLANK range stays
+	 * writable for the IPA's frame-duration control. */
+	if (imx678->pixel_rate && imx678->cam_frmfmt[imx678->frmfmt_mode].hmax) {
+		s64 rate = div_s64((s64)fmt->format.width * SENSOR_PIXEL_CLOCK,
+				   imx678->cam_frmfmt[imx678->frmfmt_mode].hmax);
+		v4l2_ctrl_modify_range(imx678->pixel_rate, rate, rate, 1, rate);
+	}
+	if (imx678->vblank &&
+	    imx678->cam_frmfmt[imx678->frmfmt_mode].vmax > fmt->format.height) {
+		s32 vb = imx678->cam_frmfmt[imx678->frmfmt_mode].vmax -
+			 fmt->format.height;
+		v4l2_ctrl_modify_range(imx678->vblank, vb, 0xffff, 1, vb);
+		v4l2_ctrl_s_ctrl(imx678->vblank, vb);
+	}
+
 	return ret;
 }
 
@@ -874,6 +883,12 @@ static int imx678_start_streaming(struct imx678 *imx678)
 		dev_err(&client->dev,"%s (%d) Stream_On - Failed\n", __func__, __LINE__);
 		return ret;
 	}
+
+	/* MCU control state is undefined across stream stop/start: invalidate
+	 * the caches so the handler setup below re-programs exposure and gain. */
+	imx678->integration_time = 0;
+	imx678->again = -1;
+	imx678->dgain = -1;
 
 	/* Apply customized values from user */
 	ret =  __v4l2_ctrl_handler_setup(imx678->sd.ctrl_handler);
@@ -2419,12 +2434,15 @@ static int cam_list_fmts(struct i2c_client *client, struct imx678 *priv,
 					dev_info(&client->dev, "stream_info->frame_rate.disc.frame_rate_num = %d --------------\n",
 							stream_info->frame_rate.disc.frame_rate_num);
 #endif
-					if ((stream_info->fmt_fourcc == V4L2_PIX_FMT_SRGGB12) ||
-							(stream_info->fmt_fourcc == V4L2_PIX_FMT_SGBRG12)) {
-						priv->cam_frmfmt[mode].hmax = 1100;
-						priv->cam_frmfmt[mode].vmax = 2250;
+					/* All modes keep the vendor VMAX seed: HMAX = clock*den/(num*VMAX). */
+					if (stream_info->frame_rate.disc.frame_rate_num &&
+							stream_info->frame_rate.disc.frame_rate_denom) {
+						priv->cam_frmfmt[mode].hmax = div_u64(
+							(u64)SENSOR_PIXEL_CLOCK * stream_info->frame_rate.disc.frame_rate_denom,
+							(u64)stream_info->frame_rate.disc.frame_rate_num * SENSOR_VMAX_SEED);
+						priv->cam_frmfmt[mode].vmax = SENSOR_VMAX_SEED;
 					}
-					
+
 					mode++;
 					break;
 
@@ -2824,6 +2842,7 @@ static void imx678_remove(struct i2c_client *client)
 	struct imx678 *imx678 = to_imx678(sd);
 
 	v4l2_async_unregister_subdev(sd);
+	sd->internal_ops = NULL;
 	media_entity_cleanup(&sd->entity);
 	imx678_free_controls(imx678);
 

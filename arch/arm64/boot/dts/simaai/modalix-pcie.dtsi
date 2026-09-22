@@ -127,7 +127,8 @@
 			<GIC_SPI 541 IRQ_TYPE_LEVEL_HIGH>,
 			<GIC_SPI 542 IRQ_TYPE_LEVEL_HIGH>,
 			<GIC_SPI 543 IRQ_TYPE_LEVEL_HIGH>,
-			<GIC_SPI 544 IRQ_TYPE_LEVEL_HIGH>;
+			<GIC_SPI 544 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 918 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "doorbell_0",
 			"doorbell_1",
 			"doorbell_2",
@@ -239,7 +240,8 @@
 			"hdma_rch28",
 			"hdma_rch29",
 			"hdma_rch30",
-			"hdma_rch31";
+			"hdma_rch31",
+			"pcie0_lde";
 		status = "disabled";
 	};
 

@@ -29,6 +29,13 @@
 			   PMBUS_HAVE_PIN | PMBUS_HAVE_POUT | \
 			   PMBUS_HAVE_TEMP | PMBUS_HAVE_STATUS_TEMP)
 
+static const struct regulator_desc irps5401_reg_desc[] = {
+	PMBUS_REGULATOR("buck", 0),   /* switcher A */
+	PMBUS_REGULATOR("buck", 1),   /* switcher B */
+	PMBUS_REGULATOR("buck", 2),   /* switcher C */
+	PMBUS_REGULATOR("buck", 3),   /* switcher D */
+};
+
 static struct pmbus_driver_info irps5401_info = {
 	.pages = 5,
 	.func[0] = IRPS5401_SW_FUNC,
@@ -36,6 +43,8 @@ static struct pmbus_driver_info irps5401_info = {
 	.func[2] = IRPS5401_SW_FUNC,
 	.func[3] = IRPS5401_SW_FUNC,
 	.func[4] = IRPS5401_LDO_FUNC,
+	.num_regulators = 4,
+	.reg_desc       = irps5401_reg_desc,
 };
 
 static int irps5401_probe(struct i2c_client *client)

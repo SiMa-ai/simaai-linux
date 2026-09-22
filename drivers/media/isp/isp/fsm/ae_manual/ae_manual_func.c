@@ -22,8 +22,6 @@
 #include "acamera_logger.h"
 #include "acamera_math.h"
 
-#include "sbuf.h"
-
 #undef LOG_MODULE
 #define LOG_MODULE LOG_MODULE_AE_MANUAL
 

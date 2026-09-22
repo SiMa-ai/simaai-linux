@@ -9,35 +9,10 @@
  */
 
 #include "dw-dphy-rx.h"
-#include <linux/jiffies.h>
 #include <linux/delay.h>
 #include <linux/io.h>
 
-static uint8_t data_lane_mask = 0xf;
-
-#define MAX_DPHY_FREQ (1250000000)
-
-struct range_dphy_gen2 {
-	u32 freq;
-	u8 hsfregrange;
-};
-
-struct range_dphy_gen2 range_gen2[] = {
-	{ 80, 0x00 },   { 90, 0x10 },   { 100, 0x20 },  { 110, 0x30 },
-	{ 120, 0x01 },  { 130, 0x11 },  { 140, 0x21 },  { 150, 0x31 },
-	{ 160, 0x02 },  { 170, 0x12 },  { 180, 0x22 },  { 190, 0x32 },
-	{ 205, 0x03 },  { 220, 0x13 },  { 235, 0x23 },  { 250, 0x33 },
-	{ 275, 0x04 },  { 300, 0x14 },  { 325, 0x05 },  { 350, 0x15 },
-	{ 400, 0x25 },  { 450, 0x06 },  { 500, 0x16 },  { 550, 0x07 },
-	{ 600, 0x17 },  { 650, 0x08 },  { 700, 0x18 },  { 750, 0x09 },
-	{ 800, 0x19 },  { 850, 0x29 },  { 900, 0x39 },  { 950, 0x0A },
-	{ 1000, 0x1A }, { 1050, 0x2A }, { 1100, 0x3A }, { 1150, 0x0B },
-	{ 1200, 0x1B }, { 1250, 0x2B }, { 1300, 0x3B }, { 1350, 0x0C },
-	{ 1400, 0x1C }, { 1450, 0x2C }, { 1500, 0x3C }, { 1550, 0x0D },
-	{ 1600, 0x1D }, { 1650, 0x2D }, { 1700, 0x0E }, { 1750, 0x1E },
-	{ 1800, 0x2E }, { 1850, 0x3E }, { 1900, 0x0F }, { 1950, 0x1F },
-	{ 2000, 0x2F },
-};
+#define MAX_DPHY_FREQ (1250000000U)
 
 struct range_dphy_gen3 {
 	u32 freq;
@@ -73,7 +48,7 @@ struct range_dphy_gen3 range_gen3[] = {
 u8 dw_dphy_setup_config(struct dw_dphy_rx *dphy)
 {
 #if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-	u8 ret;
+	int ret;
 	int setup_config;
 
 	if (dphy->max_lanes == CTRL_4_LANES)
@@ -163,7 +138,7 @@ u32 dw_dphy_read(struct dw_dphy_rx *dphy, u32 address)
 	else if (address == R_CSI2_DPHY_TST_CTRL1)
 		dphy2 = ioread32(dphy->base_address + R_CSI2_DPHY2_TST_CTRL1);
 	else
-		return -ENODEV;
+		goto end; /* only the TST_CTRL regs are mirrored to DPHY2 */
 
 	if (dphy1 != dphy2)
 		pr_debug("Values read different for each dphy\n");
@@ -301,111 +276,8 @@ int dw_dphy_te_read(struct dw_dphy_rx *dphy, u32 addr)
 	return ret;
 }
 
-#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-static void dw_dphy_if_init(struct dw_dphy_rx *dphy)
-{
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RESET);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, TX_PHY);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_if_write(dphy, DPHYZCALCTRL, 0);
-	dw_dphy_if_write(dphy, DPHYZCALCTRL, 1);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RESET);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, GLUELOGIC);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_if_write(dphy, DPHYZCALCTRL, 0);
-	dw_dphy_if_write(dphy, DPHYZCALCTRL, 1);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RESET);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RX_PHY);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_if_write(dphy, DPHYZCALCTRL, 0);
-	dw_dphy_if_write(dphy, DPHYZCALCTRL, 1);
-}
-#endif
-
-static void dw_dphy_gen3_12bit_tc_power_up(struct dw_dphy_rx *dphy)
-{
-#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RESET);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, GLUELOGIC);
-#endif
-	dw_dphy_te_write(dphy, CFGCLKFREQRANGE_TX, 0x1C);
-
-	/* CLKSEL | UPDATEPLL | SHADOW_CLEAR | SHADOW_CTRL | FORCEPLL */
-	dw_dphy_te_write(dphy, BYPASS, 0x3F);
-
-	/* IO_DS3 | IO_DS2 | IO_DS1 | IO_DS0 */
-	if (dphy->dphy_freq > 1500)
-		dw_dphy_te_write(dphy, IO_DS, 0x0F);
-#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RESET);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RX_PHY);
-#endif
-}
-
-static void dw_dphy_gen3_8bit_tc_power_up(struct dw_dphy_rx *dphy)
-{
-	u32 input_freq = dphy->dphy_freq / 1000;
-#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RESET);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, GLUELOGIC);
-	dw_dphy_te_write(dphy, CFGCLKFREQRANGE_RX, 0x1C);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RESET);
-	dw_dphy_if_write(dphy, DPHYGLUEIFTESTER, RX_PHY);
-#endif
-	dw_dphy_te_write(dphy, OSC_FREQ_TARGET_RX0_MSB, 0x03);
-	dw_dphy_te_write(dphy, OSC_FREQ_TARGET_RX0_LSB, 0x02);
-	dw_dphy_te_write(dphy, OSC_FREQ_TARGET_RX1_MSB, 0x03);
-	dw_dphy_te_write(dphy, OSC_FREQ_TARGET_RX1_LSB, 0x02);
-	dw_dphy_te_write(dphy, OSC_FREQ_TARGET_RX2_MSB, 0x03);
-	dw_dphy_te_write(dphy, OSC_FREQ_TARGET_RX2_LSB, 0x02);
-	dw_dphy_te_write(dphy, OSC_FREQ_TARGET_RX3_MSB, 0x03);
-	dw_dphy_te_write(dphy, OSC_FREQ_TARGET_RX3_LSB, 0x02);
-	dw_dphy_te_write(dphy, BANDGAP_CTRL, 0x80);
-
-	if (input_freq < 2000)
-		dw_dphy_te_write(dphy, HS_RX_CTRL_LANE0, 0xC0);
-
-	if (input_freq < 1000) {
-		dw_dphy_te_write(dphy, HS_RX_CTRL_LANE1, 0xC0);
-		dw_dphy_te_write(dphy, HS_RX_CTRL_LANE2, 0xC0);
-		dw_dphy_te_write(dphy, HS_RX_CTRL_LANE3, 0xC0);
-	}
-}
-
-int dw_dphy_g118_settle(struct dw_dphy_rx *dphy)
-{
-	u32 input_freq, total_settle, settle_time, byte_clk, lp_time;
-
-	lp_time = dphy->lp_time;
-	input_freq = dphy->dphy_freq / 1000;
-
-	settle_time = (8 * (1000000 / (input_freq))) + 115000;
-	byte_clk = (8000000 / (input_freq));
-	total_settle = (settle_time + lp_time * 1000) / byte_clk;
-
-	if (total_settle > 0xFF)
-		total_settle = 0xFF;
-
-	return total_settle;
-}
-
-static void dw_dphy_pwr_down(struct dw_dphy_rx *dphy)
-{
-	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 0);
-
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	if (dphy->lanes_config == CTRL_8_LANES)
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY2_TST_CTRL0, 0, PHY_TESTCLK, 1);
-
-	dw_dphy_write(dphy, R_CSI2_DPHY_SHUTDOWNZ, 0);
-}
-
 static u8 get_range_dphy_gen3_index_for_data_rate(u32 data_rate)
 {
-	u8 data;
 	u8 range = 0;
 
 	for (range = 0; range < (ARRAY_SIZE(range_gen3) - 1); range++) {
@@ -414,10 +286,9 @@ static u8 get_range_dphy_gen3_index_for_data_rate(u32 data_rate)
 		}
 	}
 
-	if (range == ARRAY_SIZE(range_gen3)) {
-		pr_err("Failed to do look up for data rate %u\n", data_rate);
-		return 0;
-	}
+	if (data_rate > range_gen3[range].freq)
+		pr_err("data rate %u exceeds table, clamping to %u MHz\n",
+		       data_rate, range_gen3[range].freq);
 
 	return range;
 }
@@ -443,6 +314,7 @@ static void __dw_dphy_configure(struct dw_dphy_rx *dphy)
 {
 	u8 index = 0;
 	u32 data_rate = 0; // in Mbps
+	int i;
 
 	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 0);
 	dw_dphy_write(dphy, R_CSI2_DPHY_SHUTDOWNZ, 0);
@@ -456,9 +328,9 @@ static void __dw_dphy_configure(struct dw_dphy_rx *dphy)
 	} else if (dphy->dphy_freq > MAX_DPHY_FREQ) {
 		dev_err(dphy->dev, "dphy frequency %#x is out of range, truncating it to max %#x\n",
 					dphy->dphy_freq, MAX_DPHY_FREQ);
-		data_rate = ((MAX_DPHY_FREQ * 2) / 1000000);
+		data_rate = ((MAX_DPHY_FREQ * 2U) / 1000000U);
 	} else {
-		data_rate = ((dphy->dphy_freq * 2) / 1000000);
+		data_rate = ((dphy->dphy_freq * 2U) / 1000000U);
 	}
 
 	index = get_range_dphy_gen3_index_for_data_rate(data_rate);
@@ -466,276 +338,57 @@ static void __dw_dphy_configure(struct dw_dphy_rx *dphy)
 		data_rate, range_gen3[index].hsfregrange, range_gen3[index].osc_freq_target, dphy->dphy_freq);
 
 	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL, (range_gen3[index].hsfregrange) & 0xFF, GLUE_CTRL_GEN_HSFR, 7);
+	dw_dphy_te_write(dphy, RX_RX_STARTUP_OVR_2, range_gen3[index].osc_freq_target & 0xFF);
+	dw_dphy_te_write(dphy, RX_RX_STARTUP_OVR_3, ((range_gen3[index].osc_freq_target & 0xFF00) >> 8));
+	ndelay(10);
 
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe2,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, (range_gen3[index].osc_freq_target) & 0xFF,
-			PHY_TESTDIN, 8);
-
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	ndelay(10);//delay 10ns
-
-	//write 0xe3 -> 'h1
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe3,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x01,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	ndelay(10);//delay 10ns
-
-	//write 0xe4 -> 'h1
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe4,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x01,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-			PHY_TESTDIN, 8);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-	ndelay(10);//delay 10ns
+	dw_dphy_te_write(dphy, RX_RX_STARTUP_OVR_4, 0x01);
+	ndelay(10);
 
 	if (data_rate <= 1500) {
 		//step 8
-		//write 0x08 -> 'h20
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x08,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x20,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		ndelay(10);//delay 10ns
+		dw_dphy_te_write(dphy, RX_SYS_7, 0x20);
+		ndelay(10);
 	}
 
 	//step 9
 	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL,
 			0X41, GLUE_CTRL_GEN_CFG_CLK, 8);
-	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG0, 1,
-			GLUE_CTRL_BASEDIR, 1);
-	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG1, 1,
-			GLUE_CTRL_BASEDIR, 1);
-	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG2, 1,
-			GLUE_CTRL_BASEDIR, 1);
-	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG3, 1,
-			GLUE_CTRL_BASEDIR, 1);
-	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG0, 1,
-			GLUE_CTRL_FORCE_MODE, 1);
-	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG1, 1,
-			GLUE_CTRL_FORCE_MODE, 1);
-	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG2, 1,
-			GLUE_CTRL_FORCE_MODE, 1);
-	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG3, 1,
-			GLUE_CTRL_FORCE_MODE, 1);
-	ndelay(15);//delay 15ns
+	for (i = 0; i < 4; i++)
+		dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG0 + i * 4, 1,
+				GLUE_CTRL_BASEDIR, 1);
+		dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_REG0 + i * 4, 1,
+				GLUE_CTRL_FORCE_MODE, 1);
+	ndelay(15);
 	dw_dphy_glue_write_msk(dphy, R_GLUE_DPHY_CTRL_GENERAL, 1,
 			GLUE_CTRL_GEN_ENBCLK, 1);
-	ndelay(5);//delay 5ns
+	ndelay(5);
 
 	if (data_rate > 1000 && data_rate <= 1500) {
 		//step 17
-		//write 0xe0 -> 'h80
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe0,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x80,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		ndelay(5);//delay 5ns
-
-		//write 0xe1 -> 'h1
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0xe1,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x01,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 1, PHY_TESTEN, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL1, 0x00,
-				PHY_TESTDIN, 8);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLK, 1);
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-		ndelay(5);//delay 5ns
+		dw_dphy_te_write(dphy, RX_RX_STARTUP_OVR_0, 0x80);
+		ndelay(5);//
+		dw_dphy_te_write(dphy, RX_RX_STARTUP_OVR_1, 0x01);
+		ndelay(5);//
 	}
 
 	//Force ignore deskew pattern
 	dw_dphy_ignore_deskew(dphy);
 
 	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 1);
-	ndelay(5); //delay 5ns
+	ndelay(5);
 	dw_dphy_write(dphy, R_CSI2_DPHY_SHUTDOWNZ, 1);
-}
-static void dw_dphy_pwr_up(struct dw_dphy_rx *dphy)
-{
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLK, 1);
-	if (dphy->lanes_config == CTRL_8_LANES)
-		dw_dphy_write_msk(dphy, R_CSI2_DPHY2_TST_CTRL0, 1,
-				PHY_TESTCLK, 1);
-
-	dw_dphy_write(dphy, R_CSI2_DPHY_SHUTDOWNZ, 1);
-	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 1);
-}
-
-static int dw_dphy_gen3_12bit_configure(struct dw_dphy_rx *dphy)
-{
-	u32 input_freq = dphy->dphy_freq;
-	u8 range = 0;
-
-	pr_debug("12bit: PHY GEN 3: Freq: %u\n", input_freq);
-	for (range = 0; (range < ARRAY_SIZE(range_gen3) - 1) &&
-			((input_freq / 1000) > range_gen3[range].freq);
-	     range++)
-		;
-	dw_dphy_gen3_12bit_tc_power_up(dphy);
-	dw_dphy_te_write(dphy, RX_SYS_1, range_gen3[range].hsfregrange);
-	dw_dphy_te_write(dphy, RX_SYS_0, 0x20);
-	dw_dphy_te_write(dphy, RX_RX_STARTUP_OVR_2,
-			 (u8)range_gen3[range].osc_freq_target);
-	dw_dphy_te_write(dphy, RX_RX_STARTUP_OVR_3,
-			 (u8)(range_gen3[range].osc_freq_target >> 8));
-	dw_dphy_te_write(dphy, RX_RX_STARTUP_OVR_4, 0x01);
-
-	return 0;
-}
-
-static int dw_dphy_gen3_8bit_configure(struct dw_dphy_rx *dphy)
-{
-	u32 input_freq = dphy->dphy_freq;
-	u8 data;
-	u8 range = 0;
-
-	pr_debug("8bit: PHY GEN 3: Freq: %u\n", input_freq);
-	for (range = 0; (range < ARRAY_SIZE(range_gen3) - 1) &&
-			((input_freq / 1000) > range_gen3[range].freq);
-	     range++)
-		;
-
-	dw_dphy_te_write(dphy, RX_SKEW_CAL, dw_dphy_g118_settle(dphy));
-	data = 1 << 7 | range_gen3[range].hsfregrange;
-	dw_dphy_te_write(dphy, HSFREQRANGE_8BIT, data);
-	dw_dphy_gen3_8bit_tc_power_up(dphy);
-
-	return 0;
-}
-
-static int dw_dphy_gen2_configure(struct dw_dphy_rx *dphy)
-{
-	u32 input_freq = dphy->dphy_freq;
-	u8 data;
-	u8 range = 0;
-
-	/* provide an initial active-high test clear pulse in TESTCLR  */
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 1, PHY_TESTCLR, 1);
-	dw_dphy_write_msk(dphy, R_CSI2_DPHY_TST_CTRL0, 0, PHY_TESTCLR, 1);
-
-	pr_debug("PHY GEN 2: Freq: %u\n", input_freq);
-	for (range = 0; (range < ARRAY_SIZE(range_gen2) - 1) &&
-			((input_freq / 1000) > range_gen2[range].freq);
-	     range++)
-		;
-
-	data = range_gen2[range].hsfregrange << 1;
-	dw_dphy_te_write(dphy, HSFREQRANGE_8BIT, data);
-
-	return 0;
 }
 
 static int dw_dphy_config(struct dw_dphy_rx *dphy)
 {
-	if (!dphy->dphy_on) {
-		__dw_dphy_configure(dphy);
-	} else {
-		dev_info(dphy->dev, "poll thread is already running skipping configuring\n");
+	if (dphy->dphy_on) {
+		dev_dbg(dphy->dev, "dphy already configured, skipping\n");
+		return 0;
 	}
+
+	__dw_dphy_configure(dphy);
+	dphy->dphy_on = 1;
 	return 0;
 }
 
@@ -833,6 +486,7 @@ static int dw_dphy_set_phy_state(struct dw_dphy_rx *dphy, u32 on)
 	} else {
 		dw_dphy_write(dphy, R_CSI2_DPHY_SHUTDOWNZ, 0);
 		dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 0);
+		dphy->dphy_on = 0;
 	}
 
 	return 0;
@@ -856,7 +510,6 @@ int dw_dphy_configure(struct phy *phy, union phy_configure_opts *opts)
 {
 	struct dw_dphy_rx *dphy = phy_get_drvdata(phy);
 
-	data_lane_mask = GENMASK(opts->mipi_dphy.lanes - 1, 0);
 	dphy->dphy_freq = opts->mipi_dphy.hs_clk_rate / 2;
 	return 0;
 }

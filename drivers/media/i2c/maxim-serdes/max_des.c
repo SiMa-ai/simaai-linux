@@ -199,20 +199,6 @@ static int max_des_set_pipe_enable(struct max_des *des, struct max_des_pipe *pip
 	return 0;
 }
 
-static int max_des_map_src_rr_vc_id(struct max_des_remap_context *context,
-				     unsigned int pipe_id, unsigned int phy_id,
-				     unsigned int src_vc_id, unsigned int *dst_vc_id)
-{
-	if (src_vc_id >= MAX_SERDES_VC_ID_NUM)
-		return -E2BIG;
-
-	context->pipe_phy_masks[pipe_id] |= BIT(phy_id);
-	context->vc_ids_map[pipe_id][phy_id][src_vc_id] = *dst_vc_id;
-	context->vc_ids_masks[pipe_id][phy_id] |= BIT(src_vc_id);
-
-	return 0;
-}
-
 static int max_des_map_src_dst_vc_id(struct max_des_remap_context *context,
 				     unsigned int pipe_id, unsigned int phy_id,
 				     unsigned int src_vc_id, unsigned int *dst_vc_id)
@@ -725,76 +711,6 @@ static int max_des_add_remap(struct max_des_remap *remaps,
 	return 0;
 }
 
-static int max_des_add_dts_remap(struct max_des_remap *remaps,
-			     unsigned int *num_remaps, unsigned int phy_id,
-			     unsigned int src_vc_id, unsigned int dst_vc_id,
-			     unsigned int dt)
-{
-	struct max_des_remap *remap = &remaps[*num_remaps];
-
-	remap->from_dt = dt;
-	remap->from_vc = src_vc_id;
-
-	/* Remap unsupported dts to Null packet type */
-	remap->to_dt = 0x10;
-
-	remap->to_vc = dst_vc_id;
-	remap->phy = phy_id;
-
-	(*num_remaps)++;
-
-	return 0;
-}
-
-static int max_des_remap_dts(struct max_des_priv *priv,
-				   struct max_des_remap_context *context,
-				   struct max_des_pipe *pipe,
-				   struct max_des_remap *remaps,
-				   unsigned int *num_remaps)
-{
-	struct max_des *des = priv->des;
-	unsigned long vc_ids_masks = 0;
-	unsigned int phy_id;
-	int ret;
-
-	if (context->tunnel_enable)
-		return 0;
-
-	for (phy_id = 0; phy_id < des->ops->num_phys; phy_id++) {
-		unsigned long mask = context->vc_ids_masks[pipe->index][phy_id];
-		unsigned int src_vc_id, dst_vc_id;
-
-		for_each_set_bit(src_vc_id, &mask, MAX_SERDES_VC_ID_NUM) {
-			if (!(vc_ids_masks & BIT(src_vc_id)))
-				continue;
-
-			if ((*num_remaps + des->max_des_dts_count) > des->ops->num_remaps_per_pipe) {
-				dev_err(priv->dev, "Too many streams for pipe %u\n",
-					pipe->index);
-				return -E2BIG;
-			}
-
-			if (src_vc_id >= MAX_SERDES_VC_ID_NUM)
-				return -E2BIG;
-
-			ret = max_des_map_src_dst_vc_id(context, pipe->index, phy_id,
-					src_vc_id, &dst_vc_id);
-			if (ret)
-				return ret;
-
-			for(int i = 0; i < des->max_des_dts_count; i++) {
-				ret = max_des_add_dts_remap(remaps, num_remaps, phy_id,
-						src_vc_id, dst_vc_id,
-						des->max_des_dts[i]);
-				if (ret)
-					return ret;
-			}
-		}
-	}
-
-	return 0;
-}
-
 static int max_des_get_pipe_remaps(struct max_des_priv *priv,
 				   struct max_des_remap_context *context,
 				   struct max_des_pipe *pipe,
@@ -896,12 +812,6 @@ static int max_des_get_pipe_remaps(struct max_des_priv *priv,
 			if (ret)
 				return ret;
 		}
-	}
-
-	if(des->max_des_rm_enable)  {
-		ret = max_des_remap_dts(priv, context, pipe, remaps, num_remaps);
-		if (ret)
-			return ret;
 	}
 
 	return 0;
@@ -1124,7 +1034,14 @@ static int max_des_ser_attach_addr(struct max_des_priv *priv, u32 chan_id,
 		return -EINVAL;
 	}
 
-	for (i = max; i >= min; i--) {
+	/*
+	 * min/max are an unsigned enum (max_gmsl_version). Compare against the
+	 * signed loop counter as signed: otherwise, when no version matches (an
+	 * absent serializer / wrong overlay), i decrements below min to -1 which
+	 * promotes to UINT_MAX >= min and the loop never ends, spinning the ~2s
+	 * serializer wait forever and hanging boot.
+	 */
+	for (i = max; i >= (int)min; i--) {
 		if (!(des->ops->versions & BIT(i)))
 			continue;
 
@@ -2321,42 +2238,6 @@ static int max_des_find_phys_config(struct max_des_priv *priv)
 	return 0;
 }
 
-static int max_des_parse_rm_dts(struct max_des_priv *priv)
-{
-	struct fwnode_handle *fwnode = dev_fwnode(priv->dev);
-	struct device_node *node = to_of_node(fwnode);
-	struct max_des *des = priv->des;
-	u32 count = 0;
-	int ret = 0;
-
-	count = of_property_count_u32_elems(node, "simaai,rm_dts");
-	if(count > 0) {
-		if(count > MAX_RM_DTS)
-			count = MAX_RM_DTS;
-
-		des->max_des_dts_count = count;
-
-		ret = of_property_read_u32_array(node, "simaai,rm_dts",
-				des->max_des_dts, count);
-		if (ret < 0) {
-			dev_err(priv->dev, "Error reading simaai,rm_dts\n");
-			return ret;
-		} else {
-			for(int i = 0; i < count; i++) {
-				dev_dbg(priv->dev, "Data type 0x%x will be remapped.\n",
-						des->max_des_dts[i]);
-			}
-		}
-
-		des->max_des_rm_enable = true;
-	} else {
-		des->max_des_rm_enable = false;
-		dev_dbg(priv->dev, "simaai,rm_dts not present or empty\n");
-	}
-
-	return 0;
-}
-
 static int max_des_parse_dt(struct max_des_priv *priv)
 {
 	struct fwnode_handle *fwnode = dev_fwnode(priv->dev);
@@ -2524,10 +2405,6 @@ int max_des_probe(struct i2c_client *client, struct max_des *des)
 		return ret;
 
 	ret = max_des_parse_dt(priv);
-	if (ret)
-		return ret;
-
-	ret = max_des_parse_rm_dts(priv);
 	if (ret)
 		return ret;
 

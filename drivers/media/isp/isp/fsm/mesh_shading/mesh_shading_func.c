@@ -49,7 +49,7 @@ void mesh_shading_modulate_strength( mesh_shading_fsm_ptr_t p_fsm )
 
     if ( get_context_param( ACAMERA_FSM2ICTX_PTR( p_fsm ), ISP_MODULES_MANUAL_SHADING_PARAM ) == 0 ) {
         const uint32_t ldr_gain_log2 = get_context_param( p_ictx, STATUS_INFO_LDR_GAIN_LOG2_ID_PARAM );
-        const uint16_t strength = calc_modulation_u16( ldr_gain_log2, calib_mgr_mod16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_MESH_SHADING_STRENGTH ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_MESH_SHADING_STRENGTH ) );
+        const uint16_t strength = calc_modulation_u16( ldr_gain_log2, calib_mgr_mod16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_MESH_SHADING_STRENGTH ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_MESH_SHADING_STRENGTH ) );
 
         acamera_isp_mesh_shading_mesh_strength_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, strength );
     }
@@ -71,18 +71,18 @@ void mesh_shading_reload( mesh_shading_fsm_ptr_t p_fsm )
     acamera_isp_mesh_shading_mesh_scale_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, 1 );
     acamera_isp_mesh_shading_mesh_alpha_mode_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, 2 );
 
-    mesh_page[0][0] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_A_R );
-    mesh_page[0][1] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_A_G );
-    mesh_page[0][2] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_A_B );
-    mesh_page[1][0] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_TL84_R );
-    mesh_page[1][1] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_TL84_G );
-    mesh_page[1][2] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_TL84_B );
-    mesh_page[2][0] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_D65_R );
-    mesh_page[2][1] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_D65_G );
-    mesh_page[2][2] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_D65_B );
-    mesh_page[3][0] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_D65_R );
-    mesh_page[3][1] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_D65_G );
-    mesh_page[3][2] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SHADING_LS_D65_B );
+    mesh_page[0][0] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_A_R );
+    mesh_page[0][1] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_A_G );
+    mesh_page[0][2] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_A_B );
+    mesh_page[1][0] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_TL84_R );
+    mesh_page[1][1] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_TL84_G );
+    mesh_page[1][2] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_TL84_B );
+    mesh_page[2][0] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_D65_R );
+    mesh_page[2][1] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_D65_G );
+    mesh_page[2][2] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_D65_B );
+    mesh_page[3][0] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_D65_R );
+    mesh_page[3][1] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_D65_G );
+    mesh_page[3][2] = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SHADING_LS_D65_B );
 
     for ( i = 0; i < 3; ++i ) {
         for ( j = 0; j < 32; ++j ) {
@@ -137,7 +137,7 @@ void mesh_shading_init( mesh_shading_fsm_ptr_t p_fsm )
     acamera_isp_mesh_shading_mesh_alpha_g_write( isp_base, 0 );
     acamera_isp_mesh_shading_mesh_alpha_b_write( isp_base, 0 );
 
-    acamera_isp_pipeline_bypass_mesh_shading_write( isp_base, 0 );
+    /* bypass driven by the IPA (isp_config / ISP_BYPASS_CONFIG) */
     acamera_isp_mesh_shading_enable_write( isp_base, 1 );
 }
 

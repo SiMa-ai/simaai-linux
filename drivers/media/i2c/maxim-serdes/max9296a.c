@@ -8,6 +8,7 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/of_graph.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 
 #include "max_des.h"
@@ -904,6 +905,16 @@ static int max9296a_set_link_version(struct max_des *des,
 static int max9296a_init(struct max_des *des)
 {
 	struct max9296a_priv *priv = des_to_priv(des);
+	u32 delay_ms = 0;
+	int ret = 0;
+
+	/* Configure the deserializer to wait for frame start only when no IPI
+	 * enable delay is set.
+	 */
+	ret = device_property_read_u32(priv->dev, "simaai,ipi-enable-delay-ms",
+				 &delay_ms);
+	if ((ret == 0) && (delay_ms != 0))
+		return 0;
 
 	return regmap_assign_bits(priv->regmap, MAX9296A_BACKTOP30,
 				MAX9296A_BACKTOP30_W_FRAME, 1);

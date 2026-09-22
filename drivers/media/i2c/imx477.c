@@ -606,6 +606,71 @@ static const struct cci_reg_sequence mode_4056x3040_regs[] = {
 	{CCI_REG8(0x3f57), 0xae},
 };
 
+/* 4032x3040: the 4056 mode DIG_CROP'd to 4032 wide (24-col centred crop) so the
+ * RAW12 line stride (4032*12/8 = 6048 = 189*32) is 32-byte aligned for the ISP
+ * DMA (Mali-C71AE has no scaler). Separate mode; 4056 mode left intact. */
+static const struct cci_reg_sequence mode_4032x3040_regs[] = {
+	{CCI_REG8(0x0344), 0x00},
+	{CCI_REG8(0x0345), 0x00},
+	{CCI_REG8(0x0346), 0x00},
+	{CCI_REG8(0x0347), 0x00},
+	{CCI_REG8(0x0348), 0x0f},
+	{CCI_REG8(0x0349), 0xd7},
+	{CCI_REG8(0x034a), 0x0b},
+	{CCI_REG8(0x034b), 0xdf},
+	{CCI_REG8(0x00e3), 0x00},
+	{CCI_REG8(0x00e4), 0x00},
+	{CCI_REG8(0x00fc), 0x0a},
+	{CCI_REG8(0x00fd), 0x0a},
+	{CCI_REG8(0x00fe), 0x0a},
+	{CCI_REG8(0x00ff), 0x0a},
+	{CCI_REG8(0x0900), 0x00},
+	{CCI_REG8(0x0901), 0x11},
+	{CCI_REG8(0x3c01), 0x03},
+	{CCI_REG8(0x3c02), 0xa2},
+	{CCI_REG8(0x5748), 0x07},
+	{CCI_REG8(0x5749), 0xff},
+	{CCI_REG8(0x574a), 0x00},
+	{CCI_REG8(0x574b), 0x00},
+	{CCI_REG8(0x7b75), 0x0a},
+	{CCI_REG8(0x7b76), 0x0c},
+	{CCI_REG8(0x7b77), 0x07},
+	{CCI_REG8(0x7b78), 0x06},
+	{CCI_REG8(0x7b79), 0x3c},
+	{CCI_REG8(0x7b53), 0x01},
+	{CCI_REG8(0x9369), 0x5a},
+	{CCI_REG8(0x936b), 0x55},
+	{CCI_REG8(0x936d), 0x28},
+	{CCI_REG8(0x9304), 0x00},
+	{CCI_REG8(0x9305), 0x00},
+	{CCI_REG8(0xa2a9), 0x60},
+	{CCI_REG8(0xa2b7), 0x00},
+	{CCI_REG8(0x0401), 0x00},
+	{CCI_REG8(0x0404), 0x00},
+	{CCI_REG8(0x0405), 0x10},
+	{CCI_REG8(0x0408), 0x00},
+	{CCI_REG8(0x0409), 0x0c},
+	{CCI_REG8(0x040a), 0x00},
+	{CCI_REG8(0x040b), 0x00},
+	{CCI_REG8(0x040c), 0x0f},
+	{CCI_REG8(0x040d), 0xc0},
+	{CCI_REG8(0x040e), 0x0b},
+	{CCI_REG8(0x040f), 0xe0},
+	{CCI_REG8(0x034c), 0x0f},
+	{CCI_REG8(0x034d), 0xc0},
+	{CCI_REG8(0x034e), 0x0b},
+	{CCI_REG8(0x034f), 0xe0},
+	{CCI_REG8(0x0305), 0x04},
+	{CCI_REG8(0x0306), 0x01},
+	{CCI_REG8(0x0307), 0x5e},
+	{CCI_REG8(0xe04c), 0x00},
+	{CCI_REG8(0xe04d), 0x7f},
+	{CCI_REG8(0xe04e), 0x00},
+	{CCI_REG8(0xe04f), 0x1f},
+	{CCI_REG8(0x3f56), 0x02},
+	{CCI_REG8(0x3f57), 0xae},
+};
+
 /* 12 mpix cropped to 16:9 10fps */
 static const struct cci_reg_sequence mode_4056x2160_regs[] = {
 	{CCI_REG8(0x0344), 0x00},
@@ -1028,6 +1093,22 @@ static const struct imx477_mode supported_modes[] = {
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_4056x3040_regs),
 			.regs = mode_4056x3040_regs,
+		},
+	},
+	{
+		/* 12MPix DIG_CROP'd to 4032 wide for 32-byte ISP stride (no scaler) */
+		.width = 4032,
+		.height = 3040,
+		.crop = {
+			.left = IMX477_PIXEL_ARRAY_LEFT + 12,
+			.top = IMX477_PIXEL_ARRAY_TOP,
+			.width = 4032,
+			.height = 3040,
+		},
+		.frm_length_default = 3500,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(mode_4032x3040_regs),
+			.regs = mode_4032x3040_regs,
 		},
 	},
 	{
@@ -1472,6 +1553,7 @@ static int imx477_set_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 	case V4L2_CID_ANALOGUE_GAIN:
+		dev_dbg(&client->dev, "DBG: imx477 analogue gain = %d\n", ctrl->val);
 		ret = cci_write(imx477->regmap, IMX477_REG_ANALOG_GAIN,
 				ctrl->val, NULL);
 		break;
@@ -1480,6 +1562,7 @@ static int imx477_set_ctrl(struct v4l2_ctrl *ctrl)
 				ctrl->val >> imx477->long_exp_shift, NULL);
 		break;
 	case V4L2_CID_DIGITAL_GAIN:
+		dev_dbg(&client->dev, "DBG: imx477 digital gain = %d\n", ctrl->val);
 		ret = cci_write(imx477->regmap, IMX477_REG_DIGITAL_GAIN,
 				ctrl->val, NULL);
 		break;
@@ -2520,6 +2603,7 @@ static void imx477_remove(struct i2c_client *client)
 	struct imx477 *imx477 = to_imx477(sd);
 
 	v4l2_async_unregister_subdev(sd);
+	sd->internal_ops = NULL;
 	media_entity_cleanup(&sd->entity);
 	imx477_free_controls(imx477);
 

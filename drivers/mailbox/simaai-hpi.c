@@ -4,139 +4,182 @@
  */
 
 #include <linux/device.h>
-#include <linux/cdev.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/mailbox_controller.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/poll.h>
 #include <linux/platform_device.h>
+#include <linux/spinlock.h>
+#include <linux/simaai-hpi.h>
 
-#define SIMAAI_HPI_DEV_NAME "simaai-hpi"
+/* HPI register offsets (from DT reg[0]) */
+#define HOST_IRQ_EN	0x010
+#define HOST_IRQ_STAT	0x014
+#define HOST_MB_P0	0x030
+#define HOST_MB_P1	0x034
+#define HOST_MB_CTRL	0x038
+#define ARC_MB_P0	0x040
+#define ARC_MB_P1	0x044
+#define ARC_MB_OWN	0x04c
+#define HPI_ERR_STAT	0x060
+
+#define MB_MSG		BIT(16)		/* message from ARC waiting     */
+#define MB_RTN		BIT(17)		/* host->ARC message taken (tx) */
+#define GLOBAL_ERR	BIT(21)
+#define GLOBAL_MSK	BIT(31)
+
+#define HOST_MB_SEND	0x2		/* HOST_MB_CTRL: post + xfer ownership */
+#define ARC_MB_RELEASE	0x1		/* ARC_MB_OWN: release back to host    */
+
+#define HPI_TOKEN_P0	0xdeadbeef
+#define HPI_TOKEN_P1	0xbeefdead
+#define HPI_INIT_P0	0x11111111
+#define HPI_INIT_P1	0x22222222
 
 struct simaai_hpi {
 	int irq;
 	void __iomem *base;
 	struct device *dev;
-	struct cdev cdev;
-	struct class dev_class;
-	dev_t dev_no;
-	int dev_open_count;
-	wait_queue_head_t q;
-	atomic_t data_avail_to_read;
+
+	struct mbox_controller controller;
+	struct mbox_chan chan[1];
+	spinlock_t lock;
+	bool initialized;
+	bool token;
+	bool tx_staged;
+	struct simaai_hpi_mbox_msg tx_msg;
 };
+
+/* Post the staged request. Caller holds hpi->lock. */
+static void simaai_hpi_flush(struct simaai_hpi *hpi)
+{
+	writel(hpi->tx_msg.p0, hpi->base + HOST_MB_P0);
+	writel(hpi->tx_msg.p1, hpi->base + HOST_MB_P1);
+	writel(HOST_MB_SEND, hpi->base + HOST_MB_CTRL);
+	hpi->token = false;
+}
 
 static irqreturn_t simaai_hpi_interrupt(int irq, void *dev_id)
 {
-	struct simaai_hpi *hpi = (struct simaai_hpi *)dev_id;
+	struct simaai_hpi *hpi = dev_id;
+	struct mbox_chan *chan = &hpi->chan[0];
+	struct simaai_hpi_mbox_msg rx;
+	bool do_rx = false, do_txdone = false;
+	unsigned long flags;
+	u32 stat;
 
-	BUG_ON(hpi->irq != irq);
-	disable_irq_nosync(irq);
-	atomic_inc(&hpi->data_avail_to_read);
-	wake_up(&hpi->q);
+	stat = readl(hpi->base + HOST_IRQ_STAT);
+	if (!(stat & (GLOBAL_ERR | MB_RTN | MB_MSG)))
+		return IRQ_NONE;
+
+	if (stat & GLOBAL_ERR) {
+		u32 err = readl(hpi->base + HPI_ERR_STAT);
+
+		writel(GLOBAL_ERR, hpi->base + HOST_IRQ_STAT);
+		dev_err_ratelimited(hpi->dev, "HPI error, ERR_STAT=0x%08x\n", err);
+		return IRQ_HANDLED;
+	}
+
+	if (stat & MB_RTN) {
+		writel(MB_RTN, hpi->base + HOST_IRQ_STAT);
+		do_txdone = true;
+	}
+
+	if (stat & MB_MSG) {
+		u32 p0 = readl(hpi->base + ARC_MB_P0);
+		u32 p1 = readl(hpi->base + ARC_MB_P1);
+
+		writel(ARC_MB_RELEASE, hpi->base + ARC_MB_OWN);
+		writel(MB_MSG, hpi->base + HOST_IRQ_STAT);
+
+		spin_lock_irqsave(&hpi->lock, flags);
+		if (p0 == HPI_TOKEN_P0 && p1 == HPI_TOKEN_P1) {
+			/* token grants us the turn; carries no data */
+			if (!hpi->initialized) {
+				hpi->tx_msg.p0 = HPI_INIT_P0;
+				hpi->tx_msg.p1 = HPI_INIT_P1;
+				simaai_hpi_flush(hpi);
+				hpi->initialized = true;
+			} else {
+				hpi->token = true;
+				if (hpi->tx_staged) {
+					simaai_hpi_flush(hpi);
+					hpi->tx_staged = false;
+				}
+			}
+		} else {
+			rx.p0 = p0;
+			rx.p1 = p1;
+			do_rx = true;
+		}
+		spin_unlock_irqrestore(&hpi->lock, flags);
+	}
+
+	if (do_rx)
+		mbox_chan_received_data(chan, &rx);
+	if (do_txdone)
+		mbox_chan_txdone(chan, 0);
 
 	return IRQ_HANDLED;
 }
 
-static ssize_t simaai_hpi_read(struct file *filp, char  __user *bufp, size_t len, loff_t *ppos)
+static int simaai_hpi_send_data(struct mbox_chan *chan, void *data)
 {
-	return 0;
-}
+	struct simaai_hpi *hpi = chan->con_priv;
+	struct simaai_hpi_mbox_msg *msg = data;
+	unsigned long flags;
 
-static ssize_t simaai_hpi_write(struct file *filp, const char *buff, size_t len, loff_t * off)
-{
-	struct simaai_hpi *hpi = (struct simaai_hpi *)filp->private_data;
-	enable_irq(hpi->irq);
-
-	return 0;
-}
-
-static int simaai_hpi_open(struct inode *inode, struct file *filp)
-{
-	struct simaai_hpi *hpi = container_of(inode->i_cdev,
-						     struct simaai_hpi, cdev);
-	filp->private_data = hpi;
-
-	return 0;
-}
-
-static int simaai_hpi_release(struct inode *inop, struct file *filp)
-{
-	return 0;
-}
-
-static unsigned int simaai_hpi_poll(struct file *filp, struct poll_table_struct *wait)
-{
-	struct simaai_hpi *hpi = (struct simaai_hpi *)filp->private_data;
-	unsigned int mask = 0;
-	static unsigned int nofirst = 0;
-
-	poll_wait(filp, &hpi->q, wait);
-
-	if(atomic_read(&hpi->data_avail_to_read)) {
-		mask |= POLLIN | POLLRDNORM;
-		atomic_set(&hpi->data_avail_to_read, 0);
+	spin_lock_irqsave(&hpi->lock, flags);
+	hpi->tx_msg = *msg;
+	if (hpi->token) {
+		simaai_hpi_flush(hpi);
+		hpi->tx_staged = false;
+	} else {
+		hpi->tx_staged = true;
 	}
+	spin_unlock_irqrestore(&hpi->lock, flags);
 
-	if(!nofirst)
-		nofirst = 1;
-
-	return mask;
+	return 0;
 }
-static struct file_operations simaai_hpi_fops = {
-	.owner = THIS_MODULE,
-	.open = simaai_hpi_open,
-	.release = simaai_hpi_release,
-	.write = simaai_hpi_write,
-	.read = simaai_hpi_read,
-	.poll = simaai_hpi_poll,
+
+static int simaai_hpi_startup(struct mbox_chan *chan)
+{
+	struct simaai_hpi *hpi = chan->con_priv;
+	unsigned long flags;
+	u32 stat;
+
+	spin_lock_irqsave(&hpi->lock, flags);
+	hpi->token = false;
+	hpi->tx_staged = false;
+
+	writel(GLOBAL_MSK | MB_MSG | MB_RTN, hpi->base + HOST_IRQ_EN);
+
+	stat = readl(hpi->base + HOST_IRQ_STAT);
+	if (stat == 0) {
+		hpi->token = true;
+		hpi->initialized = true;
+	} else {
+		hpi->initialized = false;
+	}
+	spin_unlock_irqrestore(&hpi->lock, flags);
+
+	return 0;
+}
+
+static void simaai_hpi_shutdown(struct mbox_chan *chan)
+{
+	struct simaai_hpi *hpi = chan->con_priv;
+
+	writel(0, hpi->base + HOST_IRQ_EN);
+}
+
+static const struct mbox_chan_ops simaai_hpi_ops = {
+	.send_data	= simaai_hpi_send_data,
+	.startup	= simaai_hpi_startup,
+	.shutdown	= simaai_hpi_shutdown,
 };
-
-static int simaai_hpi_create_dev(struct simaai_hpi *hpi)
-{
-	int ret;
-
-	ret = alloc_chrdev_region(&hpi->dev_no, 0, 1, SIMAAI_HPI_DEV_NAME);
-	if (ret != 0) {
-		dev_err(hpi->dev, "Failed: alloc_chrdev_region\n");
-		return ret;
-	}
-
-	cdev_init(&hpi->cdev, &simaai_hpi_fops);
-	hpi->cdev.owner = THIS_MODULE;
-	hpi->cdev.ops = &simaai_hpi_fops;
-
-	ret = cdev_add(&hpi->cdev, hpi->dev_no, 1);
-	if (ret != 0) {
-		dev_err(hpi->dev, "Failed: cdev_add\n");
-		goto err_cdev;
-	}
-
-	ret = class_register(&hpi->dev_class);
-	if (ret) {
-		dev_err(hpi->dev, "Failed: class_create\n");
-		goto err_class;
-	}
-
-	device_create(&hpi->dev_class, NULL, hpi->dev_no, NULL, SIMAAI_HPI_DEV_NAME);
-
-	return 0;
-
-err_class:
-	cdev_del(&hpi->cdev);
-err_cdev:
-	unregister_chrdev_region(hpi->dev_no, 1);
-	return ret;
-}
-
-static void remove_char_dev(struct simaai_hpi *hpi)
-{
-	device_destroy(&hpi->dev_class, hpi->dev_no);
-	class_unregister(&hpi->dev_class);
-	cdev_del(&hpi->cdev);
-	unregister_chrdev_region(hpi->dev_no, 1);
-}
 
 static int simaai_hpi_probe(struct platform_device *pdev)
 {
@@ -149,9 +192,9 @@ static int simaai_hpi_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	hpi->dev = &pdev->dev;
+	spin_lock_init(&hpi->lock);
 
 	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-
 	hpi->base = devm_ioremap_resource(&pdev->dev, regs);
 	if (IS_ERR(hpi->base)) {
 		dev_err(hpi->dev, "Wrong memory resource\n");
@@ -163,6 +206,8 @@ static int simaai_hpi_probe(struct platform_device *pdev)
 		dev_err(hpi->dev, "Error geting HPI IRQ\n");
 		return hpi->irq;
 	}
+
+	writel(0, hpi->base + HOST_IRQ_EN);	/* mask before hooking the line */
 
 	ret = devm_request_irq(hpi->dev, hpi->irq, simaai_hpi_interrupt,
 			       IRQF_SHARED, KBUILD_MODNAME, hpi);
@@ -177,22 +222,22 @@ static int simaai_hpi_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	hpi->dev_class.name = SIMAAI_HPI_DEV_NAME;
-	init_waitqueue_head(&hpi->q);
-	atomic_set(&hpi->data_avail_to_read, 0);
+	hpi->chan[0].con_priv = hpi;
+	hpi->controller.dev = hpi->dev;
+	hpi->controller.ops = &simaai_hpi_ops;
+	hpi->controller.chans = hpi->chan;
+	hpi->controller.num_chans = ARRAY_SIZE(hpi->chan);
+	hpi->controller.txdone_irq = true;
+
 	platform_set_drvdata(pdev, hpi);
-	ret = simaai_hpi_create_dev(hpi);
+
+	ret = devm_mbox_controller_register(hpi->dev, &hpi->controller);
+	if (ret)
+		return ret;
 
 	dev_info(&pdev->dev, "HPI registered\n");
 
-	return ret;
-}
-
-static void simaai_hpi_remove(struct platform_device *pdev)
-{
-	struct simaai_hpi *hpi = platform_get_drvdata(pdev);
-
-	remove_char_dev(hpi);
+	return 0;
 }
 
 static const struct of_device_id simaai_hpi_match[] = {
@@ -204,7 +249,6 @@ MODULE_DEVICE_TABLE(of, simaai_hpi_match);
 
 static struct platform_driver simaai_hpi_driver = {
 	.probe	= simaai_hpi_probe,
-	.remove	= simaai_hpi_remove,
 	.driver	= {
 		.name	= "simaai-hpi",
 		.of_match_table	= simaai_hpi_match,
@@ -213,7 +257,8 @@ static struct platform_driver simaai_hpi_driver = {
 
 module_platform_driver(simaai_hpi_driver);
 
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SiMa.ai HPI specific functions");
 MODULE_AUTHOR("Yurii Konovalenko <yurii.konovalenko@sima.ai>");
 MODULE_ALIAS("platform:sima-hpi");
+

@@ -45,6 +45,9 @@ int v4l2_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type
 {
     uint32_t i;
 
+    // Hold the stream alive across the whole dispatch call
+    const int srcu_idx = srcu_read_lock( &isp_stream_srcu );
+
     int rc = isp_v4l2_stream_get_frame( ctx_id, type, state, frame );
 
     aframe_t *lframe = *frame;
@@ -74,10 +77,17 @@ int v4l2_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type
 #endif
     }
 
+    srcu_read_unlock( &isp_stream_srcu, srcu_idx );
+
     return rc;
 }
 
 int v4l2_streamer_put_frame( aframe_t *frame )
 {
-    return isp_v4l2_stream_put_frame( frame );
+    // Hold the stream alive across the whole dispatch call
+    const int srcu_idx = srcu_read_lock( &isp_stream_srcu );
+    const int rc = isp_v4l2_stream_put_frame( frame );
+    srcu_read_unlock( &isp_stream_srcu, srcu_idx );
+
+    return rc;
 }

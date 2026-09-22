@@ -34,13 +34,13 @@ static uint32_t global_calibrate_bad_pixels = 0;
 
 static void defect_pixel_lut_reload( defect_pixel_fsm_ptr_t p_fsm )
 {
-    const uint32_t *defect_pixel_lut = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DEFECT_PIXEL );
-    const uint32_t defect_pixel_lut_size = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DEFECT_PIXEL );
+    const uint32_t *defect_pixel_lut = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DEFECT_PIXEL );
+    const uint32_t defect_pixel_lut_size = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DEFECT_PIXEL );
     const uint32_t defect_pixel_lut_hw_size = ( ACAMERA_DEFECT_PIXEL_MEM_SIZE >> 2 );
     const uint32_t defect_pixel_lut_min_size = ( defect_pixel_lut_size < defect_pixel_lut_hw_size ) ? defect_pixel_lut_size : defect_pixel_lut_hw_size;
 
     if ( defect_pixel_lut_size != defect_pixel_lut_hw_size ) {
-        LOG( LOG_ERR, "CALIBRATION_DEFECT_PIXEL has wrong size: expected %d got %d", defect_pixel_lut_hw_size, defect_pixel_lut_size );
+        LOG( LOG_ERR, "MODALIX_ISP_CALIB_DEFECT_PIXEL has wrong size: expected %d got %d", defect_pixel_lut_hw_size, defect_pixel_lut_size );
     }
 
     uint32_t i;
@@ -78,7 +78,7 @@ void defect_pixel_init( defect_pixel_fsm_ptr_t p_fsm )
     acamera_isp_defect_pixel_show_reference_write( isp_base, 0 );
     acamera_isp_defect_pixel_show_static_defect_pixels_write( isp_base, 0 );
     acamera_isp_defect_pixel_enable_write( isp_base, 1 );
-    acamera_isp_pipeline_bypass_defect_pixel_write( isp_base, 0 );
+    /* bypass driven by the IPA (isp_config / ISP_BYPASS_CONFIG) */
 
 
     // Strength for counting static hot pixels

@@ -17,6 +17,8 @@
 
 /* Synopsys DW SSI component versions (FourCC sequence) */
 #define DW_HSSI_102A			0x3130322a
+#define DW_HSSI_103A			0x3130332a
+#define DW_PSSI_400A			0x3430302a
 
 /* DW SSI IP-core ID and version check helpers */
 #define dw_spi_ip_is(_dws, _ip) \
@@ -32,6 +34,7 @@
 /* DW SPI controller capabilities */
 #define DW_SPI_CAP_CS_OVERRIDE		BIT(0)
 #define DW_SPI_CAP_DFS32		BIT(1)
+#define DW_SPI_CAP_EMODE		BIT(2)
 
 /* Register offsets (Generic for both DWC APB SSI and DWC SSI IP-cores) */
 #define DW_SPI_CTRLR0			0x00
@@ -61,6 +64,7 @@
 #define DW_SPI_DR			0x60
 #define DW_SPI_RX_SAMPLE_DLY		0xf0
 #define DW_SPI_CS_OVERRIDE		0xf4
+#define DW_SPI_SPI_CTRLR0		0xf4
 
 /* Bit fields in CTRLR0 (DWC APB SSI) */
 #define DW_PSSI_CTRLR0_DFS_MASK			GENMASK(3, 0)
@@ -94,6 +98,12 @@
 #define DW_HSSI_CTRLR0_TMOD_MASK		GENMASK(11, 10)
 #define DW_HSSI_CTRLR0_SRL			BIT(13)
 #define DW_HSSI_CTRLR0_MST			BIT(31)
+#define DW_HSSI_CTRLR0_SPI_FRF_MASK		GENMASK(23, 22)
+#define DW_PSSI_CTRLR0_SPI_FRF_MASK		GENMASK(22, 21)
+#define DW_SPI_CTRLR0_SPI_FRF_STD_SPI		0x0
+#define DW_SPI_CTRLR0_SPI_FRF_DUAL_SPI		0x1
+#define DW_SPI_CTRLR0_SPI_FRF_QUAD_SPI		0x2
+#define DW_SPI_CTRLR0_SPI_FRF_OCT_SPI		0x3
 
 /* Bit fields in CTRLR1 */
 #define DW_SPI_NDF_MASK				GENMASK(15, 0)
@@ -121,6 +131,21 @@
 #define DW_SPI_DMACR_RDMAE			BIT(0)
 #define DW_SPI_DMACR_TDMAE			BIT(1)
 
+/* Bit fields in SPI_CTRLR0 */
+#define DW_SPI_SPI_CTRLR0_CLK_STRETCH_EN	BIT(30)
+#define DW_SPI_SPI_CTRLR0_SPI_RXDS_EN		BIT(18)	/* read data strobe (DQS) */
+#define DW_SPI_SPI_CTRLR0_INST_DDR_EN		BIT(17)	/* instruction DDR */
+#define DW_SPI_SPI_CTRLR0_SPI_DDR_EN		BIT(16)	/* addr/data DDR */
+#define DW_SPI_SPI_CTRLR0_WAIT_CYCLE_MASK	GENMASK(15, 11)
+#define DW_SPI_SPI_CTRLR0_INST_L_MASK		GENMASK(9, 8)
+#define DW_SPI_SPI_CTRLR0_INST_L_INST_L0	0x0
+#define DW_SPI_SPI_CTRLR0_INST_L_INST_L8	0x2
+#define DW_SPI_SPI_CTRLR0_INST_L_INST_L16	0x3
+#define DW_SPI_SPI_CTRLR0_ADDR_L_MASK		GENMASK(5, 2)
+#define DW_SPI_SPI_CTRLR0_TRANS_TYPE_TT0	0x0
+#define DW_SPI_SPI_CTRLR0_TRANS_TYPE_TT1	0x1
+#define DW_SPI_SPI_CTRLR0_TRANS_TYPE_TT2	0x2
+
 /* Mem/DMA operations helpers */
 #define DW_SPI_WAIT_RETRIES			5
 #define DW_SPI_BUF_SIZE \
@@ -135,6 +160,12 @@ struct dw_spi_cfg {
 	u8 dfs;
 	u32 ndf;
 	u32 freq;
+	u8 spi_frf;
+	u8 trans_t;
+	u8 inst_l;
+	u8 addr_l;
+	u8 wait_c;
+	bool dtr;
 };
 
 struct dw_spi;

@@ -78,7 +78,6 @@ typedef struct _acamera_fsmgr_t acamera_fsmgr_t;
 #include "output_formatter_fsm.h"
 #include "radial_shading_fsm.h"
 #include "raw_fe_fsm.h"
-#include "sbuf_fsm.h"
 #include "sensor_fsm.h"
 #include "sharpening_fsm.h"
 
@@ -105,7 +104,6 @@ struct _acamera_fsmgr_t {
     sharpening_fsm_t sharpening_fsm;
     noise_reduction_fsm_t noise_reduction_fsm;
     defect_pixel_fsm_t defect_pixel_fsm;
-    sbuf_fsm_t sbuf_fsm;
     isp_wrapper_fsm_t isp_wrapper_fsm;
     cac_fsm_t cac_fsm;
     radial_shading_fsm_t radial_shading_fsm;

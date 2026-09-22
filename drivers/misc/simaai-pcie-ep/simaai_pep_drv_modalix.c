@@ -31,18 +31,20 @@ static struct si_pep_db_int_desc db_int_descs[] = {
 	{27, 0x994}, {28, 0x50}, {29, 0x54}, {30, 0x58}, {31, 0x5c},
 	{32, 0x60}, {33, 0x64}, {34, 0x68}, {35, 0x6c}
 };
-static int n_db_irqs __attribute__((unused)) = ARRAY_SIZE(db_int_descs);
+static int n_db_irqs = ARRAY_SIZE(db_int_descs);
 
 static irqreturn_t si_pep_mod_doorbell_int_handler(int, void*);
 static irqreturn_t si_pep_mod_net_rxhead_int_handler(int, void*);
 static irqreturn_t si_pep_mod_net_rxhead_int_handler_t(int, void*);
 static void si_pep_mod_delayed_mcmd_handler(struct work_struct*);
+static void si_pep_asr_db_enable_int(struct si_pep_dev *, u32);
 
 typedef void (*si_pep_dreq_cacher)(struct work_struct *);
 
 static void si_pep_mod_delayed_mreq_cacher(struct work_struct *qwork)
 {
 	si_pep_get_reqs_from_host(g_pep_dev, SI_MWQ, 0);
+	si_pep_asr_db_enable_int(g_pep_dev, MOD_OFF_MWQ_HEAD_DB);
 }
 
 #define DEF_DQ_REQ_CHECKERS \
@@ -52,6 +54,7 @@ static void si_pep_mod_delayed_mreq_cacher(struct work_struct *qwork)
 static void si_pep_mod_delayed_dreq_cacher_##q(struct work_struct *w) \
 { \
 	si_pep_get_reqs_from_host(g_pep_dev, SI_DWQ, q); \
+	si_pep_asr_db_enable_int(g_pep_dev, MOD_OFF_WQ_HEAD_DB(q)); \
 } \
 
 DEF_DQ_REQ_CHECKERS
@@ -63,6 +66,18 @@ DEF_DQ_REQ_CHECKERS
 #undef RC
 };
 
+static __always_inline u16 si_pep_asr_reg_readw(struct si_pep_dev *pep,
+		u32 offset)
+{
+	return readw(pep->asr_base + offset);
+}
+
+static __always_inline void si_pep_asr_reg_writew(struct si_pep_dev *pep,
+						 u32 offset, u16 val)
+{
+	writew(val, pep->asr_base + offset);
+}
+
 static __always_inline u32 si_pep_asr_reg_read(struct si_pep_dev *pep,
 					       uint32_t offset)
 {
@@ -73,6 +88,40 @@ static __always_inline void si_pep_asr_reg_write(struct si_pep_dev *pep,
 						 uint32_t offset, uint32_t val)
 {
 	writel(val, pep->asr_base + offset);
+}
+
+/*
+ * +----------+----------------+-----------+-------+
+ * |  31:18   |       17       |     16    |  15:0 |
+ * +----------+----------------+-----------+-------+
+ * | Reserved | Interrupt Mask | Interrupt | Index |
+ * +----------+----------------+-----------+-------+
+ */
+static void si_pep_asr_db_clear_and_mask_int(struct si_pep_dev *pep, u32 off)
+{
+	u16 val = si_pep_asr_reg_readw(pep, off + 2);
+
+	val = (val | BIT(1)) & (~(BIT(0)));
+
+	si_pep_asr_reg_writew(pep, off + 2, val);
+}
+
+static void si_pep_asr_db_enable_int(struct si_pep_dev *pep, u32 off)
+{
+	u16 val = si_pep_asr_reg_readw(pep, off + 2);
+
+	val = val & ~(BIT(1));
+
+	si_pep_asr_reg_writew(pep, off + 2, val);
+}
+
+static void si_pep_asr_db_disable_int(struct si_pep_dev *pep, u32 off)
+{
+	u16 val = si_pep_asr_reg_readw(pep, off + 2);
+
+	val = val | BIT(1);
+
+	si_pep_asr_reg_writew(pep, off + 2, val);
 }
 
 static u16 si_pep_mod_mq_get_val(struct si_pep_dev *pep,
@@ -290,10 +339,31 @@ static int si_pep_mod_plat_init(struct si_pep_dev *pep)
 	}
 
 	pep->asr_base = devm_ioremap_resource(dev, res);
-	if (IS_ERR(pep->hdma_base)) {
+	if (IS_ERR(pep->asr_base)) {
 		si_err(pep, "Failed to map 'asr' resources");
 		return PTR_ERR(pep->asr_base);
 	}
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "pcie_sys");
+	if (res == NULL) {
+		si_err(pep, "PCIeSYS base address is not found in device tree");
+		return -ENOENT;
+	}
+
+	pep->pciesys_base = devm_ioremap_resource(dev, res);
+	if (IS_ERR(pep->pciesys_base)) {
+		si_err(pep, "Failed to map 'PCIeSYS' resources");
+		return PTR_ERR(pep->pciesys_base);
+	}
+
+	i = si_pep_register_irq_handler(pep, "pcie0_lde", si_pep_irq_link_down,
+			pep);
+	if (i != 0) {
+		si_err(pep, "Failed to register handler for pcie0_ldeinterrupt. Error %d\n", i);
+		return -EINVAL;
+	}
+	si_pep_irq_link_down_enable(pep);
+
 
 	for (i = MOD_MCMD_DB; i <= MOD_DQ_DB_END; i++) {
 		snprintf(irqname, sizeof(irqname), "doorbell_%d", i);
@@ -317,6 +387,13 @@ static int si_pep_mod_plat_init(struct si_pep_dev *pep)
 		si_err(pep, "Failed to register handler for '%s'", irqname);
 		return i;
 	}
+
+	for (i = 0; i < n_db_irqs; i++) {
+		if (i == MOD_NET_TXHEAD_DB)
+			continue;
+
+		si_pep_asr_db_enable_int(pep, db_int_descs[i].offset);
+	}
 #if 0
 	/* This will cause nested interrupts */
 	for (i = 0; i < 16; i++) {
@@ -329,7 +406,7 @@ static int si_pep_mod_plat_init(struct si_pep_dev *pep)
 				&r_irq_param[0]);
 	}
 #endif
-
+	/* Install handler for pcie link down interrupt */
 	return 0;
 }
 
@@ -422,34 +499,40 @@ static void si_pep_mod_net_release(struct si_pep_dev *pep)
 {
 }
 
+static void si_pep_mod_net_enable_rxint(struct si_pep_dev *pep)
+{
+	const u32 offset = MOD_OFF_NET_TXHEAD;
+
+	si_pep_asr_db_enable_int(pep, offset);
+}
+
+static void si_pep_mod_net_disable_rxint(struct si_pep_dev *pep)
+{
+	const u32 offset = MOD_OFF_NET_TXHEAD;
+
+	si_pep_asr_db_disable_int(pep, offset);
+}
+
 static void si_pep_mod_delayed_mcmd_handler(struct work_struct *iwork)
 {
 	struct si_mcmd *mcmd = si_pep_cache_virt(g_pep_dev, mcmd);
 	if (mcmd->cmd)
 		si_pep_handle_mcmd(g_pep_dev, mcmd);
+
+	si_pep_asr_reg_writew(g_pep_dev, MOD_OFF_MCMD_DB, 0);
+	si_pep_asr_db_enable_int(g_pep_dev, MOD_OFF_MCMD_DB);
+
 }
 
 static irqreturn_t si_pep_mod_net_rxhead_int_handler(int irq, void *arg)
 {
-	struct si_pep_db_int_desc *desc;
 	struct si_pep_dev *pep = g_pep_dev;
-	struct si_pep_net_dev *net = &pep->net_dev;
-	u32 reg;
+	struct si_pep_db_int_desc *desc;
 
 	desc = (struct si_pep_db_int_desc*)arg;
-	reg = si_pep_asr_reg_read(pep, desc->offset);
-	reg = (reg | MOD_DOORBELL_INT_DIS) & (~(MOD_DOORBELL_INT));
-	si_pep_asr_reg_write(pep, desc->offset, reg);
-	if (atomic_read(&net->rx_en) == 1) {
-		atomic_set(&net->rx_en, 0);
-		return IRQ_WAKE_THREAD;
-	}
-
-	reg = si_pep_asr_reg_read(pep, desc->offset);
-	reg = reg & (~MOD_DOORBELL_INT_DIS);
-	si_pep_asr_reg_write(pep, desc->offset, reg);
-
-	return IRQ_HANDLED;
+	si_pep_asr_db_clear_and_mask_int(pep, desc->offset);
+	
+	return IRQ_WAKE_THREAD;
 }
 
 static irqreturn_t si_pep_mod_net_rxhead_int_handler_t(int irq, void *arg)
@@ -480,13 +563,13 @@ static irqreturn_t si_pep_mod_doorbell_int_handler(int irq, void *arg)
 
 	desc = (struct si_pep_db_int_desc*)arg;
 	reg = readl(pep->asr_base + desc->offset);
+	/* Disable the interrupt and mask further interrupts until we are done */
+	si_pep_asr_db_clear_and_mask_int(pep, desc->offset);
+	
 	val = MOD_DOORBELL_VAL(reg);
 	si_dbg_l(pep, "Interrupt %d, Doorbell Interrupt %d, Ofset 0x%x, "
 			"Reg 0x%x, Value 0x%x",
 			irq, desc->index, desc->offset, reg, val);
-	/* Disable the interrupt and mask further interrupts until we are done */
-	reg = (reg | MOD_DOORBELL_INT_DIS) & (~(MOD_DOORBELL_INT));
-	writel(reg, pep->asr_base + desc->offset);
 
 	if (desc->index >= MOD_DQ_DB_START && desc->index <= MOD_DQ_DB_END) {
 		/* Data queue doorbells */
@@ -495,6 +578,7 @@ static irqreturn_t si_pep_mod_doorbell_int_handler(int irq, void *arg)
 		switch (type) {
 		case MOD_DWQ_DB_REM: /* wqe head */
 			queue_work(irq_work, &d_dreq_cachers[qid].work);
+			return IRQ_HANDLED;
 			break;
 		case MOD_DCQ_DB_REM: /* cqe tail */
 			si_pep_recycle_qes(pep, SI_DCQ, qid);
@@ -521,16 +605,17 @@ static irqreturn_t si_pep_mod_doorbell_int_handler(int irq, void *arg)
 	switch (desc->index) {
 	case MOD_MCMD_DB:
 		if (pep->drv_ops->check_mcmd(pep, mcmd) == 0) {
-			reg = reg | 0xA5A5;
-			writel(reg, pep->asr_base + desc->offset);
+			writew(0x10ad, pep->asr_base + desc->offset);
 			/* Management command handlers do non-int-context-
 			 * friendly stuff. Can't handle them here. Defer
 			 */
 			queue_work(irq_work, &mcmd_handler.work);
+			return IRQ_HANDLED;
 		}
 		break;
 	case MOD_MWQ_DB:	/* MWQ head */
 		queue_work(irq_work, &d_mreq_cacher.work);
+		return IRQ_HANDLED;
 		break;
 	case MOD_MCQ_DB:	/* MCQ tail */
 		si_pep_recycle_qes(pep, SI_MCQ, 0);
@@ -541,9 +626,7 @@ static irqreturn_t si_pep_mod_doorbell_int_handler(int irq, void *arg)
 	}
 
 handled:
-	reg = readl(pep->asr_base + desc->offset);
-	reg = reg & (~(MOD_DOORBELL_INT_DIS));
-	writel(reg, pep->asr_base + desc->offset);
+	si_pep_asr_db_enable_int(pep, desc->offset);
 
 	return IRQ_HANDLED;
 }
@@ -566,6 +649,8 @@ const struct si_pep_drv_ops modalix_drv_ops = {
 	.net_set_val = si_pep_mod_net_set_val,
 	.net_get_val = si_pep_mod_net_get_val,
 	.net_open = si_pep_mod_net_open,
-	.net_release = si_pep_mod_net_release
+	.net_release = si_pep_mod_net_release,
+	.net_enable_rxint = si_pep_mod_net_enable_rxint,
+	.net_disable_rxint = si_pep_mod_net_disable_rxint
 };
 

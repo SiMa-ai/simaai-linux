@@ -10,6 +10,9 @@
 #define _SIMA_DRV_COMMON_H_
 
 #include <linux/simaai_pcie_api.h>
+#include <linux/types.h>
+#include <linux/ktime.h>
+
 #include "simaai_pcie_net.h"
 
 #define STOP_BUILD_IF_NOT(expr) extern const char failed[(!!(expr) ? 1 : (-1))]
@@ -226,6 +229,7 @@ struct si_mcmd_res {
 STOP_BUILD_IF_NOT(sizeof(struct si_mcmd_res) == 64);
 
 enum si_alert_types {
+	SI_ALERT_INVALID,
 	SI_ALERT_REBOOT_SOC,
 	SI_ALERT_LINK_DOWN,
 	SI_ALERT_KERNEL_CRASH,
@@ -240,7 +244,7 @@ struct si_alert {
 
 /*
  * Internal driver commands, not exposed to applications. Those which are 
- * exposed to applications should be defined in sima_pcie_api.h
+ * exposed to applications should be defined in simaai_pcie_api.h
  */
 struct si_mcmd_set_nethw_addr_params {
 	u32 nethw_addr_low;

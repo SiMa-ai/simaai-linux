@@ -51,9 +51,21 @@
 #define ISP_V4L2_METADATA_SIZE 4096
 #endif
 
-/* max size */
+/* min/max resolution the ISP accepts at its input/output */
+#define ISP_V4L2_MIN_WIDTH 48
+#define ISP_V4L2_MIN_HEIGHT 32
 #define ISP_V4L2_MAX_WIDTH 4096
 #define ISP_V4L2_MAX_HEIGHT 3072
+
+/* ISP AXI data channels are 256-bit (32-byte) beats. The frame DMA line
+ * stride must align to one max transaction = burst_beats * 32 bytes (the
+ * frame writer's max_awlen+1). The writer is configured for a single-beat
+ * burst, so the stride aligns to 32 bytes; raise ISP_DMA_BURST_BEATS in
+ * lockstep if that WDMA burst length is ever increased. Keep it a power of
+ * two so the per-format width alignment stays a power of two. */
+#define ISP_AXI_BEAT_BYTES  32u
+#define ISP_DMA_BURST_BEATS 1u
+#define ISP_STRIDE_ALIGN    ( ISP_AXI_BEAT_BYTES * ISP_DMA_BURST_BEATS )
 
 extern struct simaai_stu *stu;
 /**
@@ -279,7 +291,7 @@ static isp_v4l2_stream_fmt_list_t isp_v4l2_stream_supported_formats[V4L2_STREAM_
         .formats = (isp_v4l2_fmt_t[]) {
             {
                 .description = "META",
-                .pixelformat = ISP_V4L2_PIX_FMT_META,
+                .pixelformat = V4L2_PIX_FMT_MODALIX_META,
                 .data_width = 8,
                 .num_planes = 1,
                 .is_yuv = 0,
@@ -477,7 +489,7 @@ static uint32_t isp_v4l2_stream_get_default_pixelformat( isp_v4l2_stream_t *pstr
     case V4L2_STREAM_TYPE_OUT:
         return V4L2_PIX_FMT_RGB24;
     case V4L2_STREAM_TYPE_META:
-        return ISP_V4L2_PIX_FMT_META;
+        return V4L2_PIX_FMT_MODALIX_META;
     default:
         return 0;
     }
@@ -673,7 +685,9 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
         		*frame = &pbuf->frame;
 				
        		} else {
-				LOG( LOG_INFO, "list is empty");
+#ifdef ENABLE_V4L2_STREAM_LOGS
+				LOG( LOG_DEBUG, "list is empty");
+#endif
 			}
         	spin_unlock( &pstream->buffer_list[stream_direction].lock );
 			return 0;
@@ -802,8 +816,14 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
 				//	&pbuf->frame, pbuf->frame.planes[0].address.low, frame, frame->planes[0].address.low);
              break;
             } else {
-				LOG (LOG_INFO, "no match current frame is (%#llx)%#x, looking for (%#llx)%#x",
+#ifdef ENABLE_V4L2_STREAM_LOGS
+				/* Demoted to LOG_DEBUG and gated on a build toggle: this
+				 * LOG_INFO fires on every non-matching buffer in the
+				 * busy list while spin_lock is held, which was visible
+				 * in the IRQ-shadow latency on a hot stream. */
+				LOG (LOG_DEBUG, "no match current frame is (%#llx)%#x, looking for (%#llx)%#x",
 					&pbuf->frame, pbuf->frame.planes[0].address.low, frame, frame->planes[0].address.low);
+#endif
 			}
         }
 
@@ -872,7 +892,7 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
     }
 
     /* Notify buffer ready */
-    isp_v4l2_notify_event( pstream->ctx_id, pstream->stream_type, frame, V4L2_EVENT_ACAMERA_FRAME_READY, stream_direction );
+    isp_v4l2_notify_event( pstream->ctx_id, pstream->stream_type, frame, V4L2_EVENT_MODALIX_ISP_FRAME_READY, stream_direction );
 
     // For m2m stream check if we don't have any busy buffers and mark job as finished
     if ( pstream->stream_type == V4L2_STREAM_TYPE_M2M ) {
@@ -1002,8 +1022,8 @@ int isp_v4l2_stream_init( isp_v4l2_stream_t **ppstream, int stream_type, int ctx
 
 	/* init the work queue */
 	//INIT_WORK(&new_stream->work, work_queue_fn);
-    /* return stream private ptr to caller */
-    *ppstream = new_stream;
+    /* publish only after init so dispatch readers never see a partial stream */
+    smp_store_release( ppstream, new_stream );
 
     return 0;
 }
@@ -1362,8 +1382,14 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
             f->fmt.pix_mp.height = pstream->stream_common->sensor_info.mode[mode].height;
         }
 
-        v4l_bound_align_image( &f->fmt.pix_mp.width, 48, ISP_V4L2_MAX_WIDTH, 1,
-                               &f->fmt.pix_mp.height, 32, ISP_V4L2_MAX_HEIGHT, 1, 1 );
+        /* Clamp to the ISP's min/max input resolution; width/height only need
+         * to be even. The 32-byte line-stride requirement (ISP AXI beat) is
+         * met by padding bytesperline (ALIGN below), NOT by cropping the
+         * active width: sensors such as imx477 stream non-beat-aligned widths
+         * (4056) that must be preserved end-to-end, so the stride is padded
+         * rather than the width rounded. */
+        v4l_bound_align_image( &f->fmt.pix_mp.width, ISP_V4L2_MIN_WIDTH, ISP_V4L2_MAX_WIDTH, 1,
+                               &f->fmt.pix_mp.height, ISP_V4L2_MIN_HEIGHT, ISP_V4L2_MAX_HEIGHT, 1, 1 );
     }
 
     // All streams are multiplanar
@@ -1379,8 +1405,8 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 
     uint8_t i;
     for ( i = 0; i < tfmt->num_planes; i++ ) {
-        // bytesperline should be multiple of 32 due to ISP AXI alignment requirements (AXI bus width is 256-bit)
-        f->fmt.pix_mp.plane_fmt[i].bytesperline = ( ( ( ( f->fmt.pix_mp.width * tfmt->data_width ) >> 3 ) + 31 ) >> 5 ) << 5;
+        // line stride aligns to one ISP frame-DMA transaction (configured burst beats * 32-byte AXI beat)
+        f->fmt.pix_mp.plane_fmt[i].bytesperline = ALIGN( ( f->fmt.pix_mp.width * tfmt->data_width ) >> 3, ISP_STRIDE_ALIGN );
         f->fmt.pix_mp.plane_fmt[i].sizeimage = f->fmt.pix_mp.height * f->fmt.pix_mp.plane_fmt[i].bytesperline;
 
         if ( f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 ) {
@@ -1453,13 +1479,18 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
         return rc;
     }
 
-    /* update resolution */
-    rc = fw_intf_stream_set_resolution( pstream->ctx_id, &pstream->stream_common->sensor_info,
-                                        pstream->stream_type, &( f->fmt.pix_mp.width ), &( f->fmt.pix_mp.height ), f->fmt.pix_mp.pixelformat );
-    if ( rc < 0 ) {
-        LOG( LOG_ERR, "[Stream#%d-%s] Function stream_set_resolution call failed, rc: %d",
-             pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), rc );
-        return rc;
+    /* update resolution — for m2m, only the OUT (source) carries the sensor
+     * input geometry; the CAP (dst) is the requested output reached by ISP crop
+     * (the Mali-C71AE has no scaler), so a CAP S_FMT must not overwrite the
+     * sensor resolution / pixelformat. */
+    if ( pstream->stream_type != V4L2_STREAM_TYPE_M2M || stream_direction == V4L2_STREAM_DIRECTION_OUT ) {
+        rc = fw_intf_stream_set_resolution( pstream->ctx_id, &pstream->stream_common->sensor_info,
+                                            pstream->stream_type, &( f->fmt.pix_mp.width ), &( f->fmt.pix_mp.height ), f->fmt.pix_mp.pixelformat );
+        if ( rc < 0 ) {
+            LOG( LOG_ERR, "[Stream#%d-%s] Function stream_set_resolution call failed, rc: %d",
+                 pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), rc );
+            return rc;
+        }
     }
 
     const uint32_t mode = pstream->stream_common->sensor_info.cur_mode;
@@ -1478,6 +1509,31 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 
     /* update format field */
     pstream->cur_v4l2_fmt[stream_direction] = *f;
+
+    /* M2M output geometry: the Mali-C71AE has no scaler, so a requested CAP size
+     * smaller than the sensor input (OUT) size is reached by the ISP crop block
+     * (centred window). Sensor must run at a 32-byte-stride-aligned width to
+     * avoid input shear; crop then trims the processed image to the request. */
+    if ( pstream->stream_type == V4L2_STREAM_TYPE_M2M && stream_direction == V4L2_STREAM_DIRECTION_CAP ) {
+        const uint32_t in_w = pstream->cur_v4l2_fmt[V4L2_STREAM_DIRECTION_OUT].fmt.pix_mp.width;
+        const uint32_t in_h = pstream->cur_v4l2_fmt[V4L2_STREAM_DIRECTION_OUT].fmt.pix_mp.height;
+        const uint32_t out_w = f->fmt.pix_mp.width;
+        const uint32_t out_h = f->fmt.pix_mp.height;
+
+        if ( in_w && in_h && ( out_w < in_w || out_h < in_h ) ) {
+            const uint32_t xoff = ( in_w > out_w ) ? ( ( in_w - out_w ) / 2 ) : 0;
+            const uint32_t yoff = ( in_h > out_h ) ? ( ( in_h - out_h ) / 2 ) : 0;
+            fw_intf_set_image_crop_xoffset( pstream->ctx_id, xoff );
+            fw_intf_set_image_crop_yoffset( pstream->ctx_id, yoff );
+            fw_intf_set_image_crop_width( pstream->ctx_id, out_w );
+            fw_intf_set_image_crop_height( pstream->ctx_id, out_h );
+            fw_intf_set_image_crop_enable( pstream->ctx_id, 1 );
+            LOG( LOG_INFO, "[Stream#%d] ISP crop %ux%u -> %ux%u @ (%u,%u)",
+                 pstream->stream_type, in_w, in_h, out_w, out_h, xoff, yoff );
+        } else {
+            fw_intf_set_image_crop_enable( pstream->ctx_id, 0 );
+        }
+    }
 
     LOG( LOG_NOTICE, "[Stream#%d-%s] Effective stream format: width: %4u, height: %4u, type: %u, format: 0x%x (%s), cp: %d, bpl: %d",
          pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),

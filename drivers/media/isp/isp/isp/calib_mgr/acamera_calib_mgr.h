@@ -20,24 +20,24 @@
 #ifndef __ACAMERA_CALIB_MGR_H__
 #define __ACAMERA_CALIB_MGR_H__
 
+/* The wire-format types and slot IDs live in the shared UAPI header
+ * so the kernel driver and libcamera IPA agree on the calibration
+ * blob layout byte-for-byte. acamera_calib_mgr.h now just provides
+ * the kernel-internal API around them. */
+#include <linux/media/simaai/modalix_isp_calib.h>
+
 #include "acamera_calib_mgr_settings.h"
 #include "acamera_math.h"
 
-typedef struct LookupTable {
-    const void *ptr;
-    const uint16_t rows;
-    const uint16_t cols;
-    const uint16_t width;
-} LookupTable;
+/* Kernel-internal aliases for the UAPI types. struct
+ * modalix_isp_lookup_table is the on-the-wire descriptor; after the
+ * kernel ioctl handler patches `ptr` offsets to real pointers, the
+ * same struct doubles as the in-memory form. Callers that need a
+ * void* must cast through uintptr_t (see calib_mgr_lut_get()). */
+typedef struct modalix_isp_lookup_table LookupTable;
+typedef struct modalix_isp_calibrations ACameraCalibrations;
 
-// Calibration table
-typedef struct _ACameraCalibrations {
-
-    LookupTable *calibrations[CALIBRATION_TOTAL_SIZE];
-
-} ACameraCalibrations;
-
-// Calibration manager entry
+/* Calibration manager entry */
 typedef struct _acamera_calib_mgr_entry_t {
     int32_t initialized;
     int32_t ( *get_calibrations )( uint32_t wdr_mode, void *param );
@@ -47,8 +47,8 @@ typedef struct _acamera_calib_mgr_entry_t {
 /**
  *   Initialize a calibration manager entry.
  *
- *   This function MUST be called before any other call to calibration manager. 
- *   It initializes a pointer to get_calibations_*() function and inits internal data. 
+ *   This function MUST be called before any other call to calibration manager.
+ *   It initializes a pointer to get_calibations_*() function and inits internal data.
  *
  *   @param param - pointer to a get_calibations_*() function.
  *

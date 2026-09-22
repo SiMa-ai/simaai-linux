@@ -18,15 +18,13 @@
 
 #include <media/mipi-csi2.h>
 #include <media/v4l2-cci.h>
+#include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
-#define IMX415_PIXEL_ARRAY_TOP	  0
-#define IMX415_PIXEL_ARRAY_LEFT	  0
-#define IMX415_PIXEL_ARRAY_WIDTH  3864
-#define IMX415_PIXEL_ARRAY_HEIGHT 2192
-#define IMX415_PIXEL_ARRAY_VBLANK 58
+#define IMX415_NATIVE_WIDTH	  3864
+#define IMX415_NATIVE_HEIGHT	  2192
 #define IMX415_EXPOSURE_OFFSET	  8
 
 #define IMX415_PIXEL_RATE_74_25MHZ	891000000
@@ -561,6 +559,90 @@ static const struct imx415_mode supported_modes[] = {
 	},
 };
 
+/*
+ * Readout window (output resolution) configuration, these select the sensor
+ * readout window. The H period is fixed to the base mode, so only the H/V
+ * blanking and exposure control ranges change between windows.
+ */
+struct imx415_readout_mode {
+	u32 width;
+	u32 height;
+	u32 crop_top;
+	u32 crop_left;
+	/*
+	 * Minimum (and default) VBLANK. Chosen so the default VMAX
+	 * (height + vblank_min) is 2250, matching the datasheet default and
+	 * keeping the frame rate identical across windows. For the crop this
+	 * also satisfies VTTL >= PIX_VWIDTH/2 + 46.
+	 */
+	u32 vblank_min;
+	struct imx415_mode_reg_list reg_list;
+};
+
+/* All-pixel readout: full 3864x2192 effective array. */
+static const struct cci_reg_sequence imx415_window_all_pixel[] = {
+	{ IMX415_WINMODE, 0x00 },
+};
+
+/* Window cropping: 3840x2160 (UHD) centred in the effective array. */
+static const struct cci_reg_sequence imx415_window_crop_uhd[] = {
+	{ IMX415_WINMODE, 0x04 },
+	{ IMX415_PIX_HST, 12 },		/* (3864 - 3840) / 2, multiple of 2 */
+	{ IMX415_PIX_HWIDTH, 3840 },	/* multiple of 24 */
+	{ IMX415_PIX_VST, 32 },		/* 16 lines x 2, multiple of 4 */
+	{ IMX415_PIX_VWIDTH, 4320 },	/* 2160 lines x 2, multiple of 4 */
+};
+
+/* Window cropping: 1920x1080 (FHD) centred in the effective array. */
+static const struct cci_reg_sequence imx415_window_crop_fhd[] = {
+	{ IMX415_WINMODE, 0x04 },
+	{ IMX415_PIX_HST, 972 },	/* (3864 - 1920) / 2, multiple of 2 */
+	{ IMX415_PIX_HWIDTH, 1920 },	/* multiple of 24 */
+	{ IMX415_PIX_VST, 1112 },	/* 556 lines x 2, multiple of 4 */
+	{ IMX415_PIX_VWIDTH, 2160 },	/* 1080 lines x 2, multiple of 4 */
+};
+
+#define IMX415_DEFAULT_MODE 0
+
+static const struct imx415_readout_mode imx415_readout_modes[] = {
+	/* [0] 3840x2160 (UHD) window crop, centred. */
+	{
+		.width = 3840,
+		.height = 2160,
+		.crop_top = 16,
+		.crop_left = 12,
+		.vblank_min = 90,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(imx415_window_crop_uhd),
+			.regs = imx415_window_crop_uhd,
+		},
+	},
+	/* [1] Full 3864x2192 effective array, all-pixel readout. */
+	{
+		.width = IMX415_NATIVE_WIDTH,
+		.height = IMX415_NATIVE_HEIGHT,
+		.crop_top = 0,
+		.crop_left = 0,
+		.vblank_min = 58,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(imx415_window_all_pixel),
+			.regs = imx415_window_all_pixel,
+		},
+	},
+	/* [2] 1920x1080 (FHD) window crop, centred. */
+	{
+		.width = 1920,
+		.height = 1080,
+		.crop_top = 556,
+		.crop_left = 972,
+		.vblank_min = 1170,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(imx415_window_crop_fhd),
+			.regs = imx415_window_crop_fhd,
+		},
+	},
+};
+
 static const char *const imx415_test_pattern_menu[] = {
 	"disabled",
 	"solid black",
@@ -597,7 +679,7 @@ struct imx415 {
 	struct v4l2_ctrl *vflip;
 	struct v4l2_ctrl *exposure;
 
-	unsigned int cur_mode;
+	unsigned int cur_mode;		/* lane-rate / CSI-timing index */
 	unsigned int num_data_lanes;
 };
 
@@ -606,8 +688,7 @@ struct imx415 {
  * registers that have to be set to another value than default.
  */
 static const struct cci_reg_sequence imx415_init_table[] = {
-	/* use all-pixel readout mode, no flip */
-	{ IMX415_WINMODE, 0x00 },
+	/* no binning, no flip; the readout window is selected per mode */
 	{ IMX415_ADDMODE, 0x00 },
 	{ IMX415_REVERSE, 0x00 },
 	/* use RAW 10-bit mode */
@@ -697,6 +778,40 @@ static const struct cci_reg_sequence imx415_init_table[] = {
 static inline struct imx415 *to_imx415(struct v4l2_subdev *sd)
 {
 	return container_of(sd, struct imx415, subdev);
+}
+
+static const struct imx415_readout_mode *imx415_find_mode(u32 width, u32 height)
+{
+	return v4l2_find_nearest_size(imx415_readout_modes,
+				      ARRAY_SIZE(imx415_readout_modes),
+				      width, height, width, height);
+}
+
+/*
+ * Update the blanking and exposure control ranges to match the selected
+ * readout window. Called from .set_fmt with the subdev state (== control
+ * handler) lock held, so the __v4l2_ctrl_modify_range() variants are used.
+ */
+static void imx415_update_controls(struct imx415 *sensor,
+				   const struct imx415_readout_mode *mode)
+{
+	const struct imx415_mode *cur = &supported_modes[sensor->cur_mode];
+	unsigned int idx = sensor->num_data_lanes == 2 ? 0 : 1;
+	u32 hblank_min, hblank_max, exposure_max;
+
+	hblank_min = (cur->hmax_min[idx] * IMX415_HMAX_MULTIPLIER) - mode->width;
+	hblank_max = (IMX415_HMAX_MAX * IMX415_HMAX_MULTIPLIER) - mode->width;
+	__v4l2_ctrl_modify_range(sensor->hblank, hblank_min, hblank_max,
+				 IMX415_HMAX_MULTIPLIER, hblank_min);
+
+	__v4l2_ctrl_modify_range(sensor->vblank, mode->vblank_min,
+				 IMX415_VMAX_MAX - mode->height, 1,
+				 mode->vblank_min);
+
+	exposure_max = mode->height + mode->vblank_min - IMX415_EXPOSURE_OFFSET;
+	__v4l2_ctrl_modify_range(sensor->exposure, sensor->exposure->minimum,
+				 exposure_max, sensor->exposure->step,
+				 exposure_max);
 }
 
 static int imx415_set_testpattern(struct imx415 *sensor, int val)
@@ -812,9 +927,10 @@ static int imx415_ctrls_init(struct imx415 *sensor)
 	struct v4l2_fwnode_device_properties props;
 	struct v4l2_ctrl *ctrl;
 	const struct imx415_mode *cur_mode = &supported_modes[sensor->cur_mode];
+	const struct imx415_readout_mode *mode =
+		&imx415_readout_modes[IMX415_DEFAULT_MODE];
 	u64 lane_rate = cur_mode->lane_rate;
-	u32 exposure_max = IMX415_PIXEL_ARRAY_HEIGHT +
-			   IMX415_PIXEL_ARRAY_VBLANK -
+	u32 exposure_max = mode->height + mode->vblank_min -
 			   IMX415_EXPOSURE_OFFSET;
 	u32 hblank_min, hblank_max;
 	unsigned int i;
@@ -854,19 +970,17 @@ static int imx415_ctrls_init(struct imx415 *sensor)
 			  IMX415_AGAIN_MIN);
 
 	hblank_min = (cur_mode->hmax_min[sensor->num_data_lanes == 2 ? 0 : 1] *
-		      IMX415_HMAX_MULTIPLIER) - IMX415_PIXEL_ARRAY_WIDTH;
-	hblank_max = (IMX415_HMAX_MAX * IMX415_HMAX_MULTIPLIER) -
-		     IMX415_PIXEL_ARRAY_WIDTH;
-	ctrl = v4l2_ctrl_new_std(&sensor->ctrls, &imx415_ctrl_ops,
-				 V4L2_CID_HBLANK, hblank_min,
-				 hblank_max, IMX415_HMAX_MULTIPLIER,
-				 hblank_min);
+		      IMX415_HMAX_MULTIPLIER) - mode->width;
+	hblank_max = (IMX415_HMAX_MAX * IMX415_HMAX_MULTIPLIER) - mode->width;
+	sensor->hblank = v4l2_ctrl_new_std(&sensor->ctrls, &imx415_ctrl_ops,
+					   V4L2_CID_HBLANK, hblank_min,
+					   hblank_max, IMX415_HMAX_MULTIPLIER,
+					   hblank_min);
 
 	sensor->vblank = v4l2_ctrl_new_std(&sensor->ctrls, &imx415_ctrl_ops,
-					   V4L2_CID_VBLANK,
-					   IMX415_PIXEL_ARRAY_VBLANK,
-					   IMX415_VMAX_MAX - IMX415_PIXEL_ARRAY_HEIGHT,
-					   1, IMX415_PIXEL_ARRAY_VBLANK);
+					   V4L2_CID_VBLANK, mode->vblank_min,
+					   IMX415_VMAX_MAX - mode->height,
+					   1, mode->vblank_min);
 
 	v4l2_ctrl_new_std(&sensor->ctrls, NULL, V4L2_CID_PIXEL_RATE,
 			  sensor->pixel_rate, sensor->pixel_rate, 1,
@@ -925,11 +1039,23 @@ static int imx415_set_mode(struct imx415 *sensor, int mode)
 
 static int imx415_setup(struct imx415 *sensor, struct v4l2_subdev_state *state)
 {
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
+	const struct imx415_readout_mode *mode =
+		imx415_find_mode(format->width, format->height);
 	int ret;
 
 	ret = cci_multi_reg_write(sensor->regmap,
 				  imx415_init_table,
 				  ARRAY_SIZE(imx415_init_table),
+				  NULL);
+	if (ret)
+		return ret;
+
+	/* Select the readout window (all-pixel or window cropping). */
+	ret = cci_multi_reg_write(sensor->regmap,
+				  mode->reg_list.regs,
+				  mode->reg_list.num_of_regs,
 				  NULL);
 	if (ret)
 		return ret;
@@ -1044,12 +1170,13 @@ static int imx415_enum_frame_size(struct v4l2_subdev *sd,
 
 	format = v4l2_subdev_state_get_format(state, fse->pad);
 
-	if (fse->index > 0 || fse->code != format->code)
+	if (fse->index >= ARRAY_SIZE(imx415_readout_modes) ||
+	    fse->code != format->code)
 		return -EINVAL;
 
-	fse->min_width = IMX415_PIXEL_ARRAY_WIDTH;
+	fse->min_width = imx415_readout_modes[fse->index].width;
 	fse->max_width = fse->min_width;
-	fse->min_height = IMX415_PIXEL_ARRAY_HEIGHT;
+	fse->min_height = imx415_readout_modes[fse->index].height;
 	fse->max_height = fse->min_height;
 	return 0;
 }
@@ -1082,12 +1209,16 @@ static int imx415_set_format(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state,
 			     struct v4l2_subdev_format *fmt)
 {
+	struct imx415 *sensor = to_imx415(sd);
+	const struct imx415_readout_mode *mode;
 	struct v4l2_mbus_framefmt *format;
+
+	mode = imx415_find_mode(fmt->format.width, fmt->format.height);
 
 	format = v4l2_subdev_state_get_format(state, fmt->pad);
 
-	format->width = fmt->format.width;
-	format->height = fmt->format.height;
+	format->width = mode->width;
+	format->height = mode->height;
 	format->code = MEDIA_BUS_FMT_SGBRG10_1X10;
 	format->field = V4L2_FIELD_NONE;
 	format->colorspace = V4L2_COLORSPACE_RAW;
@@ -1096,6 +1227,10 @@ static int imx415_set_format(struct v4l2_subdev *sd,
 	format->xfer_func = V4L2_XFER_FUNC_NONE;
 
 	fmt->format = *format;
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		imx415_update_controls(sensor, mode);
+
 	return 0;
 }
 
@@ -1103,14 +1238,25 @@ static int imx415_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_selection *sel)
 {
+	const struct v4l2_mbus_framefmt *format;
+	const struct imx415_readout_mode *mode;
+
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP:
 	case V4L2_SEL_TGT_CROP_DEFAULT:
+		format = v4l2_subdev_state_get_format(sd_state, 0);
+		mode = imx415_find_mode(format->width, format->height);
+		sel->r.top = mode->crop_top;
+		sel->r.left = mode->crop_left;
+		sel->r.width = mode->width;
+		sel->r.height = mode->height;
+
+		return 0;
 	case V4L2_SEL_TGT_CROP_BOUNDS:
-		sel->r.top = IMX415_PIXEL_ARRAY_TOP;
-		sel->r.left = IMX415_PIXEL_ARRAY_LEFT;
-		sel->r.width = IMX415_PIXEL_ARRAY_WIDTH;
-		sel->r.height = IMX415_PIXEL_ARRAY_HEIGHT;
+		sel->r.top = 0;
+		sel->r.left = 0;
+		sel->r.width = IMX415_NATIVE_WIDTH;
+		sel->r.height = IMX415_NATIVE_HEIGHT;
 
 		return 0;
 	}
@@ -1123,8 +1269,8 @@ static int imx415_init_state(struct v4l2_subdev *sd,
 {
 	struct v4l2_subdev_format format = {
 		.format = {
-			.width = IMX415_PIXEL_ARRAY_WIDTH,
-			.height = IMX415_PIXEL_ARRAY_HEIGHT,
+			.width = imx415_readout_modes[IMX415_DEFAULT_MODE].width,
+			.height = imx415_readout_modes[IMX415_DEFAULT_MODE].height,
 		},
 	};
 

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mailbox/simaai,modalix-hpi-client.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SiMa.ai HPI mailbox client
+
+maintainers:
+  - Bharanidharan Ramalingam <bharanidharan.ramalingam@sima.ai>
+
+description:
+  Consumer of the SiMa.ai HPI mailbox. Exposes /dev/simaai-hpi and the shared
+  DDR used to exchange payloads with the tRoot.
+
+properties:
+  compatible:
+    const: simaai,modalix-hpi-client
+
+  mboxes:
+    maxItems: 1
+    description: HPI mailbox channel.
+
+  simaai,fixed-shmem:
+    $ref: /schemas/types.yaml#/definitions/uint64-array
+    items:
+      - description: fixed shared-DDR base address
+      - description: fixed shared-DDR size
+    description:
+      Optional fallback for an old tRoot without the dynamic SHMEM_MAP
+      handshake. Omit where the dynamic path is always used.
+
+required:
+  - compatible
+  - mboxes
+
+additionalProperties: false
+
+examples:
+  - |
+    mailbox-client {
+        compatible = "simaai,modalix-hpi-client";
+        mboxes = <&hpi 0>;
+        simaai,fixed-shmem = /bits/ 64 <0x1207500000 0x2200000>;
+    };
+

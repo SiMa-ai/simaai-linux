@@ -38,6 +38,8 @@ void cmos_fsm_clear( cmos_fsm_t *p_fsm )
     p_fsm->exposure_ratio = 64;
     p_fsm->log2_gain_avg = 0;
     p_fsm->isp_dgain_log2 = 0;
+    p_fsm->again_val_log2 = 0;
+    p_fsm->dgain_val_log2 = 0;
     p_fsm->target_gain_log2 = 0;
     p_fsm->exp_lut_valid_entries = 0;
     p_fsm->exp_partition_tbl = 0;

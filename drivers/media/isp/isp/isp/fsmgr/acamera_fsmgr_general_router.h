@@ -22,7 +22,9 @@
 
 #include "system_types.h"
 
-#define GENERAL_ROUTER_MAX_ISP_CHANNELS ( 10 )
+/* Shared kernel<->IPA sensor-info ABI (SENSOR_INFO_BLOB). Single source of
+ * truth: GENERAL_ROUTER_MAX_ISP_CHANNELS, general_*_t, acamera_cmd_sensor_info. */
+#include <linux/media/simaai/modalix_isp_sensor_info.h>
 
 typedef enum {
     CMD_DIRECTION_GET,
@@ -144,111 +146,6 @@ typedef struct {
 } acamera_cmd_wb_frame_quantity;
 
 
-// This structure represents image resolution.
-// It is used in the sensor driver to keep information about the frame width and frame height.
-typedef struct _general_image_resolution_t {
-
-    uint16_t width;
-    uint16_t height;
-
-} general_image_resolution_t;
-
-
-/**
- * @brief               locked exposure info struct
- * Each locked exposure is represented by a set of flag and value variables.
- * If a flag variable from the set is not set to true, the locked exposure will NOT be applied!
- *
- * @locked_exp_ratio_flag - denotes locked exposure ratio
- * @locked_exp_ratio_val - denotes locked exposure ratio value (only taken into account if the corresponding flag is set to true)
- * @locked_exp_ratio_short_flag - denotes locked short exposure ratio
- * @locked_exp_ratio_short_flag - denotes locked short exposure ratio value (only taken into account if the corresponding flag is set to true)
- * @locked_exp_ratio_medium_flag - denotes locked medium exposure ratio
- * @locked_exp_ratio_medium_flag - denotes locked medium exposure ratio value (only taken into account if the corresponding flag is set to true)
- * @locked_exp_ratio_medium2_flag - denotes locked medium2 exposure ratio
- * @locked_exp_ratio_medium2_flag - denotes locked medium2 exposure ratio value (only taken into account if the corresponding flag is set to true)
- */
-typedef struct general_locked_exp_info_t {
-    bool locked_exp_ratio_flag;
-    uint32_t locked_exp_ratio_val;
-    bool locked_exp_ratio_short_flag;
-    uint32_t locked_exp_ratio_short_val;
-    bool locked_exp_ratio_medium_flag;
-    uint32_t locked_exp_ratio_medium_val;
-    bool locked_exp_ratio_medium2_flag;
-    uint32_t locked_exp_ratio_medium2_val;
-} general_locked_exp_info_t;
-
-/**
- * @brief               sensor channel description struct
- *
- * @exposure_bit_width  final exposure bit width after decompanding (if applicable)
- * @data_type           denotes exposure type for this channel
- * @cv                  channel capability
- *
- */
-typedef struct _general_channel_desc_t {
-    uint16_t exposure_bit_width;
-    uint8_t data_type;
-    uint8_t cv;
-} general_channel_desc_t;
-
-/**
- * @brief                       sensor channels information struct
- *
- * @channel_desc                channel description
- * @exposure_idx_to_channel_map exposure index to channel id map table.
- *                              Contains channel id in decsending order based on exposure length
- *                              0 - Longest, 1 - Next longest, e.t.c so we can always access channel description
- *                              by index without iterating all elements
- * @exposure_max_bit_width      maximum of all channel_desc[*].exposure_bit_width
- * @locked_exp_info             provides information about locked exposures and their respective values
- *
- */
-typedef struct _general_channel_info_t {
-    general_channel_desc_t channel_desc[GENERAL_ROUTER_MAX_ISP_CHANNELS];
-    uint8_t exposure_idx_to_channel_map[GENERAL_ROUTER_MAX_ISP_CHANNELS];
-    uint8_t exposure_max_bit_width;
-    general_locked_exp_info_t locked_exp_info;
-} general_channel_info_t;
-
-// A sensor can support several different predefined modes.
-// This structure keeps all necessary information about a mode.
-typedef struct _general_sensor_mode_t {
-    general_image_resolution_t resolution; // Resolution of the mode.
-    general_channel_info_t channel_info;   // Channel information.
-    uint32_t fps;                          // The FPS value multiplied by 256. Used for preset information queries
-    uint8_t wdr_mode;                      // The wdr mode.
-    uint8_t exposures;                     // How many exposures this mode supports.
-    uint8_t num_channels;                  // How many virtual channels are in this mode.
-} general_sensor_mode_t;
-
-typedef struct {
-    uint16_t total_width;
-    uint16_t total_height;
-    uint16_t active_width;
-    uint16_t active_height;
-    uint16_t black_level;
-    uint32_t lines_per_second;
-    uint8_t cfa_pattern;
-    int32_t again_log2_max;
-    int32_t dgain_log2_max;
-    int32_t again_accuracy;
-    int32_t wb_gain_log2_max;
-    uint32_t integration_time_min;
-    uint32_t integration_time_max;
-    uint32_t integration_time_medium_max;
-    uint32_t integration_time_long_max;
-    uint32_t integration_time_limit;
-    uint8_t integration_time_precision;
-    uint8_t integration_time_apply_delay;
-    uint8_t sensor_exp_number;
-    uint8_t isp_exposure_channel_delay;
-    uint8_t sensor_output_bits;
-    uint8_t is_remote;
-    general_sensor_mode_t current_sensor_mode;
-    uint8_t rggb_start;
-} acamera_cmd_sensor_info;
 
 typedef struct acamera_cmd_sensor_preset_info_t {
     uint16_t width;       // Width

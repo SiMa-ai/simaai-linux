@@ -213,7 +213,7 @@ static void configure_input_formatter(
 {
     const uint32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
     const input_formatter_ctrl *p_in_fmt = (const input_formatter_ctrl *)
-        calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_INPUT_FORMATTER );
+        calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_INPUT_FORMATTER );
 
     channel_processing_level cv[4] = {0};
     input_formatter_initial_capabilities( cv );
@@ -257,8 +257,8 @@ static void configure_gamma_fe(
     const uint32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
 
     if ( ctrl->gamma_fe_lut_enable ) {
-        const uint32_t gamma_fe_size = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_GAMMA_FE );
-        const uint32_t *gamma_fe_lut = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_GAMMA_FE );
+        const uint32_t gamma_fe_size = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_FE );
+        const uint32_t *gamma_fe_lut = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_FE );
         size_t i;
         for ( i = 0; i < gamma_fe_size - 1; i++ )
             acamera_gamma_fe_mem_array_data_write( isp_base, i, gamma_fe_lut[i] );
@@ -266,7 +266,7 @@ static void configure_gamma_fe(
     }
 
     if ( ctrl->gamma_fe_sqrt_enable ) {
-        const uint32_t *gamma_black_levels = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_GAMMA_BLACK_LEVELS );
+        const uint32_t *gamma_black_levels = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_BLACK_LEVELS );
 #if DECOMPANDER_HAS_SQ
         acamera_isp_gamma_fe_black_level_in_sq_write( isp_base, *gamma_black_levels++ );
         acamera_isp_gamma_fe_black_level_out_sq_write( isp_base, *gamma_black_levels++ );
@@ -304,10 +304,10 @@ static void configure_gamma_be( decompander_fsm_ptr_t p_fsm,
     void *p_cm = ACAMERA_FSM2CM_PTR( p_fsm );
 
     if ( ctrl->gamma_be_lut_enable ) {
-        const uint32_t *gamma_be_0_lut = calib_mgr_u32_lut_get( p_cm, CALIBRATION_GAMMA_BE0 );
-        const uint32_t *gamma_be_1_lut = calib_mgr_u32_lut_get( p_cm, CALIBRATION_GAMMA_BE1 );
-        const uint32_t gamma_be_0_len = calib_mgr_lut_len( p_cm, CALIBRATION_GAMMA_BE0 );
-        const uint32_t gamma_be_1_len = calib_mgr_lut_len( p_cm, CALIBRATION_GAMMA_BE1 );
+        const uint32_t *gamma_be_0_lut = calib_mgr_u32_lut_get( p_cm, MODALIX_ISP_CALIB_GAMMA_BE0 );
+        const uint32_t *gamma_be_1_lut = calib_mgr_u32_lut_get( p_cm, MODALIX_ISP_CALIB_GAMMA_BE1 );
+        const uint32_t gamma_be_0_len = calib_mgr_lut_len( p_cm, MODALIX_ISP_CALIB_GAMMA_BE0 );
+        const uint32_t gamma_be_1_len = calib_mgr_lut_len( p_cm, MODALIX_ISP_CALIB_GAMMA_BE1 );
         const uint32_t gamma_be_0_hw_len = ( ACAMERA_GAMMA_BE0_MEM_SIZE / ( ACAMERA_GAMMA_BE0_MEM_ARRAY_DATA_DATASIZE >> 3 ) ) + 1;
         const uint32_t gamma_be_1_hw_len = ( ACAMERA_GAMMA_BE1_MEM_SIZE / ( ACAMERA_GAMMA_BE1_MEM_ARRAY_DATA_DATASIZE >> 3 ) ) + 1;
 
@@ -338,7 +338,7 @@ static void configure_gamma_be( decompander_fsm_ptr_t p_fsm,
 
 
     if ( ctrl->gamma_be_sq_enable ) {
-        const uint32_t *gamma_black_levels = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_GAMMA_BLACK_LEVELS );
+        const uint32_t *gamma_black_levels = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_BLACK_LEVELS );
 #if DECOMPANDER_HAS_SQ
         acamera_isp_gamma_be_black_level_out_sq_write( isp_base, *gamma_black_levels++ );
         acamera_isp_gamma_be_black_level_in_sq_write( isp_base, *gamma_black_levels++ );
@@ -409,10 +409,10 @@ void decompander_deinit( decompander_fsm_ptr_t p_fsm )
 void decompander_reload_calibration( decompander_fsm_ptr_t p_fsm )
 {
     /* If tuning is missing, do nothing with input formatter. */
-    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DECOMPANDER_CONTROL ) ) {
-        assert( calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DECOMPANDER_CONTROL ) ==
+    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL ) ) {
+        assert( calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL ) ==
                 sizeof( decompander_ctrl ) );
-        const decompander_ctrl *p_decompander_ctrl = (const decompander_ctrl *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DECOMPANDER_CONTROL );
+        const decompander_ctrl *p_decompander_ctrl = (const decompander_ctrl *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL );
         configure_input_formatter( p_fsm, p_decompander_ctrl );
         configure_gamma_fe( p_fsm, p_decompander_ctrl );
         configure_gamma_be( p_fsm, p_decompander_ctrl );

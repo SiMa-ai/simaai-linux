@@ -180,6 +180,13 @@ struct si_pep_stats {
 	ktime_t last_resp;
 };
 
+struct si_pep_msi_config {
+	u32 msg_addr_l;
+	u32 msg_addr_h;
+	u32 msg_nvecs;
+	u16 msg_data;
+};
+
 struct si_pep_thread_param {
 	struct si_pep_dev *pep;
 	enum si_qtype qtype;
@@ -203,6 +210,12 @@ struct si_pep_userbuf_map {
 	unsigned int nr_sgents;
 	dma_addr_t *dma_addrs;
 	size_t total_size;
+	/*
+	 * Direction this buffer was dma-mapped with. The DMA API requires
+	 * unmap to use the same direction as map, so it is recorded here
+	 * rather than assumed.
+	 */
+	enum dma_data_direction dir;
 };
 
 struct si_pep_userbuf_ctx {
@@ -235,6 +248,8 @@ struct si_pep_drv_ops {
 	int (*net_open)(struct si_pep_dev*);
 	void (*net_set_val)(struct si_pep_dev *, enum si_net_val_types, u16);
 	u16 (*net_get_val)(struct si_pep_dev *, enum si_net_val_types);
+	void (*net_enable_rxint)(struct si_pep_dev *);
+	void (*net_disable_rxint)(struct si_pep_dev *);
 };
 
 struct si_pep_qdev {
@@ -243,6 +258,17 @@ struct si_pep_qdev {
 	char devname[32];
 	struct mutex ioctl_mutex;
 	struct si_pep_dev *pep;
+	/*
+	 * Cached DMA linked-list buffer. dma_alloc_coherent() is far too
+	 * expensive to do per transfer, so the buffer is kept and reused,
+	 * growing on demand. ll_busy serialises access without introducing a
+	 * lock on the submission path: a concurrent transfer on the same
+	 * queue simply falls back to its own allocation.
+	 */
+	void *ll_cache;
+	dma_addr_t ll_cache_dma;
+	size_t ll_cache_size;
+	unsigned long ll_busy;
 	atomic_t seqid;
 	/* Timestamps structures per queue */
 	struct si_pep_timestamps cache_dreq_ts;
@@ -313,8 +339,6 @@ struct si_pep_dev {
 	atomic_t dwq_prev_heads[SI_MAX_DQS];
 	atomic_t mwq_prev_head;
 
-	u32 msg_addr_lower;
-	u32 msg_addr_upper;
 	u64 host_alert_addr;
 
 	u8 __iomem *dbi_base;	/* PCIe DBI register base */
@@ -332,10 +356,16 @@ struct si_pep_dev {
 	u8 __iomem *hdma_base;
 	struct si_pep_cache __iomem *cache_base;
 	phys_addr_t cache_pbase;
+	u8 __iomem *pciesys_base;
+	phys_addr_t pciesys_phys_base;
+	size_t pciesys_size;
 
 	int card_num;
 	bool modalix;
 	enum si_soc_state state;
+
+	bool recovery_mode;
+	struct task_struct *recovery_thread;
 };
 
 #define qdev_to_pep_dev(x) (x->pep)
@@ -423,6 +453,8 @@ int si_pep_register_irq_handler(struct si_pep_dev*, char*,
 		irqreturn_t (*)(int, void*), void*);
 irqreturn_t si_pep_dma_irq_handler(int, void*);
 irqreturn_t si_pep_irq_link_down(int, void*);
+int si_pep_irq_link_down_enable(struct si_pep_dev *);
+int si_pep_irq_link_down_disable(struct si_pep_dev *pep);
 inline bool si_pep_is_data_queue(u32);
 inline bool si_pep_is_mgmt_queue(u32);
 char *si_pep_qtype_str(enum si_qtype);

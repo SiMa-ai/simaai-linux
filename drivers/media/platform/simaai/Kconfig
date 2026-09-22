@@ -44,3 +44,12 @@ config SIMAAI_V4L2_VIDEO
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called simaai-v4l2-video.
+
+config SIMAAI_CAMERA_INSTRUMENTATION
+	bool "SiMa.ai camera pipeline debug instrumentation"
+	default n
+	help
+	  Compile in runtime debug module parameters and fault injectors for
+	  the camera pipeline drivers (ISP, VDMA, MIPI CSI-2, DMA). Exposes
+	  /sys/module parameters that can destabilise the pipeline; enable on
+	  development builds only.

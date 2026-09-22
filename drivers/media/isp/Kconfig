@@ -8,5 +8,6 @@ config ARM_MALI_ISP_C71AE
 	select VIDEOBUF2_DMA_CONTIG
 	select V4L2_ASYNC
 	select V4L2_MEM2MEM_DEV
+	depends on PM_DEVFREQ
 	help
 		Driver for ARM MALI ISP C71AE configured to run on SIMA.AI Micheangelo platform. If unsure, say N.

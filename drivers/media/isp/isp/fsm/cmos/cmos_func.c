@@ -120,10 +120,10 @@ void cmos_update_exposure_partitioning_lut( cmos_fsm_ptr_t p_fsm )
     int i;
     int32_t param[2] = {0, 0}; // In log2
 
-    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CMOS_EXP_PARTITION ) &&
-         ( calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CMOS_EXP_PARTITION ) <= EXP_LUT_TABLE_SIZE ) ) {
-        p_fsm->exp_partition_tbl = (const exposure_partition_t *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CMOS_EXP_PARTITION );
-        p_fsm->exp_lut_valid_entries = calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CMOS_EXP_PARTITION );
+    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION ) &&
+         ( calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION ) <= EXP_LUT_TABLE_SIZE ) ) {
+        p_fsm->exp_partition_tbl = (const exposure_partition_t *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION );
+        p_fsm->exp_lut_valid_entries = calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION );
     } else {
         LOG( LOG_WARNING, "Default table is set! NULL pointer is passed or table is too big!" );
 
@@ -218,8 +218,8 @@ void cmos_init( cmos_fsm_ptr_t p_fsm )
     cmos_request_interrupt( p_fsm, p_fsm->repeat_irq_mask );
 
     acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
-    acamera_isp_pipeline_bypass_white_balance_write( p_ictx->settings.isp_base, 0 );
-    acamera_isp_pipeline_bypass_digital_gain_write( p_ictx->settings.isp_base, 0 );
+    /* bypass_white_balance / bypass_digital_gain driven by the IPA
+     * (isp_config / ISP_BYPASS_CONFIG) */
 
 #ifdef ACAMERA_ISP_PIPELINE_POSITION_DIGITAL_GAIN_DEFAULT
     acamera_isp_pipeline_position_digital_gain_write( p_ictx->settings.isp_base, 1 );
@@ -240,9 +240,9 @@ void cmos_reload_calibration( cmos_fsm_ptr_t p_fsm )
 {
     acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
 
-    // Configure context parameters with default values (CALIBRATION_CMOS_CONTROL)
+    // Configure context parameters with default values (MODALIX_ISP_CALIB_CMOS_CONTROL)
     {
-        cmos_control_param_t *param = (cmos_control_param_t *)calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CMOS_CONTROL );
+        cmos_control_param_t *param = (cmos_control_param_t *)calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_CONTROL );
         set_context_param( p_ictx, SYSTEM_ANTIFLICKER_ENABLE_PARAM, param->antiflicker_enable );
         set_context_param( p_ictx, SYSTEM_ANTI_FLICKER_FREQUENCY_PARAM, param->anti_flicker_frequency );
         set_context_param( p_ictx, SYSTEM_MANUAL_INTEGRATION_TIME_PARAM, param->manual_integration_time );
@@ -263,8 +263,8 @@ void cmos_reload_calibration( cmos_fsm_ptr_t p_fsm )
     }
 
     /* Load up wdr stitching configuraiton from calibration */
-    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_WDR_STITCH_CONFIG ) ) {
-        const uint32_t *config = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_WDR_STITCH_CONFIG );
+    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_WDR_STITCH_CONFIG ) ) {
+        const uint32_t *config = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_WDR_STITCH_CONFIG );
         acamera_isp_frame_stitch_lm_thresh_high_write( p_ictx->settings.isp_base, *config++ );
         acamera_isp_frame_stitch_lm_thresh_low_write( p_ictx->settings.isp_base, *config++ );
         acamera_isp_frame_stitch_ms_thresh_high_write( p_ictx->settings.isp_base, *config++ );
@@ -280,7 +280,7 @@ void cmos_reload_calibration( cmos_fsm_ptr_t p_fsm )
         acamera_isp_frame_stitch_mcoff_vs_max_write( p_ictx->settings.isp_base, *config++ );
 #endif
     } else {
-        LOG( LOG_ERR, "CALIBRATION_WDR_STITCH_CONFIG is missing, module will not be configured correctly!" );
+        LOG( LOG_ERR, "MODALIX_ISP_CALIB_WDR_STITCH_CONFIG is missing, module will not be configured correctly!" );
     }
 }
 
@@ -1129,7 +1129,7 @@ static void cmos_analog_gain_update( cmos_fsm_ptr_t p_fsm )
 {
     int32_t gain;
     int32_t target_gain = p_fsm->target_gain_log2;
-    cmos_control_param_t *param = (cmos_control_param_t *)calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CMOS_CONTROL );
+    cmos_control_param_t *param = (cmos_control_param_t *)calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_CONTROL );
     acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
 
     acamera_cmd_sensor_info sensor_info;
@@ -1539,11 +1539,11 @@ void cmos_set_exposure_target( cmos_fsm_ptr_t p_fsm, int32_t exposure_log2, uint
         return;
     }
 
+    /* Effective ceiling = app limit capped by the sensor. Derive it, never store
+     * it back - the context outlives the stream and MIN() would ratchet it down. */
     const uint32_t system_max_sensor_analog_gain = MIN( get_context_param( p_ictx, SYSTEM_MAX_SENSOR_ANALOG_GAIN_PARAM ), sensor_info.again_log2_max >> ( LOG2_GAIN_SHIFT - 5 ) );
-    set_context_param( p_ictx, SYSTEM_MAX_SENSOR_ANALOG_GAIN_PARAM, system_max_sensor_analog_gain );
 
     const uint32_t system_max_sensor_digital_gain = MIN( get_context_param( p_ictx, SYSTEM_MAX_SENSOR_DIGITAL_GAIN_PARAM ), sensor_info.dgain_log2_max >> ( LOG2_GAIN_SHIFT - 5 ) );
-    set_context_param( p_ictx, SYSTEM_MAX_SENSOR_DIGITAL_GAIN_PARAM, system_max_sensor_digital_gain );
 
 
     /* Handle integration time limits, if we are not in manual mode then we

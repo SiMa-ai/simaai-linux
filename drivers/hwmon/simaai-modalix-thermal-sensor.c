@@ -17,6 +17,7 @@
 #define SDIF_LOCK_BIT BIT(1)
 #define SDIF_POLL_DELAY_MS 1
 #define SDIF_DONE_DELAY_US 10
+#define DELAY_150US	150
 #define MAX_TEMP_CHANNELS 14
 #define MAX_RETRIES 10
 
@@ -38,6 +39,7 @@
 #define SDIF_CH_DATA_STRIDE 0x04
 #define CLK_SYNTH_DIVIDER 0x04
 
+#define DTSN_MODE2	0x1
 #define IP_CTRL 0x0
 #define IP_CFG0 0x1
 #define IP_POLLING 0x4
@@ -75,11 +77,16 @@
 #define DTSN_INPUT_SHIFT	4096
 #define EFUSE_CALIB_M40_START	51
 #define EFUSE_CALIB_P125_START	43
+#define EFUSE_DATA_START	36
+#define EFUSE_DATA_END		51
+#define ECID_START		60
+#define ECID_END		62
 #define HOT_TEMP		85
 #define COLD_TEMP		-40
 #define K_0			-14120	/* -141.2 x 100 */
 #define Y_0			56560	/* 565.6 x 100  */
 #define SCALE_100		100
+#define SCALE_10		10
 
 struct thermal_priv {
 	void __iomem *pvt_base;		/* Base address for PVT block */
@@ -182,9 +189,20 @@ static void populate_calibrated_ky_table(struct thermal_priv *priv, u32* efuse_d
 	int Toff;
 	u32 count = EFUSE_CALIB_M40_START;
 
+	if(!efuse_data) {
+		dev_err(priv->dev, "efuse_data is Null\n");
+		return;
+	}
+	dev_dbg(priv->dev, "Validating DFT efuse data\n");
+	for (ch = EFUSE_DATA_START; ch <= EFUSE_DATA_END; ch++) {
+		if(efuse_data[ch] == 0) {
+			dev_info(priv->dev, "DFT Efuse data[%d] is 0\n", ch);
+			return;
+		}
+	}
+
 	/* Compute calibration M40 from efuse */
 	for (ch = 0; ch < MAX_TEMP_CHANNELS; ch++){
-		if(efuse_data)
 		lower_data = lower_16_bits(efuse_data[count]);
 		upper_data = upper_16_bits(efuse_data[count]);
 		calib_m40[ch++] = get_efuse_data(lower_data, COLD_TEMP);
@@ -218,19 +236,18 @@ static long compute_temperature( struct thermal_priv *priv, int raw, int channel
 {
 	long temp;
 
+	dev_dbg(priv->dev, "Temp sensor channel %d\n", channel);
 	if (priv->calib_y[channel] == 0 && priv->calib_k[channel] == 0) {
-		temp = ((raw * Y_0) / DTSN_INPUT_SHIFT) - K_0;
-		dev_dbg(priv->dev, "Temp sensor channel %d\n", channel);
-		dev_dbg(priv->dev, "Temp sensor raw %d\n", raw);
+		temp = ((raw * Y_0) / DTSN_INPUT_SHIFT) + K_0;
+		temp = temp*SCALE_10;
 	} else {
-		dev_dbg(priv->dev, "Temp sensor channel %d\n", channel);
-		dev_dbg(priv->dev, "Temp sensor raw: 0x%x\n", raw);
 		dev_dbg(priv->dev, "New calibration Y: %d\n", priv->calib_y[channel]);
 		dev_dbg(priv->dev, "New cailbration K: %d\n", priv->calib_k[channel]);
-
 		temp=(((raw*SCALE_100)/DTSN_INPUT_SHIFT)*priv->calib_y[channel]) + priv->calib_k[channel];
+		temp = temp/SCALE_10;
 	}
-	dev_dbg(priv->dev, "Temperature in milli degree celsius: %d\n", temp);
+	dev_dbg(priv->dev, "Temp raw value: 0x%x, temp in milli degree celsius: %d\n",
+				raw, temp);
 	return temp;
 }
 
@@ -241,7 +258,7 @@ static int read_efuse(struct thermal_priv *priv)
 	u32 efuse_thermal_data[64];
 	void __iomem *base = priv->efuse_base;
 
-	dev_dbg(priv->dev, "Starting DFT eFuse read sequence using iowrite32/ioread32...\n");
+	dev_info(priv->dev, "Starting DFT eFuse read sequence\n");
 
 	/* Load DR */
 	iowrite32(CHAIN_SIZE_1, base + WORD0);
@@ -265,6 +282,12 @@ static int read_efuse(struct thermal_priv *priv)
 			val, val & 0x000003FC);
 
 	/* Load DR UDR_LOAD */
+	iowrite32(CHAIN_SIZE_8, base + WORD0);
+	iowrite32(0xA9, base + WORD1);
+
+	iowrite32(0x01000004, base + WORD0);
+	iowrite32(0x7, base + WORD1);
+
 	iowrite32(CHAIN_SIZE_8, base + WORD0);
 	iowrite32(UDR_LOAD, base + WORD1);
 
@@ -294,19 +317,28 @@ static int read_efuse(struct thermal_priv *priv)
 	for (i = 0; i < 64; i++) {
 		iowrite32(0x00000000, base + WORD1);
 		efuse_thermal_data[i] = ioread32(base + WORD1);
-		dev_dbg(priv->dev, "eFuse Data[%02d]: 0x%08X\n", i, efuse_thermal_data[i]);
+		if ((i >= EFUSE_DATA_START && i <= EFUSE_DATA_END) ||
+			(i >= ECID_START && i <= ECID_END))
+			dev_dbg(priv->dev, "eFuse Data[%02d]: 0x%08X\n",
+					i, efuse_thermal_data[i]);
 	}
 
 	/* Final write and read back */
 	iowrite32(0x00000003, base + WORD1);
 	val = ioread32(base + WORD1);
 
-	if ((val & 0x00000000) == 0x00000000)
-		dev_dbg(priv->dev, "Efuse read success\n");
-	else {
-		dev_err(priv->dev, "Efuse read failure: val=0x%08X\n", val);
+	if ((val & 0x00000000) == 0x00000000) {
+		dev_info(priv->dev, "DFT Efuse read success\n");
+	} else {
+		dev_err(priv->dev, "DFT Efuse read failure: val=0x%08X\n", val);
 		return -EIO;
 	}
+
+	/* revert SRV Instruction register to 'BYPASS'(reset) */
+	iowrite32(CHAIN_SIZE_8, base + WORD0);
+	iowrite32(0x01, base + WORD1);
+	iowrite32(0x01000003, base + WORD0);
+	iowrite32(0x03, base + WORD1);
 
 	if(efuse_thermal_data[60] == 0 ||
 	   efuse_thermal_data[61] == 0 ||
@@ -354,15 +386,14 @@ static int start_measurement_sequence(struct thermal_priv *priv, int id)
 			goto unlock_and_return;							\
 	} while (0)
 
-	SEQ_WRITE(IP_CFG0, FIELD_PREP(IP_CFG0_ID_MASK, id));
+	SEQ_WRITE(IP_CFG0, FIELD_PREP(IP_CFG0_ID_MASK, id) | DTSN_MODE2);
 	SEQ_WRITE(IP_CFG1, IP_CFG1_CONFIG);
 	SEQ_WRITE(IP_TMR, IP_TIMER_CONFIG);
-	SEQ_WRITE(IP_POLLING, IP_POLLING_CONFIG | BIT(id) |
-				      FIELD_PREP(IP_POLLING_ID_MASK, id));
+	SEQ_WRITE(IP_POLLING, IP_POLLING_CONFIG | FIELD_PREP(IP_POLLING_ID_MASK, id));
 	SEQ_WRITE(IP_CTRL, IP_CTRL_CONFIG2);
 
 #undef SEQ_WRITE
-
+	udelay(DELAY_150US);
 	/* Wait for SDIF_DONE to become non-zero */
 	do {
 		data = ioread32(
@@ -378,20 +409,6 @@ static int start_measurement_sequence(struct thermal_priv *priv, int id)
 			"Timeout: SDIF_DONE did not become non-zero\n");
 		ret = -ETIMEDOUT;
 		goto unlock_and_return;
-	}
-
-	/* Read SDIF result only for channel 0 */
-	if (!id) {
-		for (i = 0; i < MAX_TEMP_CHANNELS; i++) {
-			raw = ioread32(
-				pvt_base +
-				PVT_REG__PVT_DTS0_IP_REGS__VM_DTS_CH_SDIF_DATA_ARRAY_ADDR +
-				i * SDIF_CH_DATA_STRIDE);
-			dev_dbg(priv->dev, "Temp CH-%d (0x%04X) = 0x%05X\n", i,
-				PVT_REG__PVT_DTS0_IP_REGS__VM_DTS_CH_SDIF_DATA_ARRAY_ADDR +
-					i * SDIF_CH_DATA_STRIDE,
-				raw);
-		}
 	}
 
 unlock_and_return:
@@ -500,8 +517,6 @@ static int thermal_sensor_probe(struct platform_device *pdev)
 	u32 data;
 	int ret;
 
-	dev_dbg(&pdev->dev, "thermal_sensor probe started\n");
-
 	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
@@ -531,11 +546,8 @@ static int thermal_sensor_probe(struct platform_device *pdev)
 			PVT_REG__PVT_GLOBAL_REGS__PVT_IP_CONFIG_ADDR);
 	dev_dbg(&pdev->dev, "pvt_ip_config = 0x%08X\n", data);
 
-	/*TODO
-	 * Uncomment read_efuse logic once SoC rest failure on Host warm reboot issue is fixed
-	 */
-	/*if(read_efuse(priv))*/
-		/*dev_warn(&pdev->dev, "DFT Efuse read failed\n");*/
+	if(read_efuse(priv))
+		dev_warn(&pdev->dev, "DFT Efuse read failed\n");
 
 	/* Configure DTSN clock */
 	data = ioread32(priv->pvt_base +

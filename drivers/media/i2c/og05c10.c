@@ -78,15 +78,22 @@ MODULE_PARM_DESC(trigger_mode, "Set vsync trigger mode: 1=source, 2=sink");
 #define OG05C10_VBLANK_MIN		24
 #define OG05C10_VTS_MAX			32767
 #define OG05C10_VTS			(0x0868)
+#define OG05C10_REG_VTS			0x380e	/* VTS 16-bit @ 0x380e/0x380f */
 
 #define OG05C10_HTS_REG_VAL		(0x0C58) //number of clocks per line
 #define OG05C10_HTS				(OG05C10_HTS_REG_VAL*2*2) //OG05C10_HTS_REG_VAL*(number of lanes)*2
 #define OG05C10_HTS_MAX			0x7fff
 
-#define OG05C10_AGAIN_MIN			0
+/* Datasheet timing (linear mode): frame_time = (VTS/2 - 2)*t_row + 105us,
+ * t_row = HTS_REG_VAL / pll_sa1 (timing core clock). At VTS 2152 this is
+ * 29.375 fps, matching the measured rate. */
+#define OG05C10_PLL_SA1_HZ		100000000
+#define OG05C10_LINEAR_OVERHEAD_NS	105000
+
+#define OG05C10_AGAIN_MIN			1	/* Q4: 1x gain */
 #define OG05C10_AGAIN_STEP			1
-#define OG05C10_AGAIN_DEFAULT			0
-#define OG05C10_AGAIN_MAX			(32 << 18)
+#define OG05C10_AGAIN_DEFAULT			16	/* Q4: 1x gain */
+#define OG05C10_AGAIN_MAX			511	/* Q4: ~32x gain (0x01FF) */
 
 /* Embedded metadata stream structure */
 #define OG05C10_EMBEDDED_LINE_WIDTH 16384
@@ -1229,13 +1236,15 @@ static const struct og05c10_mode supported_modes_12bit[] = {
 			.width = 1920,
 			.height = 1080,
 		},
+		/* Real native rate is 235/8 = 29.375 fps (datasheet (VTS/2-2)*t_row+105us
+		 * at VTS 2152), not 30 - so anti-flicker picks the right sync multiple. */
 		.timeperframe_min = {
-			.numerator = 100,
-			.denominator = 3000
+			.numerator = 8,
+			.denominator = 235
 		},
 		.timeperframe_default = {
-			.numerator = 100,
-			.denominator = 3000
+			.numerator = 8,
+			.denominator = 235
 		},
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1920x1080_regs),
@@ -1558,24 +1567,13 @@ int32_t cam_set_gain(struct og05c10 *og05c10, uint16_t gain)
 	return ret;
 }
 
-static int32_t set_analogue_gain( struct og05c10 *og05c10, uint32_t gain )
+static int32_t set_analogue_gain(struct og05c10 *og05c10, uint32_t gain)
 {
-	u32 i = gain >> 18;
-	u32 f = gain & 0x3FFFF;
-	u64 f_sq;
-	u64 approx_f;
-	u32 linear_q18;
-	f_sq = (u64)f * f;
-
-	approx_f = (1ULL << 18) + (((u64)f * 171804) >> 18) + ((f_sq * 90338) >> 36);
-
-	if (i >= 5)
-		linear_q18  = 0x01FF;
-	else
-		linear_q18 = ((u32)(approx_f << i)) >> 14;
-
-	return cam_set_gain (og05c10, (uint16_t)linear_q18);
+	return cam_set_gain(og05c10, (uint16_t)gain);
 }
+
+static unsigned int og05c10_get_frame_length(const struct og05c10_mode *mode,
+					     const struct v4l2_fract *timeperframe);
 
 static int og05c10_set_ctrl(struct v4l2_ctrl *ctrl)
 {
@@ -1608,11 +1606,33 @@ static int og05c10_set_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 	case V4L2_CID_ANALOGUE_GAIN:
+		dev_dbg(&client->dev, "DBG: og05c10 analogue gain = %d\n", ctrl->val);
 		ret = set_analogue_gain(og05c10, ctrl->val);
 		break;
 	case V4L2_CID_EXPOSURE:
 		ret = cam_set_exposure(og05c10, ctrl->val);
 		break;
+	case V4L2_CID_VBLANK: {
+		/* Recover the requested frame time (ns) from the V4L2 frame length, then
+		 * invert the datasheet linear-mode timing for VTS:
+		 *   frame_time = (VTS/2 - 2)*t_row + 105us  ->  VTS = 2*((frame_time-105us)/t_row + 2).
+		 * A plain frame_len:VTS ratio was ~2% off, so mains-sync rates missed. */
+		u64 frame_ns = (u64)(og05c10->mode->height + ctrl->val) *
+			       og05c10->mode->line_length_pix * 1000000000ULL;
+		u32 t_row_ns = (u32)((u64)OG05C10_HTS_REG_VAL * 1000000000ULL /
+				     OG05C10_PLL_SA1_HZ);
+		u32 vts;
+
+		do_div(frame_ns, OG05C10_PIXEL_RATE);
+		if (frame_ns > OG05C10_LINEAR_OVERHEAD_NS)
+			vts = 2 * ((u32)((frame_ns - OG05C10_LINEAR_OVERHEAD_NS) / t_row_ns) + 2);
+		else
+			vts = OG05C10_VTS;
+		/* VTS register is 16-bit; clamp to the sensor range. */
+		vts = clamp_t(u32, vts, OG05C10_VTS, OG05C10_VTS_MAX);
+		ret = og05c10_write_reg(og05c10, OG05C10_REG_VTS, OG05C10_REG_VALUE_16BIT, vts);
+		break;
+	}
 	default:
 		dev_dbg(&client->dev,
 			 "ctrl(id:0x%x,val:0x%x) is not handled\n",
@@ -1762,11 +1782,12 @@ unsigned int og05c10_get_frame_length(const struct og05c10_mode *mode,
 {
 	u64 frame_length;
 
+	/* V4L2 (pixel_rate) domain frame length; VBLANK scales it to the VTS reg. */
 	frame_length = (u64)timeperframe->numerator * OG05C10_PIXEL_RATE;
 	do_div(frame_length,
 	       (u64)timeperframe->denominator * mode->line_length_pix);
 
-	if (WARN_ON(frame_length > OG05C10_FRAME_LENGTH_MAX))
+	if (frame_length > OG05C10_FRAME_LENGTH_MAX)
 		frame_length = OG05C10_FRAME_LENGTH_MAX;
 
 	return max_t(unsigned int, frame_length, mode->height);
@@ -2088,6 +2109,54 @@ static const struct v4l2_subdev_core_ops og05c10_core_ops = {
 	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
 };
 
+static int og05c10_get_frame_interval(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *sd_state,
+				      struct v4l2_subdev_frame_interval *fi)
+{
+	struct og05c10 *og05c10 = to_og05c10(sd);
+	const struct og05c10_mode *mode;
+	unsigned int frame_length;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	mutex_lock(&og05c10->mutex);
+	mode = og05c10->mode;
+	frame_length = mode->height + og05c10->vblank->val;
+	fi->interval.numerator = frame_length * mode->timeperframe_default.numerator;
+	fi->interval.denominator = og05c10_get_frame_length(mode, &mode->timeperframe_default) *
+				   mode->timeperframe_default.denominator;
+	mutex_unlock(&og05c10->mutex);
+
+	return 0;
+}
+
+static int og05c10_set_frame_interval(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *sd_state,
+				      struct v4l2_subdev_frame_interval *fi)
+{
+	struct og05c10 *og05c10 = to_og05c10(sd);
+	const struct og05c10_mode *mode;
+	unsigned int frame_length;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	mutex_lock(&og05c10->mutex);
+	mode = og05c10->mode;
+	frame_length = og05c10_get_frame_length(mode, &fi->interval);
+	/* VBLANK set_ctrl writes VTS (0x380e) to the sensor. */
+	__v4l2_ctrl_s_ctrl(og05c10->vblank, frame_length - mode->height);
+	/* Report the actual (clamped) interval back. */
+	frame_length = mode->height + og05c10->vblank->val;
+	fi->interval.numerator = frame_length * mode->timeperframe_default.numerator;
+	fi->interval.denominator = og05c10_get_frame_length(mode, &mode->timeperframe_default) *
+				   mode->timeperframe_default.denominator;
+	mutex_unlock(&og05c10->mutex);
+
+	return 0;
+}
+
 static const struct v4l2_subdev_video_ops og05c10_video_ops = {
 	.s_stream = og05c10_set_stream,
 };
@@ -2098,6 +2167,8 @@ static const struct v4l2_subdev_pad_ops og05c10_pad_ops = {
 	.set_fmt = og05c10_set_pad_format,
 	.get_selection = og05c10_get_selection,
 	.enum_frame_size = og05c10_enum_frame_size,
+	.get_frame_interval = og05c10_get_frame_interval,
+	.set_frame_interval = og05c10_set_frame_interval,
 };
 
 static const struct v4l2_subdev_ops og05c10_subdev_ops = {
@@ -2150,7 +2221,7 @@ static int og05c10_init_controls(struct og05c10 *og05c10)
 	 * in the og05c10_set_framing_limits() call below.
 	 */
 	og05c10->vblank = v4l2_ctrl_new_std(ctrl_hdlr, &og05c10_ctrl_ops,
-					   V4L2_CID_VBLANK, OG05C10_VBLANK_MIN, OG05C10_VTS_MAX - og05c10->mode->height, 1, OG05C10_VTS - - og05c10->mode->height);
+					   V4L2_CID_VBLANK, OG05C10_VBLANK_MIN, OG05C10_VTS_MAX - og05c10->mode->height, 1, OG05C10_VTS - og05c10->mode->height);
 	og05c10->hblank = v4l2_ctrl_new_std(ctrl_hdlr, &og05c10_ctrl_ops,
 					   V4L2_CID_HBLANK, OG05C10_HTS - og05c10->mode->width, OG05C10_HTS_MAX - og05c10->mode->width, 1, OG05C10_HTS - og05c10->mode->width);
 
@@ -2418,6 +2489,7 @@ static void og05c10_remove(struct i2c_client *client)
 	struct og05c10 *og05c10 = to_og05c10(sd);
 
 	v4l2_async_unregister_subdev(sd);
+	sd->internal_ops = NULL;
 	media_entity_cleanup(&sd->entity);
 	og05c10_free_controls(og05c10);
 

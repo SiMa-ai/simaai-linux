@@ -587,6 +587,21 @@ static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
                 shadow_reg_work();
 }
 
+static void axi_chan_scratch_reload_start(struct axi_dma_chan *chan);
+
+/*
+ * Leave the RELOAD idle drain only at a frame boundary: give the reload block an
+ * IOC (BLOCK_TRF per lap = per frame) and defer the RELOAD->LL switch to that IRQ,
+ * instead of the mid-frame channel disable that desyncs the CSI glue and wedges
+ * after a long park (SOCSW-5392). 0 = legacy mid-frame disable (reproduces the wedge).
+ */
+static bool reload_frameboundary_exit = true;
+#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
+module_param(reload_frameboundary_exit, bool, 0644);
+MODULE_PARM_DESC(reload_frameboundary_exit,
+	"leave RELOAD idle at a frame boundary, not mid-frame (0 = legacy wedge, test)");
+#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+
 static void axi_chan_start_first_queued(struct axi_dma_chan *chan)
 {
 	struct axi_dma_desc *desc;
@@ -611,19 +626,49 @@ static void dma_chan_issue_pending(struct dma_chan *dchan)
 
 	spin_lock_irqsave(&chan->vc.lock, flags);
 	if (vchan_issue_pending(&chan->vc)) {
+		struct axi_dma_desc *head = NULL;
+
 		if (chan->is_video_mode) {
 			list_for_each_entry(vd, &chan->vc.desc_issued, node) {
+				if (!head)
+					head = vd_to_axi_desc(vd);
 				if (prev_vd) {
 					write_desc_llp(&vd_to_axi_desc(prev_vd)->hw_desc[0],
 							vd_to_axi_desc(vd)->hw_desc[0].llp | lms);
 				}
 				prev_vd = vd;
 			}
+			if (chan->has_scratch && prev_vd) {
+				/*
+				 * Ring: user tail -> scratch -> user head. The single
+				 * scratch block is the turnaround; each completion
+				 * re-points it at the current user head.
+				 */
+				write_desc_llp(&vd_to_axi_desc(prev_vd)->hw_desc[0],
+						chan->scratch_a->llp | lms);
+				write_desc_llp(chan->scratch_a,
+						head->hw_desc[0].llp | lms);
+			}
 			wmb();
 		}
 
-		if (!axi_chan_is_hw_enable(chan))
-			axi_chan_start_first_queued(chan);
+		/* Parked for IPI-overflow recovery: splice only, the resume
+		 * restarts the chain (starting here would race the CSI reset). */
+		if (!chan->ovf_quiesced) {
+			if (chan->reload_looping) {
+				if (reload_frameboundary_exit) {
+					/* defer RELOAD->LL to the next frame-boundary BLOCK_TRF
+					 * IRQ; the user chain is already spliced onto scratch_a. */
+					chan->reload_exit_pending = true;
+				} else {
+					/* legacy: mid-frame disable (reproduces the park wedge) */
+					axi_chan_disable(chan);
+					chan->reload_looping = false;
+				}
+			}
+			if (!chan->reload_looping && !axi_chan_is_hw_enable(chan))
+				axi_chan_start_first_queued(chan);
+		}
 	}
 	chan->last_buffer = jiffies;
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
@@ -975,6 +1020,229 @@ err_desc_get:
 	return NULL;
 }
 
+/*
+ * Build one scratch LLI block (a single-block video transfer into the throwaway
+ * scratch buffer) — mirrors the single-block path above but with no IOC, so the
+ * scratch loop raises no interrupts.
+ */
+static int axi_chan_build_scratch_block(struct axi_dma_chan *chan,
+					struct axi_dma_hw_desc *hw,
+					dma_addr_t dst, size_t size)
+{
+	u32 block_ts, ctllo, ctlhi;
+
+	hw->lli = axi_desc_get(chan, &hw->llp);
+	if (unlikely(!hw->lli))
+		return -ENOMEM;
+
+	write_desc_sar(hw, (chan->id) * CH_LLI_SRC_START_ADDR);
+	write_desc_dar(hw, dst);
+
+	block_ts = (size + FRAME_METADATA_SIZE) / 8 - 1;
+	hw->lli->block_ts_lo = cpu_to_le32(block_ts);
+
+	ctllo = CH_CTL_L_LAST_WRITE_EN |
+		DWAXIDMAC_BURST_TRANS_LEN_32 << CH_CTL_L_DST_MSIZE_POS |
+		DWAXIDMAC_BURST_TRANS_LEN_8 << CH_CTL_L_SRC_MSIZE_POS |
+		chan->chip->dw->hdata->m_data_width << CH_CTL_L_SRC_WIDTH_POS |
+		chan->chip->dw->hdata->m_data_width << CH_CTL_L_DST_WIDTH_POS |
+		DWAXIDMAC_CH_CTL_L_INC << CH_CTL_L_DST_INC_POS |
+		DWAXIDMAC_CH_CTL_L_NOINC << CH_CTL_L_SRC_INC_POS |
+		DWAXIDMAC_CH_CTL_L_MAST_2_INTF << CH_CTL_L_DST_MAST_POS |
+		DWAXIDMAC_CH_CTL_L_MAST_1_INTF << CH_CTL_L_SRC_MAST_POS;
+	hw->lli->ctl_lo = cpu_to_le32(ctllo);
+
+	ctlhi = CH_CTL_H_LLI_VALID |
+		CH_CTL_H_SRC_STAT_EN |
+		(DWAXIDMAC_ARWLEN_32 << CH_CTL_H_AWLEN_POS) |
+		CH_CTL_H_AWLEN_EN |
+		(DWAXIDMAC_ARWLEN_8 << CH_CTL_H_ARLEN_POS) |
+		CH_CTL_H_ARLEN_EN;
+	hw->lli->ctl_hi = cpu_to_le32(ctlhi);
+
+	return 0;
+}
+
+int dw_axi_dma_arm_scratch(struct dma_chan *dchan, size_t size)
+{
+	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	u8 lms = chan->chip->dw->hdata->lms_axi_master;
+	struct axi_dma_hw_desc *a;
+	unsigned long flags;
+	void *vaddr;
+	dma_addr_t scratch_dma;
+	int ret = 0;
+
+	/* Provider owns the throwaway buffer: allocate it here, free it in teardown. */
+	vaddr = dma_alloc_coherent(chan->chip->dev, size, &scratch_dma, GFP_KERNEL);
+	if (!vaddr)
+		return -ENOMEM;
+
+	a = kzalloc(sizeof(*a), GFP_KERNEL);
+	if (!a) {
+		ret = -ENOMEM;
+		goto err_free_buf;
+	}
+
+	spin_lock_irqsave(&chan->vc.lock, flags);
+	if (chan->has_scratch) {
+		spin_unlock_irqrestore(&chan->vc.lock, flags);
+		kfree(a);
+		goto err_free_buf;		/* already armed; ret stays 0 */
+	}
+
+	ret = axi_chan_build_scratch_block(chan, a, scratch_dma, size);
+	if (ret) {
+		spin_unlock_irqrestore(&chan->vc.lock, flags);
+		kfree(a);
+		goto err_free_buf;
+	}
+
+	/* Single self-looping scratch block (re-pointed at the user head when buffers queue). */
+	write_desc_llp(a, a->llp | lms);
+	wmb();
+	chan->scratch_a = a;
+	chan->scratch_vaddr = vaddr;
+	chan->scratch_dma = scratch_dma;
+	chan->scratch_size = size;
+	chan->has_scratch = true;
+	chan->reload_looping = false;
+	chan->ovf_quiesced = false;
+	spin_unlock_irqrestore(&chan->vc.lock, flags);
+	return 0;
+
+err_free_buf:
+	/* dma_free_coherent may sleep -- never call it under chan->vc.lock. */
+	dma_free_coherent(chan->chip->dev, size, vaddr, scratch_dma);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dw_axi_dma_arm_scratch);
+
+/* Drop the channel out of the scratch/RELOAD idle-loop and free the scratch
+ * descriptors. Caller holds chan->vc.lock. The provider-owned coherent buffer
+ * can't be freed under the lock (dma_free_coherent may sleep), so it is handed
+ * back via *free_* for the caller to release after unlock. Shared by
+ * terminate_all and the explicit disarm API so a channel is left reusable. */
+static void __dw_axi_dma_teardown_scratch(struct axi_dma_chan *chan,
+					  void **free_vaddr, dma_addr_t *free_dma,
+					  size_t *free_size)
+{
+	*free_vaddr = NULL;
+	if (!chan->has_scratch)
+		return;
+	chan->has_scratch = false;
+	chan->reload_looping = false;
+	chan->reload_exit_pending = false;
+	chan->ovf_quiesced = false;
+	if (chan->scratch_a) {
+		if (chan->scratch_a->lli)
+			dma_pool_free(chan->desc_pool, chan->scratch_a->lli,
+				      chan->scratch_a->llp);
+		kfree(chan->scratch_a);
+		chan->scratch_a = NULL;
+	}
+	*free_vaddr = chan->scratch_vaddr;
+	*free_dma = chan->scratch_dma;
+	*free_size = chan->scratch_size;
+	chan->scratch_vaddr = NULL;
+}
+
+void dw_axi_dma_disarm_scratch(struct dma_chan *dchan)
+{
+	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	unsigned long flags;
+	void *free_vaddr;
+	dma_addr_t free_dma;
+	size_t free_size;
+
+	spin_lock_irqsave(&chan->vc.lock, flags);
+	__dw_axi_dma_teardown_scratch(chan, &free_vaddr, &free_dma, &free_size);
+	spin_unlock_irqrestore(&chan->vc.lock, flags);
+	if (free_vaddr)
+		dma_free_coherent(chan->chip->dev, free_size, free_vaddr, free_dma);
+}
+EXPORT_SYMBOL_GPL(dw_axi_dma_disarm_scratch);
+
+/*
+ * Park the channel across the CSI IPI-overflow reset (SOCSW-5392): resetting
+ * the glue/IPI under a running DEV_TO_MEM block raises an async src bus error
+ * that drops the in-flight user buffer. ovf_quiesced gates issue_pending/
+ * handle_err/reload_start until resume_after_overflow() restarts the channel.
+ */
+int dw_axi_dma_quiesce_for_overflow(struct dma_chan *dchan)
+{
+	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	unsigned long flags;
+	int ret = -ENODEV;
+
+	spin_lock_irqsave(&chan->vc.lock, flags);
+	if (chan->has_scratch && chan->scratch_a) {
+		axi_chan_disable(chan);
+		chan->reload_looping = false;
+		chan->ovf_quiesced = true;
+		ret = 0;
+	}
+	spin_unlock_irqrestore(&chan->vc.lock, flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dw_axi_dma_quiesce_for_overflow);
+
+int dw_axi_dma_resume_after_overflow(struct dma_chan *dchan)
+{
+	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	u8 lms = chan->chip->dw->hdata->lms_axi_master;
+	struct virt_dma_desc *next;
+	unsigned long flags;
+	int ret = -ENODEV;
+
+	spin_lock_irqsave(&chan->vc.lock, flags);
+	chan->ovf_quiesced = false;
+	if (chan->has_scratch && chan->scratch_a) {
+		/* Restart cleanly from the kept queue (no in-place RESUMEREQ):
+		 * re-validate the scratch LLI, then LL chain or RELOAD idle. */
+		chan->scratch_a->lli->ctl_hi |= cpu_to_le32(CH_CTL_H_LLI_VALID);
+		next = vchan_next_desc(&chan->vc);
+		if (next) {
+			write_desc_llp(chan->scratch_a,
+				       vd_to_axi_desc(next)->hw_desc[0].llp | lms);
+			wmb();
+			if (!axi_chan_is_hw_enable(chan))
+				axi_chan_start_first_queued(chan);
+		} else {
+			wmb();
+			axi_chan_scratch_reload_start(chan);
+		}
+		ret = 0;
+	}
+	spin_unlock_irqrestore(&chan->vc.lock, flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dw_axi_dma_resume_after_overflow);
+
+/*
+ * Test injector: the exact inverse of the resume above — clear LLI_VALID on both
+ * ping-pong scratch LLIs so the next FSM fetch is invalid and the channel halts,
+ * reproducing the descriptor-exhaustion wedge (SOCSW-5392) deterministically with
+ * the scratch buffer enabled. Used to validate whether the recovery needs the DMA resume
+ * or an IPI-only reset suffices. Not for production use.
+ */
+int dw_axi_dma_inject_halt(struct dma_chan *dchan)
+{
+	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	unsigned long flags;
+	int ret = -ENODEV;
+
+	spin_lock_irqsave(&chan->vc.lock, flags);
+	if (chan->has_scratch && chan->scratch_a) {
+		chan->scratch_a->lli->ctl_hi &= ~cpu_to_le32(CH_CTL_H_LLI_VALID);
+		wmb();
+		ret = 0;
+	}
+	spin_unlock_irqrestore(&chan->vc.lock, flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dw_axi_dma_inject_halt);
+
 static struct dma_async_tx_descriptor *
 dw_axi_dma_chan_prep_cyclic(struct dma_chan *dchan, dma_addr_t dma_addr,
 			    size_t buf_len, size_t period_len,
@@ -1297,6 +1565,116 @@ static int dw_axi_dma_chan_slave_config(struct dma_chan *dchan,
 	return 0;
 }
 
+/*
+ * Video-mode scratch recovery. The HW clears LLI_VALID as it consumes the
+ * scratch block; the idle LL self-loop has nothing to re-validate it once the
+ * user queue drains, so the HW fetches an invalid scratch LLI and raises
+ * INVALID_ERR. Restore a valid self-loop (queued buffers re-chain on the next
+ * issue_pending) and, when the error halted the channel, restart it — instead
+ * of leaving it disabled to storm "Bad descriptor".
+ * Caller holds chan->vc.lock.
+ */
+static void axi_chan_scratch_rearm(struct axi_dma_chan *chan, bool restart)
+{
+	u8 lms = chan->chip->dw->hdata->lms_axi_master;
+
+	if (!chan->scratch_a)
+		return;
+
+	write_desc_llp(chan->scratch_a, chan->scratch_a->llp | lms);	/* self-loop */
+	chan->scratch_a->lli->ctl_hi |= cpu_to_le32(CH_CTL_H_LLI_VALID);
+	wmb();
+	chan->reload_looping = false;	/* recovery drops back to the LL self-loop */
+	if (restart) {
+		write_chan_llp(chan, chan->scratch_a->llp | lms);
+		axi_chan_enable(chan);
+	}
+}
+
+/*
+ * Enter the auto-reload idle drain. The LL scratch self-loop self-invalidates
+ * (HW clears LLI_VALID each block-end -> INVALID_ERR storm, SOCSW-5392). Instead
+ * run the single scratch block in RELOAD multiblock: program it straight into the
+ * channel registers (no LLI), and the HW reloads SAR/DAR/CTL/BLOCK_TS and reruns
+ * it forever. With reload_frameboundary_exit the block also carries an IOC so each
+ * lap raises BLOCK_TRF; issue_pending switches back to the LL user chain at that
+ * frame boundary when buffers arrive. Caller holds chan->vc.lock.
+ */
+static void axi_chan_scratch_reload_start(struct axi_dma_chan *chan)
+{
+	struct axi_dma_hw_desc *s = chan->scratch_a;
+	struct axi_dma_chan_config config = {};
+	u64 irq_mask = DWAXIDMAC_IRQ_ALL_ERR;
+	u32 ctl_hi;
+
+	if (!s || !s->lli)
+		return;
+
+	/* Parked for IPI-overflow recovery: stay disabled until the resume. */
+	if (chan->ovf_quiesced)
+		return;
+
+	axi_chan_disable(chan);
+
+	/* video DEV_TO_MEM scratch config (mirrors axi_chan_block_xfer_start) but RELOAD */
+	config.dst_multblk_type = DWAXIDMAC_MBLK_TYPE_RELOAD;
+	config.src_multblk_type = DWAXIDMAC_MBLK_TYPE_RELOAD;
+	config.tt_fc = DWAXIDMAC_TT_FC_PER_TO_MEM_SRC;
+	config.prior = chan->chip->dw->hdata->priority[chan->id];
+	config.hs_sel_dst = DWAXIDMAC_HS_SEL_SW;
+	config.hs_sel_src = DWAXIDMAC_HS_SEL_HW;
+	config.src_per = chan->id;
+	config.wr_uid = CH_CFG_L_WR_UID_VAL;
+	config.dst_osr_limit = CH_CFG_H_DST_OST_LIMIT_VAL;
+	axi_chan_config_write(chan, &config);
+
+	/* Frame-boundary exit: IOC on the reload block so each lap (one frame) raises
+	 * BLOCK_TRF, which issue_pending/block_xfer_complete use to leave RELOAD cleanly. */
+	ctl_hi = s->lli->ctl_hi;
+	if (reload_frameboundary_exit) {
+		ctl_hi |= cpu_to_le32(CH_CTL_H_IOC_BLK_TFR_EN);
+		irq_mask |= DWAXIDMAC_IRQ_BLOCK_TRF;
+	}
+
+	/* RELOAD has no linked list: program the block into the channel directly */
+	axi_chan_iowrite64(chan, CH_BLOCK_TS, s->lli->block_ts_lo);
+	axi_chan_iowrite32(chan, CH_CTL_L, s->lli->ctl_lo);
+	axi_chan_iowrite32(chan, CH_CTL_H, ctl_hi);
+	axi_chan_iowrite64(chan, CH_SAR, s->lli->sar);
+	axi_chan_iowrite64(chan, CH_DAR, s->lli->dar);
+
+	axi_chan_irq_sig_set(chan, irq_mask);
+	axi_chan_irq_set(chan, irq_mask);
+
+	chan->reload_looping = true;
+	chan->reload_exit_pending = false;
+	axi_chan_enable(chan);
+}
+
+/*
+ * Video active turnaround, shared by both completion handlers. Complete the finished
+ * user buffer, then re-point the single scratch block at the next user head and
+ * re-validate it (HW clears LLI_VALID at each block-end). If the queue drained, switch
+ * to the RELOAD idle drain and return true so the caller stops. Caller holds vc.lock.
+ */
+static bool axi_chan_scratch_advance(struct axi_dma_chan *chan, struct virt_dma_desc *vd)
+{
+	u8 lms = chan->chip->dw->hdata->lms_axi_master;
+	struct virt_dma_desc *next;
+
+	list_del(&vd->node);
+	vchan_cookie_complete(vd);
+	next = vchan_next_desc(&chan->vc);
+	if (!next) {
+		axi_chan_scratch_reload_start(chan);	/* queue drained -> RELOAD idle */
+		return true;
+	}
+	write_desc_llp(chan->scratch_a, vd_to_axi_desc(next)->hw_desc[0].llp | lms);
+	chan->scratch_a->lli->ctl_hi |= cpu_to_le32(CH_CTL_H_LLI_VALID);
+	wmb();
+	return false;
+}
+
 static noinline void axi_chan_handle_err(struct axi_dma_chan *chan, u32 status)
 {
 	struct virt_dma_desc *vd;
@@ -1305,6 +1683,33 @@ static noinline void axi_chan_handle_err(struct axi_dma_chan *chan, u32 status)
 	spin_lock_irqsave(&chan->vc.lock, flags);
 
 	axi_chan_disable(chan);
+
+	if (chan->is_video_mode && chan->has_scratch) {
+		if (chan->ovf_quiesced) {
+			/* Parked: the CSI reset itself can fault the src side;
+			 * keep the queue for the coordinated restart. */
+			dev_dbg(chan2dev(chan),
+				"%s: DMA err 0x%08x during IPI recovery (parked)\n",
+				axi_chan_name(chan), status);
+			goto out;
+		}
+		/*
+		 * INVALID_ERR from the idle scratch loop self-invalidating, or a
+		 * transient src error during CSI/IPI recovery: drop the in-flight
+		 * buffer (if any), restore a valid scratch loop and restart. Do not
+		 * wedge the channel.
+		 */
+		vd = vchan_next_desc(&chan->vc);
+		if (vd) {
+			list_del(&vd->node);
+			vchan_cookie_complete(vd);
+		}
+		dev_err_ratelimited(chan2dev(chan),
+			"%s: video-mode DMA err 0x%08x; re-armed scratch loop\n",
+			axi_chan_name(chan), status);
+		axi_chan_scratch_reload_start(chan);	/* deep-idle drain is RELOAD */
+		goto out;
+	}
 
 	/* The bad descriptor currently is in the head of vc list */
 	vd = vchan_next_desc(&chan->vc);
@@ -1336,15 +1741,10 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 	int count = atomic_read(&chan->descs_allocated);
 	struct axi_dma_hw_desc *hw_desc;
 	struct axi_dma_desc *desc;
-	struct virt_dma_desc *vd_iter = NULL;
-	struct axi_dma_desc *desc_iter;
-	struct axi_dma_desc *prev_desc = NULL;
 	struct virt_dma_desc *vd;
 	unsigned long flags;
 	u64 llp;
-	u32 ctlhi;
 	int i;
-	int issued_count = 0;
 
 	dev_dbg(chan2dev(chan), "DMA XFER complete");
 
@@ -1358,6 +1758,11 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 	/* The completed descriptor currently is in the head of vc list */
 	vd = vchan_next_desc(&chan->vc);
 	if (!vd) {
+		if (chan->is_video_mode && chan->has_scratch) {
+			/* stray completion, queue drained — keep the idle loop valid */
+			axi_chan_scratch_rearm(chan, false);
+			goto out;
+		}
 		dev_err(chan2dev(chan), "BUG: %s, IRQ with no descriptors\n",
 			axi_chan_name(chan));
 		goto out;
@@ -1382,32 +1787,14 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 
 			axi_chan_enable(chan);
 		}
+	} else if (chan->is_video_mode && chan->has_scratch) {
+		/* video active turnaround: complete + re-point the scratch block (or RELOAD if drained) */
+		axi_chan_scratch_advance(chan, vd);
 	} else {
 		if (chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS)
 			mark_hwdesc_done(desc);
 
-		if (chan->is_video_mode)
-			list_for_each_entry(vd_iter, &chan->vc.desc_issued, node)
-				issued_count++;
-
-		if ((chan->is_video_mode) && (issued_count <= DMAC_MIN_DESCS_IN_LIST)
-			&& time_before(jiffies, chan->last_buffer + DMAC_DROP_TOUT * HZ)) {
-			/* If we do not have enough descriptors - return it back to the list */
-			chan->dropped++;
-			ctlhi = le32_to_cpu(desc->hw_desc[0].lli->ctl_hi);
-			desc->hw_desc[0].lli->ctl_hi = cpu_to_le32(ctlhi | CH_CTL_H_LLI_VALID);
-			write_desc_llp(desc->hw_desc, 0);
-			list_move_tail(&vd->node, &chan->vc.desc_issued);
-			list_for_each_entry(vd_iter, &chan->vc.desc_issued, node) {
-				desc_iter = vd_to_axi_desc(vd_iter);
-				if(prev_desc != NULL) {
-					llp = desc_iter->hw_desc->llp;
-					write_desc_llp(prev_desc->hw_desc, llp);
-				}
-				prev_desc = desc_iter;
-			}
-			wmb();
-		} else if((chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) ||
+		if ((chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) ||
 			((chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) &&
 			(get_next_hwdesc_number(desc) < 0)))
 		{
@@ -1424,76 +1811,59 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 
 out:
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
-
-	if (chan->is_video_mode) {
-		chan->completed++;
-		if ((!(chan->completed % 1000)) && (chan->dropped != chan->reported)) {
-			dev_warn(chan2dev(chan), "Processed %d frames, %d dropped", chan->completed, chan->dropped);
-			chan->reported = chan->dropped;
-		}
-	}
 }
 static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 {
 	struct virt_dma_desc *vd;
 	unsigned long flags;
-	struct axi_dma_desc *desc;
-	struct virt_dma_desc *vd_iter = NULL;
-	struct axi_dma_desc *desc_iter;
-	struct axi_dma_desc *prev_desc = NULL;
-	u64 llp;
-	u32 ctlhi;
-	int issued_count = 0;
 
 	dev_dbg(chan2dev(chan), "block transfer complete\n");
 
 	spin_lock_irqsave(&chan->vc.lock, flags);
 
+	/*
+	 * RELOAD idle lap (frame boundary) -- only fires when reload_frameboundary_exit
+	 * armed the block's IOC. If user buffers were spliced in (reload_exit_pending),
+	 * leave RELOAD HERE, at the frame boundary, and start the LL user chain -- never
+	 * the mid-frame disable in issue_pending, which desyncs the CSI glue and wedges
+	 * after a long park (SOCSW-5392). Otherwise the HW has auto-reloaded; stay idle.
+	 */
+	if (chan->is_video_mode && chan->has_scratch && chan->reload_looping) {
+		if (chan->reload_exit_pending && vchan_next_desc(&chan->vc)) {
+			axi_chan_disable(chan);
+			chan->reload_looping = false;
+			chan->reload_exit_pending = false;
+			axi_chan_start_first_queued(chan);
+		}
+		goto out;
+	}
+
 	/* The completed descriptor currently is in the head of vc list */
 	vd = vchan_next_desc(&chan->vc);
 	if (!vd) {
+		if (chan->is_video_mode && chan->has_scratch) {
+			/* stray completion, queue drained — keep the idle loop valid */
+			axi_chan_scratch_rearm(chan, false);
+			goto out;
+		}
 		dev_err(chan2dev(chan), "BUG: %s, IRQ with no descriptors\n",
 			axi_chan_name(chan));
 		goto out;
 	}
 
-	if (chan->is_video_mode)
-		list_for_each_entry(vd_iter, &chan->vc.desc_issued, node)
-			issued_count++;
+	if (chan->is_video_mode && chan->has_scratch) {
+		/* video active turnaround: complete + re-point the scratch block (or RELOAD if drained) */
+		axi_chan_scratch_advance(chan, vd);
+		goto out;
+	}
 
-	if ((chan->is_video_mode) && (issued_count <= DMAC_MIN_DESCS_IN_LIST)
-		&& time_before(jiffies, chan->last_buffer + DMAC_DROP_TOUT * HZ)) {
-		/* If we do not have enough descriptors - return it back to the list */
-		desc = vd_to_axi_desc(vd);
-		chan->dropped++;
-		ctlhi = le32_to_cpu(desc->hw_desc[0].lli->ctl_hi);
-		desc->hw_desc[0].lli->ctl_hi = cpu_to_le32(ctlhi | CH_CTL_H_LLI_VALID);
-		write_desc_llp(desc->hw_desc, 0);
-		list_move_tail(&vd->node, &chan->vc.desc_issued);
-		list_for_each_entry(vd_iter, &chan->vc.desc_issued, node) {
-			desc_iter = vd_to_axi_desc(vd_iter);
-			if(prev_desc != NULL) {
-				llp = desc_iter->hw_desc->llp;
-				write_desc_llp(prev_desc->hw_desc, llp);
-			}
-			prev_desc = desc_iter;
-		}
-		wmb();
-	} else if(chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) {
-		/* Remove the completed descriptor from issued list before completing */
+	/* Non-video clients: complete the finished descriptor normally. */
+	if (chan->chip->dw->hdata->xfer_mode != DWAXIDMAC_MBLK_TYPE_CONTIGUOUS) {
 		list_del(&vd->node);
 		vchan_cookie_complete(vd);
 	}
 out:
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
-
-	if (chan->is_video_mode) {
-		chan->completed++;
-		if ((!(chan->completed % 1000)) && (chan->dropped != chan->reported)) {
-			dev_warn(chan2dev(chan), "Processed %d frames, %d dropped", chan->completed, chan->dropped);
-			chan->reported = chan->dropped;
-		}
-	}
 }
 
 static void dw_axi_dma_process_interrupt(struct axi_dma_chan *chan)
@@ -1587,6 +1957,9 @@ static int dma_chan_terminate_all(struct dma_chan *dchan)
 	unsigned long flags;
 	u32 val;
 	int ret;
+	void *free_vaddr;
+	dma_addr_t free_dma;
+	size_t free_size;
 	LIST_HEAD(to_abort);
 	LIST_HEAD(to_free);
 
@@ -1630,7 +2003,13 @@ static int dma_chan_terminate_all(struct dma_chan *dchan)
 	chan->dropped = 0;
 	chan->reported = 0;
 
+	/* terminate must leave a reusable channel: drop scratch/RELOAD state. */
+	__dw_axi_dma_teardown_scratch(chan, &free_vaddr, &free_dma, &free_size);
+
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
+
+	if (free_vaddr)
+		dma_free_coherent(chan->chip->dev, free_size, free_vaddr, free_dma);
 
 	dev_vdbg(dchan2dev(dchan), "terminated: %s\n", axi_chan_name(chan));
 
@@ -2021,10 +2400,13 @@ static int dw_probe(struct platform_device *pdev)
 	}
 
 	/* Set capabilities */
-	dma_cap_set(DMA_MEMCPY, dw->dma.cap_mask);
+	if (!hdata->hardcoded_handshake)
+		dma_cap_set(DMA_MEMCPY, dw->dma.cap_mask);
 	dma_cap_set(DMA_SLAVE, dw->dma.cap_mask);
 	dma_cap_set(DMA_CYCLIC, dw->dma.cap_mask);
 	dma_cap_set(DMA_INTERLEAVE, dw->dma.cap_mask);
+	if (hdata->hardcoded_handshake)
+		dma_cap_set(DMA_PRIVATE, dw->dma.cap_mask);
 
 	/* DMA capabilities */
 	dw->dma.chancnt = hdata->nr_channels;

@@ -22,7 +22,7 @@
 
 
 // stub-linux-split-dual-r1-1T-dummy-1M-dummy.set
-#define FIRMWARE_CONTEXT_NUMBER 4
+#define FIRMWARE_CONTEXT_NUMBER 16
 #define HW_REVISION 101397
 #define PHY_ADDR_ISP 0x04220000
 #define PHY_ADDR_FPGA 0x60600000
@@ -58,7 +58,11 @@
 #define ISP_HAS_ML_BIST_FSM 1
 #define ISP_HAS_RAW_FE_FSM 1
 #define KERNEL_MODULE 1
-#define ISP_HAS_CONNECTION_BUFFER 1
+/* Retired with the V4L2 control plane (SOCSW-5578): the firmware
+ * command-buffer ring is no longer fed — control goes through V4L2 CIDs
+ * which call acamera_command() synchronously. Disabling it stops the
+ * 30 ms connection_thread idle poll. */
+#define ISP_HAS_CONNECTION_BUFFER 0
 #define FW_HAS_CONTROL_CHANNEL 1
 #define ISP_RTL_VERSION_R 1
 #define ISP_RTL_VERSION_P 2

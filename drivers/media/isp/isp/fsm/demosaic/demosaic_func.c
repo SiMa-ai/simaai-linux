@@ -23,14 +23,14 @@
 static void demosaic_load_configuration( demosaic_fsm_ptr_t p_fsm )
 {
     if ( !calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ),
-                                CALIBRATION_DEMOSAIC_CONFIG ) ) {
-        LOG( LOG_ERR, "CALIBRATION_DEMOSAIC_CONFIG does not exist for this context." );
+                                MODALIX_ISP_CALIB_DEMOSAIC_CONFIG ) ) {
+        LOG( LOG_ERR, "MODALIX_ISP_CALIB_DEMOSAIC_CONFIG does not exist for this context." );
         return;
     }
 
     const uint32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
     const uint16_t *config = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ),
-                                                    CALIBRATION_DEMOSAIC_CONFIG );
+                                                    MODALIX_ISP_CALIB_DEMOSAIC_CONFIG );
     acamera_isp_demosaic_aa_offset_write( isp_base, config[0] );
     acamera_isp_demosaic_aa_slope_write( isp_base, config[1] );
     acamera_isp_demosaic_aa_thresh_write( isp_base, config[2] );
@@ -64,8 +64,8 @@ static void demosaic_load_configuration( demosaic_fsm_ptr_t p_fsm )
 static void demosaic_weight_lut_reload( demosaic_fsm_ptr_t p_fsm )
 {
 
-    const uint8_t *demosaic_lut = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DEMOSAIC );
-    const uint32_t demosaic_lut_size = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DEMOSAIC );
+    const uint8_t *demosaic_lut = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DEMOSAIC );
+    const uint32_t demosaic_lut_size = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DEMOSAIC );
 
     uint32_t i;
     for ( i = 0; i < demosaic_lut_size; i++ ) {
@@ -81,7 +81,8 @@ static void demosaic_weight_lut_reload( demosaic_fsm_ptr_t p_fsm )
  */
 void demosaic_init( demosaic_fsm_ptr_t p_fsm )
 {
-    acamera_isp_pipeline_bypass_demosaic_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, 0 );
+    /* bypass driven by the IPA (isp_config / ISP_BYPASS_CONFIG) */
+    (void)p_fsm;
 }
 
 /**

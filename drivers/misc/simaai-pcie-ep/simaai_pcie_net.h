@@ -14,16 +14,6 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 
-#define SIMA_NET_MTU	(65536)
-/*
- * This needs to be MTU + 16 bytes for ethernet header
- */
-#define TX_BUFSZ	(SIMA_NET_MTU + sizeof(struct ethhdr))
-#define RX_BUFSZ	(SIMA_NET_MTU + sizeof(struct ethhdr))
-
-#define N_TXBUF		4096
-#define N_RXBUF		4096
-
 struct si_pkt_desc {
 	uint32_t len;
 	uint32_t maxlen;
@@ -41,6 +31,9 @@ struct si_net_hwdata {
 	u32 tx_tail;
 	u32 rx_head;
 	u32 rx_tail;
+	u32 mtu;	/* Buffer size will be this + sizeof(struct ethhdr) */
+	u32 n_txbuf;
+	u32 n_rxbuf;
 };
 
 #endif

@@ -22,7 +22,6 @@
 #include "acamera_isp_ctx.h"
 #include "acamera_logger.h"
 #include "acamera_math.h"
-#include "sbuf.h"
 
 #undef LOG_MODULE
 #define LOG_MODULE LOG_MODULE_IRIDIX8_MANUAL
@@ -37,7 +36,7 @@ void iridix_config( iridix_fsm_t *p_fsm )
 
     // Initialize parameters
     set_context_param( p_ictx, SYSTEM_IRIDIX_STRENGTH_TARGET_PARAM, p_fsm->strength_target );
-    set_context_param( p_ictx, SYSTEM_MAXIMUM_IRIDIX_STRENGTH_PARAM, calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_STRENGTH_MAXIMUM )[0] );
+    set_context_param( p_ictx, SYSTEM_MAXIMUM_IRIDIX_STRENGTH_PARAM, calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_STRENGTH_MAXIMUM )[0] );
 
     // TODO: to be deleted.
     p_fsm->repeat_irq_mask = 0;
@@ -49,8 +48,8 @@ void iridix_reload_calibration( iridix_fsm_t *p_fsm )
     uint16_t i;
 
     /* Configure the IRIDIX*/
-    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX8_EXTENDED_CONTROL ) ) {
-        const uint32_t *config = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX8_EXTENDED_CONTROL );
+    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX8_EXTENDED_CONTROL ) ) {
+        const uint32_t *config = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX8_EXTENDED_CONTROL );
         acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
 
         /* Do not change the order of this init sequence. */
@@ -80,68 +79,48 @@ void iridix_reload_calibration( iridix_fsm_t *p_fsm )
         p_fsm->luma_th = *config++;
 #endif
     } else {
-        LOG( LOG_ERR, "CALIBRATION_IRIDIX8_EXTENDED_CONTROL is missing, module will not be configured correctly!" );
+        LOG( LOG_ERR, "MODALIX_ISP_CALIB_IRIDIX8_EXTENDED_CONTROL is missing, module will not be configured correctly!" );
     }
 
 
-    const uint32_t lut_element_size = calib_mgr_lut_width( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_ASYMMETRY );
+    const uint32_t lut_element_size = calib_mgr_lut_width( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY );
 
     // 32 bit tables
     if ( lut_element_size == 4 ) {
 
-        const uint32_t *lut_data = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_ASYMMETRY );
-        for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_ASYMMETRY ); i++ ) {
+        const uint32_t *lut_data = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY );
+        for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY ); i++ ) {
             acamera_isp_iridix_lut_asymmetry_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, lut_data[i] );
         }
         // 16 bit tables
     } else if ( lut_element_size == 2 ) {
 
-        const uint16_t *lut_data = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_ASYMMETRY );
-        for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_ASYMMETRY ); i++ ) {
+        const uint16_t *lut_data = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY );
+        for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY ); i++ ) {
             acamera_isp_iridix_lut_asymmetry_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, lut_data[i] );
         }
     } else {
-        LOG( LOG_ERR, "Unsupported CALIBRATION_IRIDIX_ASYMMETRY LUT element size: expected 4 or 2 bytes, got %d bytes", lut_element_size );
+        LOG( LOG_ERR, "Unsupported MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY LUT element size: expected 4 or 2 bytes, got %d bytes", lut_element_size );
     }
 
     // Update gtm tables
-    const uint32_t *lut_gtm_x = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_GTM_LUT_X );
-    const uint32_t *lut_gtm_y = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_GTM_LUT_Y );
+    const uint32_t *lut_gtm_x = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_X );
+    const uint32_t *lut_gtm_y = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_Y );
 
-    for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_GTM_LUT_X ); i++ ) {
+    for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_X ); i++ ) {
         acamera_isp_iridix_lut_globaltm_x_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, lut_gtm_x[i] );
     }
 
-    for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_GTM_LUT_Y ); i++ ) {
+    for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_Y ); i++ ) {
         acamera_isp_iridix_lut_globaltm_y_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, lut_gtm_y[i] );
     }
 }
 
-/* This function just gets an empty sbuf and sets its status to done,
- * so that it keeps the sbuf status to loop correctly.
- */
+/* Legacy sbuf-ring churn placeholder; with the sbuf ring retired this
+ * is a no-op. Iridix is driven by the V4L2 META_OUTPUT apply path. */
 void iridix_update_algo( iridix_fsm_t *p_fsm )
 {
-    struct sbuf_item sbuf;
-
-    uint32_t fw_id = ACAMERA_FSM_GET_FW_ID( p_fsm );
-
-    system_memset( &sbuf, 0, sizeof( sbuf ) );
-    sbuf.buf_type = SBUF_TYPE_IRIDIX;
-    sbuf.buf_status = SBUF_STATUS_DATA_EMPTY;
-
-    if ( sbuf_get_item( fw_id, &sbuf ) ) {
-        LOG( LOG_ERR, "Error: Failed to get iridix sbuf, return." );
-        return;
-    }
-
-    sbuf_iridix_t *p_sbuf_iridix = (sbuf_iridix_t *)sbuf.buf_base;
-    (void)p_sbuf_iridix->digital_gain; //Ignore digital gain, currently unused.
-
-    sbuf.buf_status = SBUF_STATUS_DATA_DONE;
-    if ( sbuf_set_item( fw_id, &sbuf ) ) {
-        LOG( LOG_ERR, "Error: Failed to set sbuf, return." );
-    }
+    (void)p_fsm;
 }
 
 void iridix_update_hw( iridix_fsm_t *p_fsm )
@@ -187,7 +166,7 @@ void iridix_update_hw( iridix_fsm_t *p_fsm )
         acamera_isp_iridix_collection_correction_write( p_ictx->settings.isp_base, diff );
 
         // Time filter for iridix strength.
-        const uint8_t iridix_avg_coeff = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_IRIDIX_AVG_COEF )[0];
+        const uint8_t iridix_avg_coeff = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_AVG_COEF )[0];
         uint16_t iridix_strength = p_fsm->strength_target;
         if ( iridix_avg_coeff > 1 ) {
             ( (iridix_fsm_ptr_t)p_fsm )->strength_avg += p_fsm->strength_target - p_fsm->strength_avg / iridix_avg_coeff; // Division by zero is checked.

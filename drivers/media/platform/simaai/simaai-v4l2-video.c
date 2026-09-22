@@ -27,7 +27,7 @@
 
 #include "simaai-v4l2-vdma.h"
 
-#define N_BUFFERS			8
+#define MIN_CAPTURE_BUFFERS		8
 #define MAX_CAP_DEVICES			4
 
 #define MAX_WIDTH			4096
@@ -318,6 +318,12 @@ vidioc_try_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f)
 	f->fmt.pix.bytesperline = (f->fmt.pix.width * fmt->depth) >> 3;
 	f->fmt.pix.sizeimage = f->fmt.pix.height * f->fmt.pix.bytesperline + VDMA_FRAME_METADATA_SIZE;
 	f->fmt.pix.colorspace = V4L2_COLORSPACE_RAW;
+	/* Fixed colorimetry; don't let raw userspace values leak back via g_fmt. */
+	f->fmt.pix.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	f->fmt.pix.quantization = V4L2_QUANTIZATION_DEFAULT;
+	f->fmt.pix.xfer_func = V4L2_XFER_FUNC_DEFAULT;
+	f->fmt.pix.flags = 0;
+	f->fmt.pix.priv = 0;
 	return 0;
 }
 
@@ -336,15 +342,11 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 	if (ret)
 		return ret;
 
+	/* try_fmt already sanitized the format and computed the sizes. */
 	dev->fmt = v4l2vid_find_format(f);
-	dev_fmt_pix->pixelformat = f->fmt.pix.pixelformat;
-	dev_fmt_pix->width = f->fmt.pix.width;
-	dev_fmt_pix->height  = f->fmt.pix.height;
-	dev_fmt_pix->field = f->fmt.pix.field;
-	dev_fmt_pix->bytesperline = (dev_fmt_pix->width * dev->fmt->depth) >> 3;
-	dev_fmt_pix->sizeimage =
-			dev_fmt_pix->height * dev_fmt_pix->bytesperline + VDMA_FRAME_METADATA_SIZE;
+	*dev_fmt_pix = f->fmt.pix;
 
+	memset(&fmt, 0, sizeof(fmt));
 	fmt.format.colorspace = V4L2_COLORSPACE_RAW;
 	fmt.format.code = dev->fmt->mbus_code;
 
@@ -352,6 +354,11 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 	fmt.format.height = dev_fmt_pix->height;
 	fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 	fmt.pad = 0;
+	fmt.format.field = dev_fmt_pix->field;
+
+	ret = v4l2_subdev_call_state_active(dev->ep_sd, pad, set_fmt, &fmt);
+	if (ret)
+		dev_err(dev->dev, "Failed to set VDMA format: %d\n", ret);
 
 	return ret;
 }
@@ -522,7 +529,31 @@ static int queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
 		dev_err(dev->dev, "Configured Image size is zero\n");
 		return -EINVAL;
 	}
-	*nbuffers = N_BUFFERS;
+	/*
+	 * MIN_CAPTURE_BUFFERS is a floor, not a queue size.  vb2 calls
+	 * queue_setup() with *nbuffers holding the count userspace asked for,
+	 * and the driver may only raise it.  Assigning here instead turned the
+	 * minimum into a cap and silently handed every caller an 8-deep queue,
+	 * however many it had requested.
+	 *
+	 * That breaks any consumer that sizes its queue for the mode it runs.
+	 * libcamera asks for 32 capture buffers on the IMX568 path and treats a
+	 * short allocation as fatal, so the clamp failed stream configuration
+	 * outright with "Not enough buffers provided by V4L2VideoDevice.
+	 * Wanted 32, got 8" before a single frame was captured.
+	 *
+	 * Depth here is not merely latency headroom.  The sensor is a
+	 * free-running producer that cannot be back-pressured: if the consumer
+	 * is holding every queued buffer, VDMA has nowhere to land the next
+	 * frame and falls into its scratch/error path, so a short queue surfaces
+	 * as dropped frames rather than as flow control.  High-bandwidth modes
+	 * such as IMX568 2432x2048 RAW12 hit that window first.
+	 *
+	 * Honouring a larger request stays bounded, because vb2 still enforces
+	 * q->max_num_buffers.  Keep this a floor - never assign to *nbuffers.
+	 */
+	if (*nbuffers < MIN_CAPTURE_BUFFERS)
+		*nbuffers = MIN_CAPTURE_BUFFERS;
 	*nplanes = 1;
 	sizes[0] = size;
 
@@ -544,12 +575,24 @@ static int buffer_prepare(struct vb2_buffer *vb)
 static int start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct v4l2vid_dev *dev = vb2_get_drv_priv(vq);
+	struct vb2_buffer *vb;
+	unsigned int i;
 	int ret;
 
 	ret = v4l2_subdev_enable_streams(dev->ep_sd, dev->ep_pad,
 		get_vdma_channel_mask(dev->vdma_channel));
 	if (ret) {
 		dev_err(dev->dev, "Failed to enable stream on EP subdevice: %d", ret);
+		/*
+		 * The VDMA abort path returns submitted descriptors in QUEUED
+		 * state.  Reclaim descriptors that did not reach that path as
+		 * well, so vb2 can retry the queue after a failed STREAMON.
+		 */
+		for (i = 0; i < vq->max_num_buffers; i++) {
+			vb = vb2_get_buffer(vq, i);
+			if (vb && vb->state == VB2_BUF_STATE_ACTIVE)
+				vb2_buffer_done(vb, VB2_BUF_STATE_QUEUED);
+		}
 		return ret;
 	}
 
@@ -762,10 +805,10 @@ static const struct v4l2_async_notifier_operations v4l2vid_notify_ops = {
 };
 
 static int v4l2vid_set_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_state *sd_state,
-		struct v4l2_subdev_format *sdformat)
+			   struct v4l2_subdev_state *sd_state,
+			   struct v4l2_subdev_format *sdformat)
 {
-	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_mbus_framefmt *sink_fmt, *src_fmt;
 
 	/*
 	 * The VDMA can't transcode in any way, the source format can't be
@@ -774,20 +817,19 @@ static int v4l2vid_set_fmt(struct v4l2_subdev *sd,
 	if (sdformat->pad != 0)
 		return -EINVAL;
 
-	fmt = v4l2_subdev_state_get_format(sd_state, sdformat->pad,
-			sdformat->stream);
-	if (!fmt)
+	sink_fmt = v4l2_subdev_state_get_format(sd_state, sdformat->pad,
+						sdformat->stream);
+	if (!sink_fmt)
 		return -EINVAL;
-
-	*fmt = sdformat->format;
+	*sink_fmt = sdformat->format;
 
 	/* Propagate the format from sink stream to source stream */
-	fmt = v4l2_subdev_state_get_opposite_stream_format(sd_state, sdformat->pad,
-			sdformat->stream);
-	if (!fmt)
+	src_fmt = v4l2_subdev_state_get_opposite_stream_format(sd_state,
+							       sdformat->pad,
+							       sdformat->stream);
+	if (!src_fmt)
 		return -EINVAL;
-
-	*fmt = sdformat->format;
+	*src_fmt = sdformat->format;
 
 	return 0;
 }

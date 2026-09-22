@@ -28,19 +28,19 @@ static void noise_profile_lut_reload( noise_profile_fsm_ptr_t p_fsm )
     acamera_calib_mgr_entry_t *cm_ptr = ACAMERA_FSM2CM_PTR( p_fsm );
 
     const uint8_t *np_lin = NULL;
-    const uint8_t *np_lut = calib_mgr_u8_lut_get( cm_ptr, CALIBRATION_NOISE_PROFILE );
+    const uint8_t *np_lut = calib_mgr_u8_lut_get( cm_ptr, MODALIX_ISP_CALIB_NOISE_PROFILE );
 
-#if defined( CALIBRATION_WDR_NP_LUT ) && defined( ACAMERA_ISP_NOISE_PROFILE_WDR_VS_WEIGHT_LUT_DEFAULT ) && defined( ACAMERA_ISP_NOISE_PROFILE_WDR_S_WEIGHT_LUT_DEFAULT )
+#if defined( MODALIX_ISP_CALIB_WDR_NP_LUT ) && defined( ACAMERA_ISP_NOISE_PROFILE_WDR_VS_WEIGHT_LUT_DEFAULT ) && defined( ACAMERA_ISP_NOISE_PROFILE_WDR_S_WEIGHT_LUT_DEFAULT )
     const uint32_t wdr_mode = get_context_param( p_ictx, SENSOR_WDR_MODE_PARAM );
 
     if ( ( wdr_mode != WDR_MODE_LINEAR ) && ( wdr_mode != WDR_MODE_NATIVE ) ) {
-        np_lin = calib_mgr_u8_lut_get( cm_ptr, CALIBRATION_WDR_NP_LUT );
+        np_lin = calib_mgr_u8_lut_get( cm_ptr, MODALIX_ISP_CALIB_WDR_NP_LUT );
     }
 #endif
 
     int32_t i;
 
-    for ( i = 0; i < calib_mgr_lut_len( cm_ptr, CALIBRATION_NOISE_PROFILE ); i++ ) {
+    for ( i = 0; i < calib_mgr_lut_len( cm_ptr, MODALIX_ISP_CALIB_NOISE_PROFILE ); i++ ) {
 
 #ifdef ACAMERA_ISP_NOISE_PROFILE_LUT_WEIGHT_LUT_DEFAULT
         acamera_isp_noise_profile_lut_weight_lut_write( isp_base, i, np_lut[i] );

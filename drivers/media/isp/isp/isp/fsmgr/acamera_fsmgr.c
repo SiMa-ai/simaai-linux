@@ -84,9 +84,6 @@ void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
     p_fsmgr->defect_pixel_fsm.p_fsmgr = p_fsmgr;
     p_fsmgr->defect_pixel_fsm.state = defect_pixel_state_invalid;
     defect_pixel_fsm_clear( &( p_fsmgr->defect_pixel_fsm ) );
-    p_fsmgr->sbuf_fsm.p_fsmgr = p_fsmgr;
-    p_fsmgr->sbuf_fsm.state = sbuf_state_invalid;
-    sbuf_fsm_clear( &( p_fsmgr->sbuf_fsm ) );
     p_fsmgr->isp_wrapper_fsm.p_fsmgr = p_fsmgr;
     p_fsmgr->isp_wrapper_fsm.state = isp_wrapper_state_invalid;
     isp_wrapper_fsm_clear( &( p_fsmgr->isp_wrapper_fsm ) );
@@ -243,13 +240,6 @@ void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
     defect_pixel_fsm_switch_state( &( p_fsmgr->defect_pixel_fsm ), defect_pixel_state_initialized );
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( DEFECT_PIXEL_PERF_SECTION, 1 );
-#endif /* ACAMERA_ISP_PROFILING */
-#if ACAMERA_ISP_PROFILING
-    acamera_profiler_start( SBUF_PERF_SECTION );
-#endif /* ACAMERA_ISP_PROFILING */
-    sbuf_fsm_switch_state( &( p_fsmgr->sbuf_fsm ), sbuf_state_initialized );
-#if ACAMERA_ISP_PROFILING
-    acamera_profiler_stop( SBUF_PERF_SECTION, 1 );
 #endif /* ACAMERA_ISP_PROFILING */
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( ISP_WRAPPER_PERF_SECTION );
@@ -438,13 +428,6 @@ void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
     defect_pixel_fsm_process_state( &( p_fsmgr->defect_pixel_fsm ) );
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( DEFECT_PIXEL_PERF_SECTION, 1 );
-#endif /* ACAMERA_ISP_PROFILING */
-#if ACAMERA_ISP_PROFILING
-    acamera_profiler_start( SBUF_PERF_SECTION );
-#endif /* ACAMERA_ISP_PROFILING */
-    sbuf_fsm_process_state( &( p_fsmgr->sbuf_fsm ) );
-#if ACAMERA_ISP_PROFILING
-    acamera_profiler_stop( SBUF_PERF_SECTION, 1 );
 #endif /* ACAMERA_ISP_PROFILING */
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( ISP_WRAPPER_PERF_SECTION );
@@ -792,16 +775,6 @@ int acamera_fsmgr_process_event( acamera_fsmgr_t *p_fsmgr )
     acamera_profiler_stop( DEFECT_PIXEL_PERF_SECTION, fsm_event_processed_flag );
 #endif
 
-// SBUF FSM
-#if ACAMERA_ISP_PROFILING
-    acamera_profiler_start( SBUF_PERF_SECTION );
-#endif
-    fsm_event_processed_flag = sbuf_fsm_process_event( &( p_fsmgr->sbuf_fsm ), event_id );
-    global_event_processed_flag |= fsm_event_processed_flag;
-#if ACAMERA_ISP_PROFILING
-    acamera_profiler_stop( SBUF_PERF_SECTION, fsm_event_processed_flag );
-#endif
-
 // ISP_WRAPPER FSM
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_start( ISP_WRAPPER_PERF_SECTION );
@@ -873,7 +846,19 @@ int acamera_fsmgr_process_event( acamera_fsmgr_t *p_fsmgr )
 #endif
 
     if ( !global_event_processed_flag ) {
-        return -1;
+        switch ( event_id ) {
+        case event_id_fsm_config:
+        case event_id_fsm_start:
+        case event_id_fsm_stop:
+        case event_id_fsm_deinit:
+            /* All FSMs declining a state event means they already reached the
+             * target state; still return it so the context state follows,
+             * else the context wedges (e.g. START it can never leave). */
+            LOG( LOG_WARNING, "state event %d unclaimed by all FSMs; completing transition", event_id );
+            return event_id;
+        default:
+            return -1;
+        }
     }
 
     return event_id;

@@ -37,12 +37,22 @@ enum _histogram_state_t {
 
 typedef enum _histogram_state_t histogram_state_t;
 
+#include "acamera_histogram_mem_config.h"
 #include "acamera_isp_core_settings.h"
 
 #define AE_HISTOGRAM_TAP_AFTER_WDRGAIN 1     // AE is running on metering histogram (be after wdra gain)
 #define AE_HISTOGRAM_TAP_AFTER_FS 2          // AE is running on metering histogram (be after frame stitch)
 #define AE_HISTOGRAM_TAP_AFTER_DECOMPANDER 3 // AE is running on metering histogram (be after decompander)
 #define AE_HISTOGRAM_TAP_AFTER_SHADING 4     // AE is running on metering histogram (be after shading)
+
+/* Size of one histogram set's MMIO window in u32 records: half-as-many
+ * because each MMIO word packs two 16-bit bins, plus a fixed-size tail
+ * for the meta/CRC area. Lives on the per-context FSM so concurrent
+ * stats events from different ISP contexts don't share a scratch
+ * buffer.
+ */
+#define HISTOGRAM_BUF_LEN \
+    ( ( ISP_METERING_HISTOGRAM_SIZE_BINS / 2 ) + ISP_METERING_HISTOGRAM_TAIL_SIZE_REGS )
 
 void histogram_init( histogram_fsm_ptr_t p_fsm );
 void histogram_config( histogram_fsm_ptr_t p_fsm );
@@ -59,6 +69,13 @@ struct _histogram_fsm_t {
     uint32_t fullhist_sum;
     uint8_t hist_ready_mask;
     uint8_t hist_is_on_sqrt;
+
+    /* Per-context snapshot of the ISP histogram MMIO window. Read once
+     * per AE stats-ready interrupt by ae_read_full_histogram_data() so
+     * we can both CRC-verify and decode bins without re-reading MMIO
+     * twice. Per-FSM so concurrent stats events from different ISP
+     * contexts don't race on a shared scratch buffer. */
+    uint32_t hist_buf[ HISTOGRAM_BUF_LEN ];
 };
 
 

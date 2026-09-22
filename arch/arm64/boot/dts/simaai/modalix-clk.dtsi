@@ -10,6 +10,13 @@
 		#size-cells = <2>;
 		ranges;
 
+		ref_osc: oscillator {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <33333333>; /* 33.33 MHz */
+			clock-output-names = "refosc";
+		};
+
 		sys_clk: sysclk {
 			compatible = "fixed-clock";
 			#clock-cells = <0>;
@@ -222,6 +229,35 @@
 			#clock-cells = <0>;
 			clock-div = <5>;
 			clock-mult = <4>;
+		};
+		clkc: clock-controller@ff00000 {
+			compatible = "simaai,clkc-prc";
+			reg = <0x0 0x0ff00000 0x0 0x758>;
+			clocks = <&ref_osc>;
+			simaai,ignore-unused = <0xf>;
+			#clock-cells = <1>;
+		};
+
+		mla_opp_table: opp-table-mla {
+			compatible = "operating-points-v2";
+
+			opp-500000000 { opp-hz = /bits/ 64 <500000000>; };
+			opp-600000000 { opp-hz = /bits/ 64 <600000000>; };
+			opp-700000000 { opp-hz = /bits/ 64 <700000000>; };
+			opp-800000000 { opp-hz = /bits/ 64 <800000000>; };
+			opp-900000000 { opp-hz = /bits/ 64 <900000000>; };
+			opp-1000000000 { opp-hz = /bits/ 64 <1000000000>; };
+		};
+
+		isp_opp_table: opp-table-isp {
+			compatible = "operating-points-v2";
+
+			opp-200000000 { opp-hz = /bits/ 64 <200000000>; };
+			opp-400000000 { opp-hz = /bits/ 64 <400000000>; };
+			opp-600000000 { opp-hz = /bits/ 64 <600000000>; };
+			opp-800000000 { opp-hz = /bits/ 64 <800000000>; };
+			opp-1000000000 { opp-hz = /bits/ 64 <1000000000>; };
+			opp-1200000000 { opp-hz = /bits/ 64 <1200000000>; };
 		};
 	};
 };

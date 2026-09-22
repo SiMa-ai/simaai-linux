@@ -23610,6 +23610,12 @@ M:	Yurii Konovalenko <orientua@gmail.com>
 S:	Supported
 F:	Documentation/devicetree/bindings/clock/simaai,clkdiv-sio.yaml
 
+SIMAAI PRC CLOCK DRIVER
+M:	Bharanidharan Ramalingam <bharanidharan.ramalingam@sima.ai>
+S:	Supported
+F:	Documentation/devicetree/bindings/clock/simaai,clkc-prc.yaml
+F:	include/dt-bindings/clock/simaai,clkc-prc.h
+
 SIMAAI SIO AND NVS PINCTRL AND PINMUX DRIVER
 M:	Yurii Konovalenko <orientua@gmail.com>
 S:	Supported
@@ -23641,6 +23647,17 @@ F:	drivers/media/platform/simaai/simaai-v4l2-vdma.c
 F:	drivers/media/platform/simaai/simaai-v4l2-vdma.h
 F:	drivers/media/platform/simaai/simaai-v4l2-video.c
 F:	drivers/phy/dw/
+
+SIMAAI HPI MAILBOX DRIVER
+M:	Yurii Konovalenko <yurii.konovalenko@sima.ai>
+M:	Bharanidharan Ramalingam <bharanidharan.ramalingam@sima.ai>
+S:	Supported
+F:	Documentation/devicetree/bindings/mailbox/simaai,hpi.yaml
+F:	Documentation/devicetree/bindings/mailbox/simaai,modalix-hpi-client.yaml
+F:	drivers/mailbox/simaai-hpi-client.c
+F:	drivers/mailbox/simaai-hpi.c
+F:	include/linux/simaai-hpi.h
+F:	include/uapi/linux/simaai/simaai-hpi.h
 
 SIMPLEFB FB DRIVER
 M:	Hans de Goede <hansg@kernel.org>
@@ -24059,6 +24076,17 @@ S:	Maintained
 T:	git git://linuxtv.org/media.git
 F:	Documentation/devicetree/bindings/media/i2c/sony,imx415.yaml
 F:	drivers/media/i2c/imx415.c
+
+SONY IMX568 GMSL CAMERA DRIVER
+M:	Kishore Kumar <kishore.kumar@e-consystems.com>
+M:	Nileshkumar Raghuvanshi <nilesh.r@sima.ai>
+L:	linux-media@vger.kernel.org
+S:	Maintained
+T:	git git://linuxtv.org/media.git
+F:	Documentation/devicetree/bindings/media/i2c/sony,imx568-gmsl.yaml
+F:	drivers/media/i2c/econ_imx568_gmsl.c
+F:	drivers/media/i2c/econ_imx568_gmsl.h
+F:	drivers/media/i2c/econ_imx568_serdes.h
 
 SONY MEMORYSTICK SUBSYSTEM
 M:	Maxim Levitsky <maximlevitsky@gmail.com>

@@ -10,6 +10,7 @@
 
 #define MXIC_NOR_OP_RD_CR2	0x71		/* Read configuration register 2 opcode */
 #define MXIC_NOR_OP_WR_CR2	0x72		/* Write configuration register 2 opcode */
+#define MXIC_NOR_OP_8DTRD	0xee		/* Octa I/O DTR read opcode */
 #define MXIC_NOR_ADDR_CR2_MODE	0x00000000	/* CR2 address for setting spi/sopi/dopi mode */
 #define MXIC_NOR_ADDR_CR2_DC	0x00000300	/* CR2 address for setting dummy cycles */
 #define MXIC_NOR_REG_DOPI_EN	0x2		/* Enable Octal DTR */
@@ -94,6 +95,27 @@ static const struct spi_nor_fixups macronix_qpp4b_fixups = {
 
 static const struct spi_nor_fixups mx25l3255e_fixups = {
 	.late_init = mx25l3255e_late_init_fixups,
+};
+
+static int mx25um51245g_late_init(struct spi_nor *nor)
+{
+	/*
+	 * No-SFDP OctaFlash configured for 8D-8D-8D (OPI DTR). The manufacturer
+	 * late_init already wires set_octal_dtr; fill in the part specifics:
+	 *  - command extension is the inverted opcode (e.g. EEh -> 11h),
+	 *  - OPI is entered via a volatile CR2 write (recovers on power-down),
+	 *  - use the 8DTRD octal-DTR read opcode (datasheet 10-14), not the
+	 *    generic 0x0B fast-read the no-SFDP path installs.
+	 */
+	nor->cmd_ext_type = SPI_NOR_EXT_INVERT;
+	nor->flags |= SNOR_F_IO_MODE_EN_VOLATILE;
+	nor->params->reads[SNOR_CMD_READ_8_8_8_DTR].opcode = MXIC_NOR_OP_8DTRD;
+
+	return 0;
+}
+
+static const struct spi_nor_fixups mx25um51245g_fixups = {
+	.late_init = mx25um51245g_late_init,
 };
 
 static const struct flash_info macronix_nor_parts[] = {
@@ -236,6 +258,17 @@ static const struct flash_info macronix_nor_parts[] = {
 	 * manufacturer hooks to set parameters that can't be discovered at SFDP
 	 * parsing time.
 	 */
+	{
+		.id = SNOR_ID(0xc2, 0x80, 0x3a),
+		.name = "mx25um51245g",
+		.sector_size = SZ_64K,
+		.size = SZ_64M,
+		/* OctaFlash octal = 8D-8D-8D (OPI DTR), entered via CR2. */
+		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_DTR_READ |
+				 SPI_NOR_OCTAL_DTR_PP,
+		.fixup_flags = SPI_NOR_4B_OPCODES,
+		.fixups = &mx25um51245g_fixups,
+	},
 	{ .id = SNOR_ID(0xc2) }
 };
 

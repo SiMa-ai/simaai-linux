@@ -42,7 +42,7 @@ void raw_fe_init( raw_fe_fsm_ptr_t p_fsm )
 void raw_fe_config( raw_fe_fsm_ptr_t p_fsm )
 {
     const int32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
-    acamera_isp_pipeline_bypass_raw_frontend_write( isp_base, 0 );
+    /* bypass driven by the IPA (isp_config / ISP_BYPASS_CONFIG) */
     acamera_isp_raw_frontend_show_dynamic_defect_pixel_write( isp_base,
                                                               ACAMERA_ISP_RAW_FRONTEND_SHOW_DYNAMIC_DEFECT_PIXEL_DEFAULT );
 }
@@ -69,12 +69,12 @@ void raw_fe_update_hw( raw_fe_fsm_ptr_t p_fsm )
     ;
 
     const uint16_t dp_slope = calc_modulation_u16( ldr_gain_log2,
-                                                   calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_DP_SLOPE ),
-                                                   calib_mgr_lut_rows( p_cmgr, CALIBRATION_DP_THRESHOLD ) );
+                                                   calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_DP_SLOPE ),
+                                                   calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_DP_THRESHOLD ) );
 
     const uint16_t dp_threshold = calc_modulation_u16( ldr_gain_log2,
-                                                       calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_DP_THRESHOLD ),
-                                                       calib_mgr_lut_rows( p_cmgr, CALIBRATION_DP_SLOPE ) );
+                                                       calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_DP_THRESHOLD ),
+                                                       calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_DP_SLOPE ) );
 
     acamera_isp_raw_frontend_dp_slope_write( isp_base, dp_slope );
     acamera_isp_raw_frontend_dp_threshold_write( isp_base, dp_threshold );
@@ -99,8 +99,8 @@ void raw_fe_reload_calibration( raw_fe_fsm_ptr_t p_fsm )
     */
     const int32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
 
-    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_RAW_FRONTEND_CONFIG ) ) {
-        const uint16_t *config = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_RAW_FRONTEND_CONFIG );
+    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_RAW_FRONTEND_CONFIG ) ) {
+        const uint16_t *config = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_RAW_FRONTEND_CONFIG );
 
         acamera_isp_raw_frontend_hpdev_threshold_write( isp_base, *config++ ); // dpdev threshold
         acamera_isp_raw_frontend_line_thresh_write( isp_base, *config++ );     // dp line thresh
@@ -114,7 +114,7 @@ void raw_fe_reload_calibration( raw_fe_fsm_ptr_t p_fsm )
         acamera_isp_raw_frontend_ge_enable_write( isp_base, 1 );
         acamera_isp_raw_frontend_dp_enable_write( isp_base, 1 );
     } else {
-        LOG( LOG_ERR, "Cannot configure raw_fe, calibration table CALIBRATION_RAW_FRONTEND_CONFIG not found!" );
+        LOG( LOG_ERR, "Cannot configure raw_fe, calibration table MODALIX_ISP_CALIB_RAW_FRONTEND_CONFIG not found!" );
         acamera_isp_raw_frontend_ge_enable_write( isp_base, 0 );
         acamera_isp_raw_frontend_dp_enable_write( isp_base, 0 );
     }

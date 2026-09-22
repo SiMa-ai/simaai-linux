@@ -21,6 +21,7 @@
 #define _ISP_V4L2_H_
 
 #include <linux/mutex.h>
+#include <linux/srcu.h>
 #include <media/v4l2-dev.h>
 #include <media/v4l2-device.h>
 #include <media/videobuf2-core.h>
@@ -36,6 +37,12 @@
 #include "isp-v4l2-ctrl.h"
 #include "isp-v4l2-stream.h"
 
+struct modalix_meta_stats_dev;
+struct modalix_meta_params_dev;
+
+/* held by frame-dispatch readers of pstreams[]; teardown synchronizes on it */
+extern struct srcu_struct isp_stream_srcu;
+
 typedef struct _isp_v4l2_dev {
     /* device */
     uint32_t ctx_id;
@@ -44,8 +51,21 @@ typedef struct _isp_v4l2_dev {
     struct v4l2_m2m_dev *v4l2_m2m_dev;
     struct video_device video_dev[V4L2_STREAM_TYPE_MAX];
 
+    /* META_CAPTURE stats device (vb2-based replacement for the
+     * sbuf stats path, lives in isp-v4l2-meta-stats.c). NULL while
+     * the meta path isn't yet wired up for this context. */
+    struct modalix_meta_stats_dev *meta_stats;
+
+    /* META_OUTPUT params device — symmetric counterpart receiving
+     * the IPA's 3A decisions per frame. NULL when the meta-params
+     * path is not yet wired up for this context. */
+    struct modalix_meta_params_dev *meta_params;
+
     /* lock */
     struct mutex mlock;
+
+    /* serializes fop open/release on the shared per-context stream state */
+    struct mutex open_lock;
 
     /* streams */
     isp_v4l2_stream_t *pstreams[V4L2_STREAM_TYPE_MAX];
@@ -57,7 +77,7 @@ typedef struct _isp_v4l2_dev {
     atomic_t opened;
     volatile unsigned long stream_on_mask;
     volatile unsigned long stream_open_mask;
-	
+
 } isp_v4l2_dev_t;
 
 

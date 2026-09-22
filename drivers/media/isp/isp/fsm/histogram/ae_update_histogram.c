@@ -102,8 +102,8 @@ void ae_update_histogram_shading_lut( histogram_fsm_const_ptr_t p_fsm, int input
         return;
     }
 
-    const uint32_t *radial_shading_lut = calib_mgr_u32_lut_get( p_ictx->calib_mgr_data, CALIBRATION_SHADING_RADIAL_G );
-    const uint32_t radial_shading_lut_size = calib_mgr_lut_len( p_ictx->calib_mgr_data, CALIBRATION_SHADING_RADIAL_G );
+    const uint32_t *radial_shading_lut = calib_mgr_u32_lut_get( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_SHADING_RADIAL_G );
+    const uint32_t radial_shading_lut_size = calib_mgr_lut_len( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_SHADING_RADIAL_G );
 
     if ( ( radial_shading_lut_size >> 1 ) != ( ACAMERA_ISP_METERING_HIST_1_SHADING_LUT_ARRAY_DIM_0_SIZE - 1 ) ) {
         LOG( LOG_ERR, "Failed to configure metering histogram %d shading lut. Radial shading (G) size mismatch (%d != %d).",
@@ -424,11 +424,11 @@ void ae_update_histogram_zone_weights( histogram_fsm_const_ptr_t p_fsm, int inpu
     const uint16_t horz_zones = nodes_used_horiz_read( p_ictx->settings.isp_base );
     const uint16_t vert_zones = nodes_used_vert_read( p_ictx->settings.isp_base );
 
-    const uint16_t *ptr_ae_zone_whgh_h = calib_mgr_u16_lut_get( p_ictx->calib_mgr_data, CALIBRATION_AE_ZONE_WGHT_HOR );
-    const uint16_t *ptr_ae_zone_whgh_v = calib_mgr_u16_lut_get( p_ictx->calib_mgr_data, CALIBRATION_AE_ZONE_WGHT_VER );
+    const uint16_t *ptr_ae_zone_whgh_h = calib_mgr_u16_lut_get( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AE_ZONE_WGHT_HOR );
+    const uint16_t *ptr_ae_zone_whgh_v = calib_mgr_u16_lut_get( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AE_ZONE_WGHT_VER );
 
-    const uint32_t ae_zone_wght_hor_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, CALIBRATION_AE_ZONE_WGHT_HOR );
-    const uint32_t ae_zone_wght_ver_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, CALIBRATION_AE_ZONE_WGHT_VER );
+    const uint32_t ae_zone_wght_hor_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AE_ZONE_WGHT_HOR );
+    const uint32_t ae_zone_wght_ver_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AE_ZONE_WGHT_VER );
 
     if ( ( horz_zones * vert_zones ) > ISP_METERING_HISTOGRAM_ZONES_MAX ) {
         LOG( LOG_CRIT, "AE zone weights update failed. Number of zones configured (%d * %d = %d) is out of range (%d)",
@@ -499,10 +499,10 @@ void configure_histogram_neq_lut( histogram_fsm_const_ptr_t p_fsm, int input )
 #if ( ISP_RTL_VERSION_R >= 1 ) //TODO: Figure out the behaviour for R2, for now assume same as R1
     const uint32_t cfg_offset = ( ISP_HISTOGRAM_POSITION_IS_BE ) ? ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base : PHY_ADDR_ISP;
     // TODO2: handle case when decompander is disabled on input_formatter
-    if ( !calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DECOMPANDER_CONTROL ) )
+    if ( !calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL ) )
         return;
 
-    const decompander_ctrl *p_decompander_ctrl = (const decompander_ctrl *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_DECOMPANDER_CONTROL );
+    const decompander_ctrl *p_decompander_ctrl = (const decompander_ctrl *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL );
 
     // If we enable here for BE_FS, BE_DECOMPANDER or BE_SHADING, we need to add input_port = 0;
     // TODO: should check on decompanding happening in inputFormatter or gammaFE.
@@ -535,8 +535,8 @@ void configure_histogram_neq_lut( histogram_fsm_const_ptr_t p_fsm, int input )
         const uint8_t hist_neq_lut_pos = p_decompander_ctrl->hist_neq_lut_pos;
 #endif
         const histogram_neq_lut *ptr_look =
-            (histogram_neq_lut *)calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_NEQ_LUT );
-        const uint32_t rows = calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_NEQ_LUT );
+            (histogram_neq_lut *)calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NEQ_LUT );
+        const uint32_t rows = calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NEQ_LUT );
         int i;
 
         switch ( input ) {

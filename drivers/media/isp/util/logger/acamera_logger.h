@@ -294,4 +294,37 @@ const char *alog_level_string( const alog_level_t level );
 #define LOG_EMERG LOG_LEVEL_EMERG
 
 
+/* ============================================================================
+ * Per-component verbose-trace toggles.
+ *
+ * Some LOG() calls in the ISP driver live inside spin_lock_irqsave regions
+ * on the per-frame hot path. Even at LOG_DEBUG, those calls pay a function-
+ * call cost; when the system log level is bumped (or when printk's console
+ * driver stalls) they have been measured to hold ISP spinlocks with IRQs
+ * disabled for tens of milliseconds, dropping other interrupts.
+ *
+ * The fix is to wrap each in-lock LOG site in `#ifdef ENABLE_<NAME>_LOGS`,
+ * leaving the macro undefined by default. Define any subset below (or via
+ * the kernel build's CFLAGS) to re-enable targeted tracing while debugging
+ * a specific component. Do NOT leave these enabled on a running system —
+ * they can re-introduce IRQ-shadow latency at higher log levels.
+ *
+ *   ENABLE_SBUF_LOGS          — sbuf_mgr ring-state traces (get/set hot path)
+ *   ENABLE_AE_LOGS            — AE per-FSM diagnostic traces
+ *   ENABLE_AWB_LOGS           — AWB per-FSM diagnostic traces
+ *   ENABLE_GAMMA_LOGS         — Gamma per-FSM diagnostic traces
+ *   ENABLE_IRIDIX_LOGS        — Iridix per-FSM diagnostic traces
+ *   ENABLE_V4L2_STREAM_LOGS   — V4L2 buffer-list traces inside stream lock
+ *
+ * Add new toggles here (not in individual .c files) so every component
+ * that uses LOG() can guard new sites consistently.
+ * ============================================================================*/
+//#define ENABLE_SBUF_LOGS
+//#define ENABLE_AE_LOGS
+//#define ENABLE_AWB_LOGS
+//#define ENABLE_GAMMA_LOGS
+//#define ENABLE_IRIDIX_LOGS
+//#define ENABLE_V4L2_STREAM_LOGS
+
+
 #endif // ACAMERA_LOGGER_H

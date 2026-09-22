@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+    imx568_clk0: imx568_clk0 {
+        status = "okay";
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+
+    imx568_vana0: vana0 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vana0";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+
+    imx568_vdig0: vdig0 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vdig0";
+        regulator-min-microvolt = <110000>;
+        regulator-max-microvolt = <110000>;
+        regulator-always-on;
+    };
+
+    imx568_vddl0: vddl0 {
+        compatible = "regulator-fixed";
+        regulator-name = "vddl0";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+};
+
+&csi3 {
+    status = "okay";
+};
+
+&axi_vdma3 {
+    status = "okay";
+};
+
+&mipi_dphy_rx3 {
+    status = "okay";
+};
+
+&v4l2video3 {
+    status = "okay";
+};
+
+&v4l2vdma3 {
+    status = "okay";
+};
+
+&csi30in{
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <594000000>;
+    remote-endpoint = <&cam30out>;
+    clock-continuous;
+};
+
+&i2c01 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    imx568: imx568@42 {
+        compatible = "econ,imx568-gmsl";
+        reg = <0x42>;
+        clocks = <&imx568_clk0>;
+        clock-names = "xclk";
+        VANA-supply = <&imx568_vana0>;
+        VDIG-supply = <&imx568_vdig0>;
+        VDDL-supply = <&imx568_vddl0>;
+        camera_mipi_lanes = <2>;
+        cam_fw_name = "imx568_cam_fw_gmsl.bin";
+        port@1 {
+            reg = <1>;
+            cam30out: endpoint@0 {
+                reg = <0>;
+                clock-lanes = <0>;
+                data-lanes = <1 2>;
+                link-frequencies = /bits/ 64 <594000000>;
+                remote-endpoint = <&csi30in>;
+                clock-continuous;
+            };
+        };
+    };
+};

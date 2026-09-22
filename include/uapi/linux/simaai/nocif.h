@@ -1,4 +1,7 @@
-
+/* SPDX-License-Identifier: (GPL-2.0+ WITH Linux-syscall-note) OR MIT */
+/*
+ * Copyright (c) 2026 Sima ai
+ */
 #ifndef NOCIF_H
 #define NOCIF_H
 
@@ -37,20 +40,20 @@ enum txnFilterOpCode {
 };
 
 struct filterAddrBase {
-  uint32_t addrBase_low;
-  uint8_t addrBase_high;
-  uint32_t windowSize;
+	uint32_t addrBase_low;
+	uint8_t addrBase_high;
+	uint32_t windowSize;
 };
 
 struct observedDesc {
-  char label[64];
-  uint32_t threshold[4];
-  enum txnFilterMode mode;
-  uint8_t addrWindowSize;
-  uint32_t histogramBin[5];
-  transactionFilterId_t fltId;
-  enum txnFilterOpCode opcode;
-  struct filterAddrBase addrBase;
+	char label[64];
+	uint32_t threshold[4];
+	enum txnFilterMode mode;
+	uint8_t addrWindowSize;
+	uint32_t histogramBin[5];
+	transactionFilterId_t fltId;
+	enum txnFilterOpCode opcode;
+	struct filterAddrBase addrBase;
 };
 
 
@@ -93,53 +96,56 @@ enum alarmMode {
 enum pktProbeId {
 	prb_bsu_nvs_pkt = 0,
 	prb_prc_sio12_pkt,
-	prb_prc_sio7_pkt
+	prb_prc_sio7_pkt,
+	prb_pkt_MAX
 };
 
 struct routeIdDesc {
-  uint32_t routeIdBase;
-  uint32_t routeIdMask;
+	uint32_t routeIdBase;
+	uint32_t routeIdMask;
 };
 
 struct securityDesc {
-  uint32_t securityBase;
-  uint32_t securityMask;
+	uint32_t securityBase;
+	uint32_t securityMask;
 };
 
 struct pktFilterDesc {
-  struct routeIdDesc fltRouteIdDesc;
-  struct filterAddrBase fltAddrDesc;
-  struct securityDesc fltSecurityDesc;
-  uint16_t fltOpCode;
-  uint8_t fltStatus:2;
-  uint8_t fltLength : 4;
-  uint8_t fltUrgency : 3;
+	struct routeIdDesc fltRouteIdDesc;
+	struct filterAddrBase fltAddrDesc;
+	struct securityDesc fltSecurityDesc;
+	uint16_t fltOpCode;
+	uint8_t fltStatus:2;
+	uint8_t fltLength : 4;
+	uint8_t fltUrgency : 3;
 };
 
 struct counterDesc {
-  uint8_t counterPortSel : 3;
-  enum pktCounterSource pktCounter;
-  enum alarmMode pktCounterAlarmMode;
+	uint8_t counterPortSel : 3;
+	enum pktCounterSource pktCounter;
+	enum alarmMode pktCounterAlarmMode;
 };
 
 struct txnProbeDesc {
-  char label[64];
-  uint32_t ovfStatus;
-  uint8_t nTenureLines;
-  uint8_t nObservedSel;
-  enum transactionProbesId id;
-  enum txnProfilerMode profilerMode;
-  struct observedDesc observedSel[2];
+	char label[64];
+	uint32_t ovfStatus;
+	uint8_t nTenureLines;
+	uint8_t nObservedSel;
+	enum transactionProbesId id;
+	enum txnProfilerMode profilerMode;
+	struct observedDesc observedSel[2];
 };
 
 struct pktProbeDesc {
-  enum pktProbeId id;
-  uint8_t tracePort;
-  uint8_t nFilterCount;
-  char label[64];
-  uint64_t bytesCount;
-  struct pktFilterDesc fltDesc[4];
-  struct counterDesc pktCounterDesc;
+	enum pktProbeId id;
+	uint64_t statPeriod;
+	uint8_t tracePort;
+	uint8_t nFilterCount;
+	char label[64];
+	uint64_t bytesCount;
+	uint64_t prevBytesCount;
+	struct pktFilterDesc fltDesc[4];
+	struct counterDesc pktCounterDesc;
 };
 
 #endif //NOCIF_H

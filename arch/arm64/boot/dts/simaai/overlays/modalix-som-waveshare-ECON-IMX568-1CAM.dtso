@@ -73,6 +73,25 @@
 
 &csi1 {
     status = "okay";
+
+    /*
+     * IPI blanking timings (v4l2_bt_timings) consumed by the CSI controller.
+     * Porch/sync values are in pixels (horizontal) or lines (vertical).
+     * pixelclock is the MIPI clock in Hz, used as the reference for
+     * converting the horizontal blanking intervals to ns. The active
+     * resolution is not set here; it comes from the V4L2 format (set_fmt).
+     */
+    simaai,bt-pixelclock = /bits/ 64 <500000000>;
+    simaai,bt-hsync = <2>;
+    simaai,bt-hbackporch = <100>;
+    simaai,bt-hfrontporch = <1548>;
+    simaai,bt-vsync = <1>;
+    simaai,bt-vbackporch = <68>;
+    simaai,bt-vfrontporch = <1>;
+
+    /* Defaults for the IPI custom V4L2 controls (0 = disabled) */
+    simaai,ipi-controller-mode = <1>;
+    simaai,ipi-emb-data-enable = <0>;
 };
 
 &axi_vdma1 {
@@ -108,33 +127,8 @@
 		status = "okay";
 	};
 
-	pca6408_fpga: pca6408@0x21 {
-        compatible = "ti,tca6408";                              
-        gpio-controller;                                        
-        #gpio-cells = <2>;                                      
-        reg = <0x21>;                                           
-        status = "okay";                                        
-    };
-
-    fpga: fpga@c {
-		compatible = "econ,fpga";
-		reg = <0x0c>;
-		status = "okay";
-		fpga_nprogram-gpios = <&pca6408_fpga 2 0>;
-        fpga_nreset-gpios = <&pca6408_fpga 3 0>;
-        fpga_slaveid_sel0-gpios = <&pca6408_fpga 4 0>;
-        fpga_slaveid_sel1-gpios = <&pca6408_fpga 7 0>;
-		mipi_filter_dt1 = <0x92>;
-		mipi_filter_dt2 = <0x93>;
-		mipi_filter_dt3 = <0xb7>;
-		mipi_filter_dt4 = <0x7f>;
-		mipi_speed = <1188>;
-		mipi_tx_clockmode = <0>; // Discontinuous
-		mipi_rx_clockmode = <0>; // Discontinuous
-	};
-
     imx568: imx568@42 {
-        compatible = "sony,imx568";
+        compatible = "econ,imx568";
         reg = <0x42>;
         clocks = <&imx568_clk_1>;
         clock-names = "xclk";
@@ -145,6 +139,10 @@
 		boot-gpios  = <&pca6408_camera_1 0 0>;
         camera_mipi_lanes = <2>;
         cam_fw_name = "imx568_cam_fw.bin";
+
+        /* Exposure window limits in microseconds (min 300 us, max 18 ms) */
+        simaai,manual_exposure_min = <300>;
+        simaai,manual_exposure_max = <18000>;
 
         port@1 {
             cam10out: endpoint@0 {

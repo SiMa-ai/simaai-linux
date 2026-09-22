@@ -37,12 +37,6 @@
 #define AWB_LIGHT_SOURCE_D50 0x03
 #endif
 
-// Threshold for the LSC table hysterisis.
-#define AWB_DLS_LIGHT_SOURCE_D40_D50_BORDER_low ( ( ( AWB_LIGHT_SOURCE_D50_TEMPERATURE + AWB_LIGHT_SOURCE_D40_TEMPERATURE ) >> 1 ) - 200 )
-#define AWB_DLS_LIGHT_SOURCE_D40_D50_BORDER_high ( ( ( AWB_LIGHT_SOURCE_D40_TEMPERATURE + AWB_LIGHT_SOURCE_D50_TEMPERATURE ) >> 1 ) + 200 )
-#define AWB_DLS_LIGHT_SOURCE_A_D40_BORDER_low ( ( ( AWB_LIGHT_SOURCE_A_TEMPERATURE + AWB_LIGHT_SOURCE_D40_TEMPERATURE ) >> 1 ) - 200 )
-#define AWB_DLS_LIGHT_SOURCE_A_D40_BORDER_high ( ( ( AWB_LIGHT_SOURCE_D40_TEMPERATURE + AWB_LIGHT_SOURCE_A_TEMPERATURE ) >> 1 ) + 200 )
-
 //==============Math Functions========================================================
 void matrix_matrix_multiply( int16_t *a1, int16_t *a2, int16_t *result, int dim1, int dim2, int dim3 )
 {
@@ -192,7 +186,7 @@ void saturation_modulate_strength( color_matrix_fsm_ptr_t p_fsm )
 
     const uint32_t ldr_gain_log2 = get_context_param( p_ictx, STATUS_INFO_LDR_GAIN_LOG2_ID_PARAM );
 
-    uint32_t ccm_saturation_table_idx = CALIBRATION_SATURATION_STRENGTH;
+    uint32_t ccm_saturation_table_idx = MODALIX_ISP_CALIB_SATURATION_STRENGTH;
     const modulation_entry_t *ccm_saturation_table = calib_mgr_mod16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), ccm_saturation_table_idx );
     uint32_t ccm_saturation_table_len = calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), ccm_saturation_table_idx );
     uint16_t strength = calc_modulation_u16( ldr_gain_log2, ccm_saturation_table, ccm_saturation_table_len );
@@ -236,11 +230,34 @@ void color_matrix_recalculate( color_matrix_fsm_ptr_t p_fsm )
 }
 
 
+/* Fill p_matrix with an identity 3×3 (for size == ISP_CCM_SIZE) or a zero
+ * offset vector (for size == ISP_CCM_B_SIZE). Used as a defensive fallback
+ * when the calib_mgr slot is unpopulated. Output is in 2's-complement form
+ * irrespective of ISP_RTL_VERSION_R since both setup variants emit that. */
+static void color_matrix_fill_identity( int16_t *p_matrix, int16_t size )
+{
+    int i;
+
+    if ( size == ISP_CCM_SIZE ) {
+        for ( i = 0; i < size; i++ )
+            p_matrix[i] = ( i == 0 || i == 4 || i == 8 ) ? 256 : 0;
+    } else {
+        for ( i = 0; i < size; i++ )
+            p_matrix[i] = 0;
+    }
+}
+
 #if ( ISP_RTL_VERSION_R == 2 )
 //In case of MOSS , values are already in two complement format at the LUT
 void color_matrix_setup( int16_t *p_matrix, const uint16_t *source_matrix, int16_t size )
 {
     int i;
+
+    if ( source_matrix == NULL ) {
+        LOG( LOG_WARNING, "color_matrix_setup: source NULL (size=%d), filling identity", size );
+        color_matrix_fill_identity( p_matrix, size );
+        return;
+    }
 
     for ( i = 0; i < size; i++ ) {
         p_matrix[i] = source_matrix[i];
@@ -251,6 +268,12 @@ void color_matrix_setup( int16_t *p_matrix, const uint16_t *source_matrix, int16
 void color_matrix_setup( int16_t *p_matrix, const uint16_t *source_matrix, int16_t size )
 {
     int i;
+
+    if ( source_matrix == NULL ) {
+        LOG( LOG_WARNING, "color_matrix_setup: source NULL (size=%d), filling identity", size );
+        color_matrix_fill_identity( p_matrix, size );
+        return;
+    }
 
     if ( size == ISP_CCM_SIZE ) { //CCM_A
         for ( i = 0; i < size; i++ ) {
@@ -375,27 +398,27 @@ void color_matrix_change_CCMs( color_matrix_fsm_ptr_t p_fsm )
     //	For CCM switching
 
     // Light source: A
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_MT_ABSOLUTE_LS_A_CCM );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_MT_ABSOLUTE_LS_A_CCM );
     color_matrix_setup( p_fsm->color_matrix_A, p_mtrx, ISP_CCM_SIZE );
 
     // Light source: D40
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_MT_ABSOLUTE_LS_D40_CCM );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_MT_ABSOLUTE_LS_D40_CCM );
     color_matrix_setup( p_fsm->color_matrix_D40, p_mtrx, ISP_CCM_SIZE );
 
     // Light source: D50
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_MT_ABSOLUTE_LS_D50_CCM );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_MT_ABSOLUTE_LS_D50_CCM );
     color_matrix_setup( p_fsm->color_matrix_D50, p_mtrx, ISP_CCM_SIZE );
 
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_MATRIX_YUV_PRESETS );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_MATRIX_YUV_PRESETS );
     color_matrix_setup( p_fsm->color_matrix_yuv, p_mtrx, ISP_CCM_SIZE );
 
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_MATRIX_LUV_PRESETS );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_MATRIX_LUV_PRESETS );
     color_matrix_setup( p_fsm->color_matrix_luv, p_mtrx, ISP_CCM_SIZE );
 
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_RGB2RGB_HS_CONVERSION );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_RGB2RGB_HS_CONVERSION );
     color_matrix_setup( p_fsm->color_matrix_hs, p_mtrx, ISP_CCM_SIZE );
 
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_RGB2RGB_S2_CONVERSION );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_RGB2RGB_S2_CONVERSION );
     color_matrix_setup( p_fsm->color_matrix_s2, p_mtrx, ISP_CCM_SIZE );
 
 // Default tables
@@ -406,49 +429,28 @@ void color_matrix_change_CCMs( color_matrix_fsm_ptr_t p_fsm )
 #endif
     color_matrix_setup( p_fsm->color_matrix_one, cm_one, ISP_CCM_SIZE );
 
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_MATRIX_B_YUV_PRESETS );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_MATRIX_B_YUV_PRESETS );
     color_matrix_setup( p_fsm->color_matrix_yuv_b, p_mtrx, ISP_CCM_B_SIZE );
 
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_MATRIX_B_LUV_PRESETS );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_MATRIX_B_LUV_PRESETS );
     color_matrix_setup( p_fsm->color_matrix_luv_b, p_mtrx, ISP_CCM_B_SIZE );
 
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_RGB2RGB_HS_CONVERSION_B );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_RGB2RGB_HS_CONVERSION_B );
     color_matrix_setup( p_fsm->color_matrix_hs_b, p_mtrx, ISP_CCM_B_SIZE );
 
-    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_RGB2RGB_S2_CONVERSION_B );
+    p_mtrx = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_RGB2RGB_S2_CONVERSION_B );
     color_matrix_setup( p_fsm->color_matrix_s2_b, p_mtrx, ISP_CCM_B_SIZE );
 
-    if ( p_fsm->light_source_change_frames_left != 0 ) {
-
-        // In CCM switching
-        // call CCM switcher to update CCM
-        // (note: this does mean CCM switching takes one frame less than normal)
-        color_matrix_update_hw( p_fsm );
-    } else {
-        // Not moving, update current CCMs
-
-        int16_t *p_ccm_next;
-
-        switch ( p_fsm->light_source_ccm ) {
-
-        case AWB_LIGHT_SOURCE_A:
-            p_ccm_next = p_fsm->color_matrix_A;
-            break;
-        case AWB_LIGHT_SOURCE_D40:
-            p_ccm_next = p_fsm->color_matrix_D40;
-            break;
-        case AWB_LIGHT_SOURCE_D50:
-            p_ccm_next = p_fsm->color_matrix_D50;
-            break;
-        default:
-            p_ccm_next = p_fsm->color_matrix_one;
-            break;
-        }
-
-        for ( i = 0; i < 9; i++ ) {
-            p_fsm->color_correction_matrix[i] = p_ccm_next[i];
-        }
-    }
+    /* Seed color_correction_matrix with identity until the IPA pushes a
+     * real CCM via sbuf_awb. The legacy zone classifier that used to pick
+     * one of color_matrix_A/D40/D50 here based on p_fsm->light_source_ccm
+     * has been retired — the IPA's Catmull-Rom spline over
+     * calibration_illuminants is now the sole runtime source of CCM
+     * updates. color_matrix_A/D40/D50 are still loaded above so any code
+     * that reads them directly (e.g. introspection / debug) keeps working;
+     * they just no longer drive the hot path. */
+    for ( i = 0; i < ISP_CCM_SIZE; i++ )
+        p_fsm->color_correction_matrix[i] = p_fsm->color_matrix_one[i];
 }
 
 /**
@@ -478,6 +480,38 @@ void color_matrix_config( color_matrix_fsm_ptr_t p_fsm )
 }
 
 /**
+ * color_matrix_set_user_matrix() - Accept an IPA-pushed CCM.
+ *
+ * Called from sbuf_func.c when a new sbuf_awb arrives with
+ * ccm_matrix_valid != 0. The matrix encoding on the wire is sign-magnitude
+ * s7.8 row-major — the same format the calib_mgr ILLUMINANT_CCMS slot and
+ * the legacy MT_ABSOLUTE_LS_*_CCM slots use.
+ *
+ * The rest of the kernel CCM pipeline (matrix_matrix_multiply,
+ * color_matrix_recalculate) expects 2's-complement. Funnel through
+ * color_matrix_setup() so the conversion is identical to the legacy
+ * color_matrix_change_CCMs() path:
+ *   - On Morgan (ISP_RTL_VERSION_R != 2): a_reg_to_twos_complement().
+ *   - On MOSS  (ISP_RTL_VERSION_R == 2): direct copy (LUT is 2's-comp).
+ * The next color_matrix_update_hw() consumes user_matrix and clears the
+ * flag.
+ */
+void color_matrix_set_user_matrix( color_matrix_fsm_ptr_t p_fsm,
+                                   const int16_t matrix[ISP_CCM_SIZE] )
+{
+    if ( !p_fsm || !matrix )
+        return;
+
+    /* Reinterpret cast is safe — color_matrix_setup() inspects the bit
+     * pattern (sign-magnitude on Morgan, copied through on MOSS); int16 vs
+     * uint16 only changes the C type, not the underlying bytes. */
+    color_matrix_setup( p_fsm->user_matrix,
+                        (const uint16_t *)matrix,
+                        ISP_CCM_SIZE );
+    p_fsm->user_matrix_valid = 1;
+}
+
+/**
  * color_matrix_update_hw() - FSM handler function
  * @p_fsm: Pointer to color_matrix FSM.
 
@@ -485,66 +519,36 @@ void color_matrix_config( color_matrix_fsm_ptr_t p_fsm )
  */
 void color_matrix_update_hw( color_matrix_fsm_ptr_t p_fsm )
 {
-    //	For CCM switching
-    if ( p_fsm->light_source_change_frames_left != 0 ) {
+    /*
+     * IPA-pushed CCM is the sole runtime source for the colour
+     * correction matrix. When a fresh matrix has been delivered via
+     * sbuf_awb (color_matrix_set_user_matrix sets user_matrix_valid),
+     * copy it into color_correction_matrix; otherwise the existing
+     * matrix is reused unchanged.
+     *
+     * Saturation modulation and the register write run unconditionally
+     * so that gain-driven saturation changes still propagate to the
+     * hardware between IPA pushes, even when the CCM itself didn't
+     * change this frame.
+     *
+     * The legacy zone classifier + 35-frame blend (light_source_ccm /
+     * light_source_change_frames_left) is retired. Those FSM fields are
+     * still written by awb_manual_func.c but no longer drive any code
+     * here.
+     */
+    if ( p_fsm->user_matrix_valid ) {
+        uint8_t i;
+        for ( i = 0; i < ISP_CCM_SIZE; i++ )
+            p_fsm->color_correction_matrix[i] = p_fsm->user_matrix[i];
+        p_fsm->user_matrix_valid = 0;
 
-        int16_t *p_ccm_prev;
-        int16_t *p_ccm_cur = p_fsm->color_correction_matrix;
-        int16_t *p_ccm_target;
-        int16_t delta;
-
-        switch ( p_fsm->light_source_ccm_previous ) {
-
-        case AWB_LIGHT_SOURCE_A:
-            p_ccm_prev = p_fsm->color_matrix_A;
-            break;
-        case AWB_LIGHT_SOURCE_D40:
-            p_ccm_prev = p_fsm->color_matrix_D40;
-            break;
-        case AWB_LIGHT_SOURCE_D50:
-            p_ccm_prev = p_fsm->color_matrix_D50;
-            break;
-        default:
-            p_ccm_prev = p_fsm->color_matrix_one;
-
-            break;
-        }
-
-        switch ( p_fsm->light_source_ccm ) {
-
-        case AWB_LIGHT_SOURCE_A:
-            p_ccm_target = p_fsm->color_matrix_A;
-            break;
-        case AWB_LIGHT_SOURCE_D40:
-            p_ccm_target = p_fsm->color_matrix_D40;
-            break;
-        case AWB_LIGHT_SOURCE_D50:
-            p_ccm_target = p_fsm->color_matrix_D50;
-            break;
-        default:
-            p_ccm_target = p_fsm->color_matrix_one;
-            break;
-        }
-
-        int i;
-        for ( i = 0; i < 9; ++i ) {
-
-            // Smooth transition
-            // using curr += (target - curr)/frames_left causes no movement in first half
-            // for small movements
-            if ( p_fsm->light_source_change_frames > 1 ) {
-                delta = ( ( p_ccm_target[i] - p_ccm_prev[i] ) * ( p_fsm->light_source_change_frames - p_fsm->light_source_change_frames_left ) ) / ( p_fsm->light_source_change_frames - 1 ); // division by zero is checked
-                p_ccm_cur[i] = p_ccm_prev[i] + delta;
-            }
-        }
+        static u32 ccm_apply_log_n;
+        if ( ( ccm_apply_log_n++ % 100 ) == 0 )
+            LOG_CCM( pr_debug, "applied (2's-comp) CCM", p_fsm->color_correction_matrix );
     }
 
     color_matrix_recalculate( p_fsm );
     color_matrix_write( p_fsm );
-
-    if ( p_fsm->light_source_change_frames_left > 0 ) {
-        p_fsm->light_source_change_frames_left--;
-    }
 }
 
 void color_matrix_get_info( const color_matrix_fsm_ptr_t p_fsm, acamera_cmd_ccm_info *p_info )

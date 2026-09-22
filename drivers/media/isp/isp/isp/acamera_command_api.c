@@ -70,10 +70,6 @@ uint8_t acamera_command( uint32_t ctx_id, uint8_t command_type, uint8_t command,
         break;
     } // switch ( command_type )
 
-#if FW_HAS_CONTROL_CHANNEL
-    ctrl_channel_handle_api_command( ctx_id, cmd_if_mode, command_type, command, value, direction );
-#endif
-
     if ( ret != SUCCESS ) {
         LOG( LOG_WARNING, "API COMMAND FAILED: ctx: %d, if_mode: %d, type: %d, cmd: %d, value: %lu, direction: %d, ret_value: %lu, result: %d",
              ctx_id,

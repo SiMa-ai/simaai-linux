@@ -47,7 +47,7 @@ static void stitching_error_calculate( noise_reduction_fsm_t *p_fsm )
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_MCOFF_MODE_ENABLE_DEFAULT
     // Change to MC off mode when gain is higher than gain_log2 value found in calibration.
-    uint16_t MC_off_enable_gain = calib_mgr_u32_lut_get( p_cmgr, CALIBRATION_FS_MC_OFF )[0];
+    uint16_t MC_off_enable_gain = calib_mgr_u32_lut_get( p_cmgr, MODALIX_ISP_CALIB_FS_MC_OFF )[0];
 
     if ( ldr_gain_log2 > MC_off_enable_gain ) {
         acamera_isp_frame_stitch_mcoff_mode_enable_write( p_ictx->settings.isp_base, 1 );
@@ -61,41 +61,41 @@ static void stitching_error_calculate( noise_reduction_fsm_t *p_fsm )
     case WDR_MODE_FS_LIN: {
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_LM_NP_MULT_DEFAULT
-        const uint16_t lm_np = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_STITCHING_LM_NP ), calib_mgr_lut_rows( p_cmgr, CALIBRATION_STITCHING_LM_NP ) );
+        const uint16_t lm_np = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_STITCHING_LM_NP ), calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_STITCHING_LM_NP ) );
         acamera_isp_frame_stitch_lm_np_mult_write( p_ictx->settings.isp_base, lm_np );
 #endif
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_LM_ALPHA_MOV_SLOPE_DEFAULT
-        const uint16_t lm_mov_mult = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_STITCHING_LM_MOV_MULT ), calib_mgr_lut_rows( p_cmgr, CALIBRATION_STITCHING_LM_MOV_MULT ) );
+        const uint16_t lm_mov_mult = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_STITCHING_LM_MOV_MULT ), calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_STITCHING_LM_MOV_MULT ) );
         acamera_isp_frame_stitch_lm_alpha_mov_slope_write( p_ictx->settings.isp_base, lm_mov_mult );
 #endif
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_MS_NP_MULT_DEFAULT
-        const uint16_t ms_np = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_STITCHING_MS_NP ), calib_mgr_lut_rows( p_cmgr, CALIBRATION_STITCHING_MS_NP ) );
+        const uint16_t ms_np = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_STITCHING_MS_NP ), calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_STITCHING_MS_NP ) );
         acamera_isp_frame_stitch_ms_np_mult_write( p_ictx->settings.isp_base, ms_np );
 #endif
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_MS_ALPHA_MOV_SLOPE_DEFAULT
-        const uint16_t ms_mov_mult = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_STITCHING_MS_MOV_MULT ), calib_mgr_lut_rows( p_cmgr, CALIBRATION_STITCHING_MS_MOV_MULT ) );
+        const uint16_t ms_mov_mult = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_STITCHING_MS_MOV_MULT ), calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_STITCHING_MS_MOV_MULT ) );
         acamera_isp_frame_stitch_ms_alpha_mov_slope_write( p_ictx->settings.isp_base, ms_mov_mult );
 #endif
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_SVS_NP_MULT_DEFAULT
-        if ( calib_mgr_lut_exists( p_cmgr, CALIBRATION_STITCHING_SVS_NP ) ) {
-            const uint16_t svs_np = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_STITCHING_SVS_NP ), calib_mgr_lut_rows( p_cmgr, CALIBRATION_STITCHING_SVS_NP ) );
+        if ( calib_mgr_lut_exists( p_cmgr, MODALIX_ISP_CALIB_STITCHING_SVS_NP ) ) {
+            const uint16_t svs_np = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_STITCHING_SVS_NP ), calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_STITCHING_SVS_NP ) );
             acamera_isp_frame_stitch_svs_np_mult_write( p_ictx->settings.isp_base, svs_np );
         }
 #endif
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_SVS_ALPHA_MOV_SLOPE_DEFAULT
-        if ( calib_mgr_lut_exists( p_cmgr, CALIBRATION_STITCHING_SVS_MOV_MULT ) ) {
-            const uint16_t svs_mov_mult = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_STITCHING_SVS_MOV_MULT ), calib_mgr_lut_rows( p_cmgr, CALIBRATION_STITCHING_SVS_MOV_MULT ) );
+        if ( calib_mgr_lut_exists( p_cmgr, MODALIX_ISP_CALIB_STITCHING_SVS_MOV_MULT ) ) {
+            const uint16_t svs_mov_mult = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_STITCHING_SVS_MOV_MULT ), calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_STITCHING_SVS_MOV_MULT ) );
             acamera_isp_frame_stitch_svs_alpha_mov_slope_write( p_ictx->settings.isp_base, svs_mov_mult );
         }
 #endif
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_LM_MED_NOISE_INTENSITY_THRESH_DEFAULT
-        const uint16_t stitching_lm_med_noise_intensity_thresh = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, CALIBRATION_STITCHING_LM_MED_NOISE_INTENSITY ), calib_mgr_lut_rows( p_cmgr, CALIBRATION_STITCHING_LM_MED_NOISE_INTENSITY ) );
+        const uint16_t stitching_lm_med_noise_intensity_thresh = calc_modulation_u16( ldr_gain_log2, (modulation_entry_t *)calib_mgr_mod16_lut_get( p_cmgr, MODALIX_ISP_CALIB_STITCHING_LM_MED_NOISE_INTENSITY ), calib_mgr_lut_rows( p_cmgr, MODALIX_ISP_CALIB_STITCHING_LM_MED_NOISE_INTENSITY ) );
         acamera_isp_frame_stitch_lm_med_noise_intensity_thresh_write( p_ictx->settings.isp_base, stitching_lm_med_noise_intensity_thresh );
 #endif
         break;
@@ -115,7 +115,7 @@ static void sinter_strength_calculate( noise_reduction_fsm_t *p_fsm )
 
     if ( get_context_param( p_ictx, ISP_MODULES_MANUAL_SINTER_PARAM ) == 0 ) {
         // Get lut indexes for the current HDR mode.
-        uint32_t sinter_strength_mc_contrast_idx = CALIBRATION_SINTER_STRENGTH_MC_CONTRAST;
+        uint32_t sinter_strength_mc_contrast_idx = MODALIX_ISP_CALIB_SINTER_STRENGTH_MC_CONTRAST;
         uint32_t sinter_strength_idx;
         uint32_t sinter_strength1_idx;
         uint32_t sinter_strength4_idx;
@@ -125,21 +125,21 @@ static void sinter_strength_calculate( noise_reduction_fsm_t *p_fsm )
 
 #if ( ISP_RTL_VERSION_R == 2 )
         uint32_t raw_scaler_enable = get_context_param( p_ictx, IMAGE_RAW_SCALER_ENABLE_ID_PARAM );
-        sinter_strength_mc_contrast_idx = raw_scaler_enable ? CALIBRATION_SINTER_STRENGTH_MC_CONTRAST_WRS : CALIBRATION_SINTER_STRENGTH_MC_CONTRAST;
-        sinter_strength_idx = raw_scaler_enable ? CALIBRATION_SINTER_STRENGTH_WRS : CALIBRATION_SINTER_STRENGTH;
-        sinter_strength1_idx = raw_scaler_enable ? CALIBRATION_SINTER_STRENGTH1_WRS : CALIBRATION_SINTER_STRENGTH1;
-        sinter_strength4_idx = raw_scaler_enable ? CALIBRATION_SINTER_STRENGTH4_WRS : CALIBRATION_SINTER_STRENGTH4;
-        sinter_thresh1_idx = raw_scaler_enable ? CALIBRATION_SINTER_THRESH1_WRS : CALIBRATION_SINTER_THRESH1;
-        sinter_thresh4_idx = raw_scaler_enable ? CALIBRATION_SINTER_THRESH4_WRS : CALIBRATION_SINTER_THRESH4;
-        sinter_int_config_idx = raw_scaler_enable ? CALIBRATION_SINTER_INTCONFIG_WRS : CALIBRATION_SINTER_INTCONFIG;
+        sinter_strength_mc_contrast_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SINTER_STRENGTH_MC_CONTRAST_WRS : MODALIX_ISP_CALIB_SINTER_STRENGTH_MC_CONTRAST;
+        sinter_strength_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SINTER_STRENGTH_WRS : MODALIX_ISP_CALIB_SINTER_STRENGTH;
+        sinter_strength1_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SINTER_STRENGTH1_WRS : MODALIX_ISP_CALIB_SINTER_STRENGTH1;
+        sinter_strength4_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SINTER_STRENGTH4_WRS : MODALIX_ISP_CALIB_SINTER_STRENGTH4;
+        sinter_thresh1_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SINTER_THRESH1_WRS : MODALIX_ISP_CALIB_SINTER_THRESH1;
+        sinter_thresh4_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SINTER_THRESH4_WRS : MODALIX_ISP_CALIB_SINTER_THRESH4;
+        sinter_int_config_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SINTER_INTCONFIG_WRS : MODALIX_ISP_CALIB_SINTER_INTCONFIG;
 #else
-        sinter_strength_mc_contrast_idx = CALIBRATION_SINTER_STRENGTH_MC_CONTRAST;
-        sinter_strength_idx = CALIBRATION_SINTER_STRENGTH;
-        sinter_strength1_idx = CALIBRATION_SINTER_STRENGTH1;
-        sinter_strength4_idx = CALIBRATION_SINTER_STRENGTH4;
-        sinter_thresh1_idx = CALIBRATION_SINTER_THRESH1;
-        sinter_thresh4_idx = CALIBRATION_SINTER_THRESH4;
-        sinter_int_config_idx = CALIBRATION_SINTER_INTCONFIG;
+        sinter_strength_mc_contrast_idx = MODALIX_ISP_CALIB_SINTER_STRENGTH_MC_CONTRAST;
+        sinter_strength_idx = MODALIX_ISP_CALIB_SINTER_STRENGTH;
+        sinter_strength1_idx = MODALIX_ISP_CALIB_SINTER_STRENGTH1;
+        sinter_strength4_idx = MODALIX_ISP_CALIB_SINTER_STRENGTH4;
+        sinter_thresh1_idx = MODALIX_ISP_CALIB_SINTER_THRESH1;
+        sinter_thresh4_idx = MODALIX_ISP_CALIB_SINTER_THRESH4;
+        sinter_int_config_idx = MODALIX_ISP_CALIB_SINTER_INTCONFIG;
 #endif
 
         const uint32_t ldr_gain_log2 = get_context_param( p_ictx, STATUS_INFO_LDR_GAIN_LOG2_ID_PARAM );
@@ -185,7 +185,7 @@ void noise_reduction_config( noise_reduction_fsm_t *p_fsm )
     p_fsm->snr_strength_target = 15;
     p_fsm->tnr_thresh_master = p_fsm->tnr_strength_target; // Same as target.
     p_fsm->snr_thresh_master = p_fsm->snr_strength_target; // Same as target.
-    const uint16_t *p_sinter_params = (const uint16_t *)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SINTER_PARAMS );
+    const uint16_t *p_sinter_params = (const uint16_t *)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SINTER_PARAMS );
     /* @todo review with iq if we need a calibration table for this. */
     acamera_isp_frame_stitch_lm_thresh_high_write( p_ictx->settings.isp_base, 60947 );
     acamera_isp_frame_stitch_lm_thresh_low_write( p_ictx->settings.isp_base, 49151 );
@@ -199,17 +199,17 @@ void noise_reduction_config( noise_reduction_fsm_t *p_fsm )
     acamera_isp_sinter_scale_mode_write( p_ictx->settings.isp_base,
                                          ACAMERA_ISP_SINTER_SCALE_MODE_USE_ALL_FILTERS );
 
-    acamera_isp_pipeline_bypass_sinter_write( p_ictx->settings.isp_base, 0 );
+    /* bypass driven by the IPA (isp_config / ISP_BYPASS_CONFIG) */
     acamera_isp_sinter_enable_write( p_ictx->settings.isp_base, 1 );
 }
 
 void noise_reduction_reload_calibration( noise_reduction_fsm_t *p_fsm )
 {
-    const uint8_t *p_sinter_radial_lut = (uint8_t *)calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SINTER_RADIAL_LUT );
+    const uint8_t *p_sinter_radial_lut = (uint8_t *)calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SINTER_RADIAL_LUT );
     // Params must be in the following format: rm_enable, rm_centre_x, rm_centre_y, rm_off_centre_mult
-    const uint16_t *p_sinter_radial_params = (const uint16_t *)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SINTER_RADIAL_PARAMS );
+    const uint16_t *p_sinter_radial_params = (const uint16_t *)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SINTER_RADIAL_PARAMS );
     int i;
-    uint8_t number_of_nodes = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_SINTER_RADIAL_LUT );
+    uint8_t number_of_nodes = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SINTER_RADIAL_LUT );
 
     for ( i = 0; i < number_of_nodes; ++i ) {
         acamera_isp_sinter_shading_rm_shading_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, p_sinter_radial_lut[i] );
@@ -220,11 +220,11 @@ void noise_reduction_reload_calibration( noise_reduction_fsm_t *p_fsm )
     acamera_isp_sinter_rm_off_center_mult_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, p_sinter_radial_params[3] );
 
 #if ( ISP_RTL_VERSION_R >= 1 ) //TODO: Figure out the behaviour for R2, for now assume same as R1
-    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_NOISE_PROFILE_CONFIG ) ) {
+    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_PROFILE_CONFIG ) ) {
         const acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
-        const uint16_t *config = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_NOISE_PROFILE_CONFIG );
+        const uint16_t *config = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_PROFILE_CONFIG );
         const uint32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
-        const uint32_t *gamma_black_levels = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_GAMMA_BLACK_LEVELS );
+        const uint32_t *gamma_black_levels = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_BLACK_LEVELS );
         uint16_t data_tmp = 0, gain16 = 0;
         uint32_t gain_tmp = ( get_context_param( p_ictx, SYSTEM_ISP_DIGITAL_GAIN_PARAM ) << ( LOG2_GAIN_SHIFT - 5 ) );
 
@@ -251,7 +251,7 @@ void noise_reduction_reload_calibration( noise_reduction_fsm_t *p_fsm )
         acamera_isp_noise_profile_hlog_exp_rat_0_2_max_diff_write( isp_base, *config++ );
         acamera_isp_noise_profile_hlog_exp_rat_0_3_max_diff_write( isp_base, *config++ );
     } else {
-        LOG( LOG_ERR, "CALIBRATION_NOISE_PROFILE_CONFIG is missing, module will not be configured correctly!" );
+        LOG( LOG_ERR, "MODALIX_ISP_CALIB_NOISE_PROFILE_CONFIG is missing, module will not be configured correctly!" );
     }
 #endif /* ISP_RTL_VERSION_R */
 }
@@ -267,9 +267,9 @@ void noise_reduction_update_hw( noise_reduction_fsm_t *p_fsm )
 
 #if ( ISP_RTL_VERSION_R == 2 )
         uint32_t raw_scaler_enable = get_context_param( p_ictx, IMAGE_RAW_SCALER_ENABLE_ID_PARAM );
-        tbl_inx = raw_scaler_enable ? CALIBRATION_DEMOSAIC_UU_SLOPE_WRS : CALIBRATION_DEMOSAIC_UU_SLOPE;
+        tbl_inx = raw_scaler_enable ? MODALIX_ISP_CALIB_DEMOSAIC_UU_SLOPE_WRS : MODALIX_ISP_CALIB_DEMOSAIC_UU_SLOPE;
 #else
-        tbl_inx = CALIBRATION_DEMOSAIC_UU_SLOPE;
+        tbl_inx = MODALIX_ISP_CALIB_DEMOSAIC_UU_SLOPE;
 #endif
         acamera_isp_demosaic_uu_slope_write( p_ictx->settings.isp_base, calc_modulation_u16( ldr_gain_gain, calib_mgr_mod16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), tbl_inx ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), tbl_inx ) ) );
     }
@@ -298,7 +298,7 @@ void noise_reduction_update_hw( noise_reduction_fsm_t *p_fsm )
     if ( gain_01 != 0 ) {
         // gain_01 will not always be = 256, so this division is needed
         uint32_t rgain = div_fixed( gain_00, gain_01, 8 );
-        uint32_t noise_level_r = calc_modulation_u32( rgain, calib_mgr_mod32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_NOISE_LEVEL_R_LUT ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_NOISE_LEVEL_R_LUT ) );
+        uint32_t noise_level_r = calc_modulation_u32( rgain, calib_mgr_mod32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_LEVEL_R_LUT ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_LEVEL_R_LUT ) );
         // register noise_level_r is 8 bits long
         noise_level_r = MIN( noise_level_r, 255 );
 
@@ -306,7 +306,7 @@ void noise_reduction_update_hw( noise_reduction_fsm_t *p_fsm )
 
         // gain_01 will not always be = 256, so this division is needed
         uint32_t bgain = div_fixed( gain_11, gain_01, 8 );
-        uint32_t noise_level_b = calc_modulation_u32( bgain, calib_mgr_mod32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_NOISE_LEVEL_B_LUT ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_NOISE_LEVEL_B_LUT ) );
+        uint32_t noise_level_b = calc_modulation_u32( bgain, calib_mgr_mod32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_LEVEL_B_LUT ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_LEVEL_B_LUT ) );
         // register noise_level_b is 8 bits long
         noise_level_b = MIN( noise_level_b, 255 );
 

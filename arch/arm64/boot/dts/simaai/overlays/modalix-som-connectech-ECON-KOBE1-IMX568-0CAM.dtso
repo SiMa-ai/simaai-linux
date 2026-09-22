@@ -77,7 +77,7 @@
     };
 
     imx568s0: imx568@42 {
-        compatible = "sony,imx568";
+        compatible = "econ,imx568-fpga";
         reg = <0x42>;
         clocks = <&imx568_clk_0>;
         clock-names = "xclk";

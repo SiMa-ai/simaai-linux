@@ -28,12 +28,16 @@
 #include <media/videobuf2-vmalloc.h>
 
 #include "acamera_command_api.h"
+#include "acamera_fsmgr_general_router.h"
+#include "acamera_isp_ctx.h"
 #include "acamera_logger.h"
 #include "fw-interface.h"
 #include "isp-v4l2-common.h"
 #include "isp-v4l2-stream.h"
 #include "isp-v4l2.h"
 #include "isp-vb2.h"
+
+extern void *get_ctx_ptr_by_id( uint32_t ctx_id );
 
 static int isp_fw_do_set_cmd( uint32_t ctx_id, uint8_t command_type, uint8_t command, uint32_t value );
 static int isp_fw_do_get_cmd( uint32_t ctx_id, uint8_t command_type, uint8_t command, uint32_t *ret_val );
@@ -276,7 +280,11 @@ int fw_intf_isp_update_sensor_info_mode( uint32_t ctx_id, isp_v4l2_sensor_info *
     }
 
     if ( found == 0 ) {
-        LOG( LOG_ERR, "Failed to update sensor info mode and submode for sensor preset: %u, no match found", current_preset );
+        /* Benign for contexts without a real sensor bound (dummy
+         * get_calibrations); the fallback to mode 0 is the intended
+         * behaviour. Demoted from LOG_ERR because FCN now iterates over
+         * 16 contexts at init and this fires for every unused slot. */
+        LOG( LOG_DEBUG, "No sensor info mode match for preset: %u, falling back to mode 0", current_preset );
         sensor_info->cur_mode = 0;
         sensor_info->mode[0].cur_sub_mode = 0;
     }
@@ -597,7 +605,10 @@ int fw_intf_stream_set_resolution( uint32_t ctx_id, isp_v4l2_sensor_info *sensor
 
             // Check if we found requested resolution in the sensor info
             if ( mode >= sensor_info->num_modes ) {
-                LOG( LOG_ERR, "Unsupported resolution: %dx%d requested, reverting to current resolution: %dx%d",
+                /* Not a failure — we fall back to the current resolution and
+                 * return success. Demoted from LOG_ERR because libcamera
+                 * issues this lookup on every stream start. */
+                LOG( LOG_DEBUG, "Unsupported resolution: %dx%d requested, reverting to current resolution: %dx%d",
                      target_width, target_height, current_width, current_height );
                 *width = current_width;
                 *height = current_height;
@@ -665,7 +676,7 @@ int fw_intf_stream_set_output_format( uint32_t ctx_id, isp_v4l2_stream_type_t st
             string_value = "OF_MODE_Y8UV88_2X2";
             break;
 
-        case ISP_V4L2_PIX_FMT_NULL:
+        case V4L2_PIX_FMT_MODALIX_NULL:
             value = OF_MODE_DISABLE;
             string_value = "OF_MODE_DISABLE";
             break;
@@ -3354,4 +3365,89 @@ int fw_intf_get_register_address( uint32_t ctx_id, int *ret_val )
 #endif
 
     return rc;
+}
+
+/* ---------- kf_info accessors (V4L2 SENSOR_INFO_BLOB / CMOS_*_LOG2) ---------- */
+
+int fw_intf_get_sensor_info_blob( uint32_t ctx_id, void *out, size_t out_sz )
+{
+    acamera_isp_ctx_ptr_t p_ictx;
+
+    if ( !out || out_sz < sizeof( acamera_cmd_sensor_info ) ) {
+        return -EINVAL;
+    }
+    if ( !fw_intf_is_context_initialised( ctx_id ) ) {
+        return -EBUSY;
+    }
+    p_ictx = get_ctx_ptr_by_id( ctx_id );
+    if ( !p_ictx ) {
+        return -EINVAL;
+    }
+    memset( out, 0, sizeof( acamera_cmd_sensor_info ) );
+    WRAP_GENERAL_CMD( p_ictx, CMD_ID_SENSOR_INFO, CMD_DIRECTION_GET,
+                      NULL, (uint32_t *)out );
+    return 0;
+}
+
+int fw_intf_get_cmos_max_exposure_log2( uint32_t ctx_id, int *ret_val )
+{
+    acamera_isp_ctx_ptr_t p_ictx;
+    int32_t               v = 0;
+
+    if ( !ret_val ) {
+        return -EINVAL;
+    }
+    if ( !fw_intf_is_context_initialised( ctx_id ) ) {
+        return -EBUSY;
+    }
+    p_ictx = get_ctx_ptr_by_id( ctx_id );
+    if ( !p_ictx ) {
+        return -EINVAL;
+    }
+    WRAP_GENERAL_CMD( p_ictx, CMD_ID_CMOS_MAX_EXPOSURE_LOG2, CMD_DIRECTION_GET,
+                      NULL, (uint32_t *)&v );
+    *ret_val = v;
+    return 0;
+}
+
+int fw_intf_get_cmos_again_log2( uint32_t ctx_id, int *ret_val )
+{
+    acamera_isp_ctx_ptr_t p_ictx;
+    int32_t               v = 0;
+
+    if ( !ret_val ) {
+        return -EINVAL;
+    }
+    if ( !fw_intf_is_context_initialised( ctx_id ) ) {
+        return -EBUSY;
+    }
+    p_ictx = get_ctx_ptr_by_id( ctx_id );
+    if ( !p_ictx ) {
+        return -EINVAL;
+    }
+    WRAP_GENERAL_CMD( p_ictx, CMD_ID_CMOS_ANALOG_GAIN, CMD_DIRECTION_GET,
+                      NULL, (uint32_t *)&v );
+    *ret_val = v;
+    return 0;
+}
+
+int fw_intf_get_cmos_dgain_log2( uint32_t ctx_id, int *ret_val )
+{
+    acamera_isp_ctx_ptr_t p_ictx;
+    int32_t               v = 0;
+
+    if ( !ret_val ) {
+        return -EINVAL;
+    }
+    if ( !fw_intf_is_context_initialised( ctx_id ) ) {
+        return -EBUSY;
+    }
+    p_ictx = get_ctx_ptr_by_id( ctx_id );
+    if ( !p_ictx ) {
+        return -EINVAL;
+    }
+    WRAP_GENERAL_CMD( p_ictx, CMD_ID_CMOS_DIGITAL_GAIN, CMD_DIRECTION_GET,
+                      NULL, (uint32_t *)&v );
+    *ret_val = v;
+    return 0;
 }

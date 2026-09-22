@@ -27,21 +27,21 @@
 void sharpening_update_hw( sharpening_fsm_t *p_fsm )
 {
     uint16_t alt_d, alt_ud;
-    uint32_t sharp_alt_d_idx = CALIBRATION_SHARP_ALT_D;
-    uint32_t sharp_alt_ud_idx = CALIBRATION_SHARP_ALT_UD;
+    uint32_t sharp_alt_d_idx = MODALIX_ISP_CALIB_SHARP_ALT_D;
+    uint32_t sharp_alt_ud_idx = MODALIX_ISP_CALIB_SHARP_ALT_UD;
     uint16_t alt_du = 0;
     uint32_t sharp_alt_du_idx;
 
     const acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
 #if ( ISP_RTL_VERSION_R == 2 )
     uint32_t raw_scaler_enable = get_context_param( p_ictx, IMAGE_RAW_SCALER_ENABLE_ID_PARAM );
-    sharp_alt_d_idx = raw_scaler_enable ? CALIBRATION_SHARP_ALT_D_WRS : CALIBRATION_SHARP_ALT_D;
-    sharp_alt_ud_idx = raw_scaler_enable ? CALIBRATION_SHARP_ALT_UD_WRS : CALIBRATION_SHARP_ALT_UD;
-    sharp_alt_du_idx = raw_scaler_enable ? CALIBRATION_SHARP_ALT_DU_WRS : CALIBRATION_SHARP_ALT_DU;
+    sharp_alt_d_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SHARP_ALT_D_WRS : MODALIX_ISP_CALIB_SHARP_ALT_D;
+    sharp_alt_ud_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SHARP_ALT_UD_WRS : MODALIX_ISP_CALIB_SHARP_ALT_UD;
+    sharp_alt_du_idx = raw_scaler_enable ? MODALIX_ISP_CALIB_SHARP_ALT_DU_WRS : MODALIX_ISP_CALIB_SHARP_ALT_DU;
 #else
-    sharp_alt_d_idx = CALIBRATION_SHARP_ALT_D;
-    sharp_alt_ud_idx = CALIBRATION_SHARP_ALT_UD;
-    sharp_alt_du_idx = CALIBRATION_SHARP_ALT_DU;
+    sharp_alt_d_idx = MODALIX_ISP_CALIB_SHARP_ALT_D;
+    sharp_alt_ud_idx = MODALIX_ISP_CALIB_SHARP_ALT_UD;
+    sharp_alt_du_idx = MODALIX_ISP_CALIB_SHARP_ALT_DU;
 #endif
     const modulation_entry_t *sharp_alt_du_table_ptr = calib_mgr_mod16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), sharp_alt_du_idx );
     const modulation_entry_t *sharp_alt_d_table_ptr;

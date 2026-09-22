@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * A V4L2 driver for Sony IMX568 cameras.
- * Copyright (C) 2020, Raspberry Pi (Trading) Ltd
- *
- * Based on Sony imx219 camera driver
- * Copyright (C) 2019-2020 Raspberry Pi (Trading) Ltd
+ * A V4L2 driver for econ IMX568 camera.
+ * Copyright (C) 2026 e-con systems
  */
 #include <linux/unaligned.h>
 #include <linux/clk.h>
@@ -28,60 +25,61 @@
 
 // Define EN_DEBUG_PRINTS Macro to enable debug prints
 #define EN_DEBUG_PRINTS
+// Default controls added to meet libcamera requirements
+#define IMX568_DEFAULT_CONTROLS (7)
 
 
 unsigned char errorcheck(char *data, unsigned int len)
 {
-        unsigned int i = 0;
-        unsigned char crc = 0x00;
+	unsigned int i = 0;
+	unsigned char crc = 0x00;
 
-        for (i = 0; i < len; i++) {
-                crc ^= data[i];
-        }
+	for (i = 0; i < len; i++)
+		crc ^= data[i];
 
-        return crc;
+	return crc;
 }
 
-static int cam_read(struct i2c_client *client, u8 * val, u32 count)
+static int cam_read(struct i2c_client *client, u8 *val, u32 count)
 {
-        int ret;
-        struct i2c_msg msg = {
-                .addr = client->addr,
-                .flags = 0,
-                .buf = val,
-        };
+	int ret;
+	struct i2c_msg msg = {
+		.addr = client->addr,
+		.flags = 0,
+		.buf = val,
+	};
 
-        msg.flags = I2C_M_RD;
-        msg.len = count;
-        ret = i2c_transfer(client->adapter, &msg, 1);
-        if (ret < 0)
-                goto err;
+	msg.flags = I2C_M_RD;
+	msg.len = count;
+	ret = i2c_transfer(client->adapter, &msg, 1);
+	if (ret < 0)
+		goto err;
 
-        return 0;
+	return 0;
 
- err:
-        dev_err(&client->dev, "Failed reading register ret = %d!\n", ret);
-        return ret;
+err:
+	dev_err(&client->dev, "Failed reading register ret = %d!\n", ret);
+	return ret;
 }
 
-static int cam_write(struct i2c_client *client, u8 * val, u32 count)
+static int cam_write(struct i2c_client *client, u8 *val, u32 count)
 {
-        int ret;
-        struct i2c_msg msg = {
-                .addr = client->addr,
-                .flags = 0,
-                .len = count,
-                .buf = val,
-        };
+	int ret;
+	struct i2c_msg msg = {
+		.addr = client->addr,
+		.flags = 0,
+		.len = count,
+		.buf = val,
+	};
 
-        ret = i2c_transfer(client->adapter, &msg, 1);
-        if (ret < 0) {
-                dev_err(&client->dev, "Failed writing register ret = %d!\n",
-                        ret);
-                return ret;
-        }
+	ret = i2c_transfer(client->adapter, &msg, 1);
+	if (ret < 0) {
+		dev_dbg(&client->dev, "Failed writing register ret = %d!\n",
+				ret);
+		return ret;
+	}
 
-        return 0;
+	return 0;
 }
 
 /* --------------------- GPIO Toggling --------------------- */
@@ -89,188 +87,193 @@ static int cam_write(struct i2c_client *client, u8 * val, u32 count)
 static void toggle_gpio_mcu(struct gpio_desc *gpio, int val)
 {
 	if (gpiod_cansleep(gpio)) {
-		gpiod_direction_output(gpio,val);
+		gpiod_direction_output(gpio, val);
 		gpiod_set_value_cansleep(gpio, val);
 	} else {
-		gpiod_direction_output(gpio,val);
+		gpiod_direction_output(gpio, val);
 		gpiod_set_value_cansleep(gpio, val);
 	}
 }
 
-static int cam_get_cmd_status(struct i2c_client *client, uint8_t * cmd_id,
-                              uint16_t * cmd_status, uint8_t * ret_code)
+static int cam_get_cmd_status(struct i2c_client *client, uint8_t *cmd_id,
+		uint16_t *cmd_status, uint8_t *ret_code)
 {
-        unsigned char mc_data[100];
-        unsigned char mc_ret_data[100];
-        uint32_t payload_len = 0, err = 0;
-        uint8_t orig_crc = 0, calc_crc = 0;
+	unsigned char mc_data[100];
+	unsigned char mc_ret_data[100];
+	uint32_t payload_len = 0, err = 0;
+	uint8_t orig_crc = 0, calc_crc = 0;
 
-		// Number of bytes will be transmitted in the 2nd i2c transaction
-        payload_len = 1;
+	// Number of bytes will be transmitted in the 2nd i2c transaction
+	payload_len = 1;
 
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_GET_STATUS;
-        mc_data[2] = payload_len >> 8;
-        mc_data[3] = payload_len & 0xFF;
-        mc_data[4] = errorcheck(&mc_data[2], 2);
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_GET_STATUS;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
 
-        cam_write(client, mc_data, TX_LEN_PKT);
-        if (err != 0) {
-                dev_err(&client->dev,
-				" %s(%d) MCU Get CMD Status Write Error - %d \n", __func__, __LINE__, err);
-                return -1;
-        }
+	cam_write(client, mc_data, TX_LEN_PKT);
+	if (err != 0) {
+		dev_dbg(&client->dev,
+				"%s(%d) MCU Get CMD Status Write Error - %d\n",
+				__func__, __LINE__, err);
+		return -1;
+	}
 
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_GET_STATUS;
-        mc_data[2] = *cmd_id;
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_GET_STATUS;
+	mc_data[2] = *cmd_id;
 
-        err = cam_write(client, mc_data, 3);
-        if (err != 0) {
-                dev_err(&client->dev,
-				" %s(%d) MCU Get CMD Status Write Error - %d \n", __func__, __LINE__, err);
-                return -1;
-        }
+	err = cam_write(client, mc_data, 3);
+	if (err != 0) {
+		dev_dbg(&client->dev,
+				"%s(%d) MCU Get CMD Status Write Error - %d\n",
+				__func__, __LINE__, err);
+		return -1;
+	}
 
-        payload_len = CMD_STATUS_MSG_LEN;
-        memset(mc_ret_data, 0x00, payload_len);
+	payload_len = CMD_STATUS_MSG_LEN;
+	memset(mc_ret_data, 0x00, payload_len);
 
-        err = cam_read(client, mc_ret_data, payload_len);
-        if (err != 0) {
-                dev_err(&client->dev,
-				" %s(%d) MCU Get CMD Status Length Error - %d \n", __func__, __LINE__, err);
-                return -1;
-        }
+	err = cam_read(client, mc_ret_data, payload_len);
+	if (err != 0) {
+		dev_dbg(&client->dev,
+				"%s(%d) MCU Get CMD Status Length Error - %d\n",
+				__func__, __LINE__, err);
+		return -1;
+	}
 
-        /* Verify CRC */
-        orig_crc = mc_ret_data[payload_len - 2];
-        calc_crc = errorcheck(&mc_ret_data[2], 3);
-        if (orig_crc != calc_crc) {
-                dev_err(&client->dev,
-				" %s(%d) MCU Get CMD Status Error CRC 0x%02x != 0x%02x \n", __func__,
-				__LINE__, orig_crc, calc_crc);
-                return -1;
-        }
+	/* Verify CRC */
+	orig_crc = mc_ret_data[payload_len - 2];
+	calc_crc = errorcheck(&mc_ret_data[2], 3);
+	if (orig_crc != calc_crc) {
+		dev_dbg(&client->dev,
+				" %s(%d) MCU Get CMD Status Error CRC 0x%02x != 0x%02x\n",
+				__func__, __LINE__, orig_crc, calc_crc);
+		return -1;
+	}
 
-        *cmd_id = mc_ret_data[2];
-        *cmd_status = mc_ret_data[3] << 8 | mc_ret_data[4];
-        *ret_code = mc_ret_data[payload_len - 1];
+	*cmd_id = mc_ret_data[2];
+	*cmd_status = mc_ret_data[3] << 8 | mc_ret_data[4];
+	*ret_code = mc_ret_data[payload_len - 1];
 
-        return 0;
+	return 0;
 }
 
 /* NOTE : Caller need to take the lock */
 static int cam_set_ctrl(struct i2c_client *client, struct imx568 *priv, uint32_t arg_ctrl_id,
-                        uint8_t ctrl_type, int64_t curr_val)
+		uint8_t ctrl_type, int64_t curr_val)
 {
-        unsigned char mc_data[100];
-        uint32_t payload_len = 0, ctrl_val_len = 0;
+	unsigned char mc_data[100];
+	uint32_t payload_len = 0, ctrl_val_len = 0;
 
-        uint16_t cmd_status = 0, index = 0xFFFF;
-        uint8_t retcode = 0, cmd_id = 0;
-        int loop = 0, ret = 0, err =0;
+	uint16_t cmd_status = 0, index = 0xFFFF;
+	uint8_t retcode = 0, cmd_id = 0;
+	int loop = 0, ret = 0, err = 0;
 	int retry = 10;
 
-        /* call ISP Ctrl config command */
-        for (loop = 0; loop < priv->num_ctrls; loop++) {
-                if (priv->ctrldb[loop] == arg_ctrl_id) {
-                        index = loop;
-                        break;
-                }
-        }
-        if (index == 0xFFFF) {
-                ret = -EINVAL;
-                goto exit;
-        }
+
+	/* call ISP Ctrl config command */
+	for (loop = 0; loop < priv->num_ctrls; loop++) {
+		if (priv->ctrldb[loop] == arg_ctrl_id) {
+			index = loop;
+			break;
+		}
+	}
+	if (index == 0xFFFF) {
+		ret = -EINVAL;
+		goto exit;
+	}
 	payload_len =
 		(ctrl_type == CTRL_STANDARD) ? 11 : 20;
-        /* First Txn Payload length = 0 */
+	/* First Txn Payload length = 0 */
 	ctrl_val_len =
 		(ctrl_type == CTRL_STANDARD) ? 4 : 8;
 
 
 	mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_SET_CTRL;
-        mc_data[2] = payload_len >> 8;
-        mc_data[3] = payload_len & 0xFF;
-        mc_data[4] = errorcheck(&mc_data[2], 2);
+	mc_data[1] = CMD_ID_SET_CTRL;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
 
-        cam_write(client, mc_data, TX_LEN_PKT);
+	cam_write(client, mc_data, TX_LEN_PKT);
 
-        /* Second Txn */
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_SET_CTRL;
+	/* Second Txn */
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_SET_CTRL;
 
-        /* Index */
-        mc_data[2] = index >> 8;
-        mc_data[3] = index & 0xFF;
+	/* Index */
+	mc_data[2] = index >> 8;
+	mc_data[3] = index & 0xFF;
 
-        /* Control ID */
-        mc_data[4] = arg_ctrl_id >> 24;
-        mc_data[5] = arg_ctrl_id >> 16;
-        mc_data[6] = arg_ctrl_id >> 8;
-        mc_data[7] = arg_ctrl_id & 0xFF;
+	/* Control ID */
+	mc_data[4] = arg_ctrl_id >> 24;
+	mc_data[5] = arg_ctrl_id >> 16;
+	mc_data[6] = arg_ctrl_id >> 8;
+	mc_data[7] = arg_ctrl_id & 0xFF;
 
-        /* Ctrl Type */
-        mc_data[8] = ctrl_type;
+	/* Ctrl Type */
+	mc_data[8] = ctrl_type;
 
-        /* Ctrl Value */
-		if (ctrl_type == CTRL_STANDARD) {
-			mc_data[9] = curr_val >> 24;
-			mc_data[10] = curr_val >> 16;
-			mc_data[11] = curr_val >> 8;
-			mc_data[12] = curr_val & 0xFF;
-			/* CRC */
-			mc_data[13] = errorcheck(&mc_data[2], payload_len);
+	/* Ctrl Value */
+	if (ctrl_type == CTRL_STANDARD) {
+		mc_data[9] = curr_val >> 24;
+		mc_data[10] = curr_val >> 16;
+		mc_data[11] = curr_val >> 8;
+		mc_data[12] = curr_val & 0xFF;
+		/* CRC */
+		mc_data[13] = errorcheck(&mc_data[2], payload_len);
 
-		} else {
-			mc_data[9]  = V4L2_CTRL_TYPE_INTEGER64;
-			mc_data[10] = ctrl_val_len >> 24;
-			mc_data[11] = ctrl_val_len >> 16;
-			mc_data[12] = ctrl_val_len >> 8;
-			mc_data[13] = ctrl_val_len & 0xFF;
-			for (loop = 0;loop < ctrl_val_len; loop++)
-				mc_data[21-loop] = (curr_val >> (8 * loop));
-			/* CRC */
-			mc_data[22] = errorcheck(&mc_data[2], payload_len);
+	} else {
+		mc_data[9]  = V4L2_CTRL_TYPE_INTEGER64;
+		mc_data[10] = ctrl_val_len >> 24;
+		mc_data[11] = ctrl_val_len >> 16;
+		mc_data[12] = ctrl_val_len >> 8;
+		mc_data[13] = ctrl_val_len & 0xFF;
+		for (loop = 0; loop < ctrl_val_len; loop++)
+			mc_data[21-loop] = (curr_val >> (8 * loop));
+		/* CRC */
+		mc_data[22] = errorcheck(&mc_data[2], payload_len);
+	}
+	err = cam_write(client, mc_data, payload_len+3);
+	if (err != 0) {
+		dev_dbg(&client->dev, " %s(%d) MCU Set Ctrl Error - %d\n", __func__,
+				__LINE__, err);
+		ret = -1;
+		goto exit;
+	}
+
+	while (--retry > 0) {
+		cmd_id = CMD_ID_SET_CTRL;
+		if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
+				0) {
+			dev_dbg(&client->dev, " %s(%d) MCU Get CMD Status Error\n", __func__,
+					__LINE__);
+			ret = -1;
+			goto exit;
 		}
-        err = cam_write(client, mc_data, payload_len+3);
-        if (err != 0) {
-                dev_err(&client->dev," %s(%d) MCU Set Ctrl Error - %d \n", __func__,
-                       __LINE__, err);
-                ret = -1;
-                goto exit;
-        }
 
-        while (--retry > 0) {
-		yield();
-                cmd_id = CMD_ID_SET_CTRL;
-                if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
-                    0) {
-                        dev_err(&client->dev," %s(%d) MCU Get CMD Status Error \n", __func__,
-                               __LINE__);
-                        ret = -1;
-                        goto exit;
-                }
+		if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
+				(retcode == ERRCODE_SUCCESS)) {
+			ret = 0;
+			goto exit;
+		}
 
-                if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
-                    (retcode == ERRCODE_SUCCESS)) {
-                        ret = 0;
-                        goto exit;
-                }
+		if ((retcode != ERRCODE_BUSY) &&
+				((cmd_status != MCU_CMD_STATUS_PENDING))) {
+			dev_err(&client->dev,
+					"(%s) %d MCU Get CMD Error STATUS = 0x%04x RET = 0x%02x\n",
+					__func__, __LINE__, cmd_status, retcode);
+			ret = -1;
+			goto exit;
+		}
+		msleep(1);
+	}
 
-                if ((retcode != ERRCODE_BUSY) &&
-                    ((cmd_status != MCU_CMD_STATUS_PENDING))) {
-                       dev_err(&client->dev,
-                           "(%s) %d MCU Get CMD Error STATUS = 0x%04x RET = 0x%02x\n",
-                             __func__, __LINE__, cmd_status, retcode);
-                        ret = -1;
-                        goto exit;
-                }
-        }
+exit:
 
- exit:
-        return ret;
+	return ret;
 }
 
 static int cam_set_exposure(struct i2c_client *client, struct imx568 *priv, s64 val)
@@ -279,15 +282,16 @@ static int cam_set_exposure(struct i2c_client *client, struct imx568 *priv, s64 
 	uint64_t data = val;
 
 	while (--retry > 0) {
-		if ((err = cam_set_ctrl(client, priv, EXPOSURE_CTRL_ID, CTRL_EXTENDED, data)) < 0) {
-			dev_err(&client->dev, "%s[%d] Fail! retrying\n",__func__,__LINE__);
+		err = cam_set_ctrl(client, priv, EXPOSURE_CTRL_ID, CTRL_EXTENDED, data);
+		if (err < 0) {
+			dev_dbg(&client->dev, "%s[%d] Fail! retrying\n", __func__, __LINE__);
 			continue;
 		} else {
 			return 0;
 		}
 	}
 
-	dev_err(&client->dev, "%s[%d] Failed after retries!\n",__func__,__LINE__);
+	dev_err(&client->dev, "%s[%d] Failed, error : %d!\n", __func__, __LINE__, err);
 	return -EINVAL;
 
 }
@@ -298,93 +302,113 @@ static int cam_set_framerate(struct i2c_client *client, struct imx568 *priv, s64
 	uint64_t data = val;
 
 	while (--retry > 0) {
-		if ((err = cam_set_ctrl(client, priv, FRAMERATE_CTRL_ID, CTRL_EXTENDED, data)) < 0) {
-			dev_err(&client->dev, "%s[%d] Fail! retrying\n",__func__,__LINE__);
+		err = cam_set_ctrl(client, priv, FRAMERATE_CTRL_ID, CTRL_EXTENDED, data);
+		if (err < 0) {
+			dev_dbg(&client->dev, "%s[%d] Fail! retrying\n", __func__, __LINE__);
 			continue;
-		} else {
-			return 0;
 		}
+		break;
+	}
+	if (err < 0) {
+		dev_err(&client->dev, "%s[%d] Failed, error : %d!\n", __func__, __LINE__, err);
+		return -EINVAL;
 	}
 
-	dev_err(&client->dev, "%s[%d] Failed after retries!\n",__func__,__LINE__);
-	return -EINVAL;
+	priv->curr_framerate = div_u64(data, MULTIPLY_FACTOR);
+
+	retry = 5;
+	while (--retry > 0) {
+		err = cam_set_ctrl(client, priv,
+				EXPOSURE_CTRL_ID,
+				CTRL_EXTENDED,
+				priv->curr_exposure);
+		if (err < 0) {
+			dev_dbg(&client->dev, "%s[%d] Fail! retrying\n",
+					__func__, __LINE__);
+			continue;
+		}
+		break;
+	}
+	if (err < 0)
+		dev_err(&client->dev, "%s[%d] - Exposure Set Control Failed after all retries, error : %d\n",
+				__func__, __LINE__, err);
+
+	return 0;
 
 }
 
 // MCU APIs
 static int cam_init(struct i2c_client *client)
 {
-        unsigned char mc_data[100];
-        uint32_t payload_len = 0;
+	unsigned char mc_data[100];
+	uint32_t payload_len = 0;
 
-        uint16_t cmd_status = 0;
-        uint8_t retcode = 0, cmd_id = 0;
-	int retry = 10, err = 0 ,ret = 0;
+	uint16_t cmd_status = 0;
+	uint8_t retcode = 0, cmd_id = 0;
+	int retry = 10, err = 0, ret = 0;
 
-        /* check current status of cam */
-        cmd_id = CMD_ID_INIT_CAM;
-        if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) < 0) {
-                dev_err(&client->dev," %s(%d) MCU CAM Init ISP Error \n",
+	/* check current status of cam */
+	cmd_id = CMD_ID_INIT_CAM;
+	if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) < 0) {
+		dev_err(&client->dev, " %s(%d) MCU CAM Init ISP Error\n",
 				__func__, __LINE__);
-                return -1;
-        }
+		return -1;
+	}
 
-        if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
-            (retcode == ERRCODE_SUCCESS)) {
-                dev_info(&client->dev," %s %d CAM Initialized !! \n",
-				__func__, __LINE__ );
-                return 0;
-        }
+	if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
+			(retcode == ERRCODE_SUCCESS)) {
+		dev_info(&client->dev, " %s %d CAM Initialized !!\n",
+				__func__, __LINE__);
+		return 0;
+	}
 
-        /* call cam init command */
-        payload_len = 0;
+	/* call cam init command */
+	payload_len = 0;
 
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_INIT_CAM;
-        mc_data[2] = payload_len >> 8;
-        mc_data[3] = payload_len & 0xFF;
-        mc_data[4] = errorcheck(&mc_data[2], 2);
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_INIT_CAM;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
 
-        cam_write(client, mc_data, TX_LEN_PKT);
+	cam_write(client, mc_data, TX_LEN_PKT);
 
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_INIT_CAM;
-        err = cam_write(client, mc_data, 2);
-        if (err != 0) {
-                dev_err(&client->dev," %s(%d) MCU Get CMD CAM Init Error - "
-				"%d \n", __func__, __LINE__, err);
-                return -1;
-        }
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_INIT_CAM;
+	err = cam_write(client, mc_data, 2);
+	if (err != 0) {
+		dev_err(&client->dev, "%s(%d) MCU Get CMD CAM Init Error - %d\n",
+				__func__, __LINE__, err);
+		return -1;
+	}
 
-        while (--retry > 0) {
-		msleep (100); // wait till sensor to initialise
-                /* Some Sleep for init to process */
-		yield();
-                cmd_id = CMD_ID_INIT_CAM;
-                if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
-                    0) {
-                       dev_err(&client->dev," %s(%d) MCU CMD ID CAM INIT Error \n", __func__,
-                               __LINE__);
-                        msleep(5);
+	while (--retry > 0) {
+		msleep(100); // wait till sensor to initialise
+		cmd_id = CMD_ID_INIT_CAM;
+		if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
+				0) {
+			dev_err(&client->dev, "%s(%d) MCU CMD ID CAM INIT Error\n", __func__,
+					__LINE__);
+			msleep(5);
 			ret = -1;
 			continue;
-                }
+		}
 
-                if (cmd_status == MCU_CMD_STATUS_SUCCESS) {
-                        dev_err(&client->dev,"%s(%d) CAM INIT Success !! \n", __func__,__LINE__);
+		if (cmd_status == MCU_CMD_STATUS_SUCCESS) {
+			dev_err(&client->dev, "%s(%d) CAM INIT Success !!\n", __func__, __LINE__);
 			ret = 0;
 			goto exit_init;
-                }
+		}
 
-                if ((retcode != ERRCODE_BUSY) &&
-                    ((cmd_status != MCU_CMD_STATUS_PENDING))) {
-                       dev_err(&client->dev,
-                            "(%s) %d MCU CMD ID CAM INIT Error STATUS = 0x%04x RET = 0x%02x\n",
-                             __func__, __LINE__, cmd_status, retcode);
-		       ret = -1;
-                        continue;
-                }
-        }
+		if ((retcode != ERRCODE_BUSY) &&
+				((cmd_status != MCU_CMD_STATUS_PENDING))) {
+			dev_err(&client->dev,
+					"(%s) %d MCU CMD ID CAM INIT Error STATUS = 0x%04x RET = 0x%02x\n",
+					__func__, __LINE__, cmd_status, retcode);
+			ret = -1;
+			continue;
+		}
+	}
 exit_init:
 	return ret;
 }
@@ -466,63 +490,108 @@ static int32_t cam_set_gain(struct imx568 *imx568, uint64_t gain)
 	return ret;
 }
 
-#define AGAIN_PRECISION 12
-#define LOG10_2_AGAIN_PREC ( 1233 ) // log10(2) << AGAIN_PRECISION
-#define LOG_TO_DB ( 20 )
-#define NORMALISE_FACTOR (LOG2_GAIN_SHIFT - AGAIN_PRECISION)
-#define CONVERSION_FACTOR ((LOG10_2_AGAIN_PREC * LOG_TO_DB * GAIN_FACTOR))
-
-static int32_t sensor_set_analogue_gain( struct imx568 *imx568, int32_t gain )
+/* The MCU has one total-gain control: 0..IMX568_ANA_GAIN_MAX is analog, anything
+ * above it is digital stacked on the full analog ceiling. Write analog+digital as
+ * one value — writing either channel on its own drops the other's contribution. */
+static int32_t sensor_apply_total_gain(struct imx568 *imx568)
 {
-    uint32_t a_gain;
-	int32_t ret = 0;
+	int32_t total = (imx568->again > 0 ? imx568->again : 0) +
+			(imx568->dgain > 0 ? imx568->dgain : 0);
 
-	if (imx568->again != gain) {
-		// Conversion of log2_gain value to corresponded sensor gain value in dB
-	    a_gain = (((gain >> NORMALISE_FACTOR) * CONVERSION_FACTOR)) >> AGAIN_PRECISION;
-		// Conversion of dB to Gain Values to parse to the MCU to configure sensor
-		ret = cam_set_gain (imx568, (uint64_t)a_gain);
-		if (ret == 0) {
-			imx568->again = gain;
-		}
-	}
-
-    return ret;
+	return cam_set_gain(imx568, (uint64_t)total);
 }
 
-static int32_t sensor_set_digital_gain( struct imx568 *imx568, int32_t gain )
+static int32_t sensor_set_analogue_gain(struct imx568 *imx568, int32_t gain)
 {
-    uint32_t d_gain;
-    int32_t ret = 0;
-	
-	if (imx568->dgain != gain) {
-		// Conversion of log2_gain value to corresponded sensor gain value in dB
-		d_gain = (((gain >> NORMALISE_FACTOR) * CONVERSION_FACTOR)) >> AGAIN_PRECISION;
-		// Conversion of dB to Gain Values to parse to the MCU to configure sensor
-		d_gain = (d_gain) + (24 * GAIN_FACTOR); // 24 - Adding Sensor Analog Gain maximum: 24dB
-		ret = cam_set_gain (imx568, (uint64_t)d_gain);
-		if (ret == 0){
-			imx568	->dgain = gain;
-		}
+	int32_t prev = imx568->again;
+	int32_t ret = 0;
+
+	if (prev != gain) {
+		imx568->again = gain;
+		ret = sensor_apply_total_gain(imx568);
+		if (ret != 0)
+			imx568->again = prev;
 	}
 
 	return ret;
 }
 
-static int32_t sensor_set_exposure( struct imx568 *imx568, uint32_t integration_time)
+static int32_t sensor_set_digital_gain(struct imx568 *imx568, int32_t gain)
 {
-    uint64_t exp = 0;
-    int32_t ret = 0;
+	int32_t prev = imx568->dgain;
+	int32_t ret = 0;
 
-    if (imx568->integration_time != integration_time) {
-		// Conversion of lines to exposure time (us)
-		exp = (uint64_t)(integration_time) * (imx568->cam_frmfmt[imx568->frmfmt_mode].hmax);
-		exp = (exp * EXPOSURE_FACTOR)/ SENSOR_PIXEL_CLOCK;
-		ret = cam_set_exposure (imx568->i2c_client, imx568, exp);
-		if (ret == 0) {
-			imx568->integration_time = integration_time;
+	if (prev != gain) {
+		imx568->dgain = gain;
+		ret = sensor_apply_total_gain(imx568);
+		if (ret != 0)
+			imx568->dgain = prev;
+	}
+
+	return ret;
+}
+
+static int32_t sensor_set_exposure( struct imx568 *imx568, uint32_t exposure_us)
+{
+    int32_t ret = 0;
+	uint32_t fps = 0;
+	uint32_t prev_exposure = imx568->curr_exposure;
+
+	/* Honour the exposure window advertised by the V4L2_CID_EXPOSURE control
+	 * (microseconds). Any request outside [minimum, maximum] is ignored and
+	 * the current exposure is left unchanged. */
+	if (imx568->exposure &&
+	    (exposure_us < imx568->exposure->minimum ||
+	     exposure_us > imx568->exposure->maximum)) {
+		dev_warn(&imx568->i2c_client->dev,
+				"%s: exposure %u us outside range [%lld, %lld] us, ignoring\n",
+				__func__, exposure_us,
+				imx568->exposure->minimum, imx568->exposure->maximum);
+		return 0;
+	}
+
+    if (imx568->curr_exposure != exposure_us) {
+		fps = EXPOSURE_FACTOR / exposure_us;
+
+		dev_dbg(&imx568->i2c_client->dev, "%s: exposure %u us, fps calculated %u\n", __func__, exposure_us, fps);
+
+		if(fps > imx568->set_framerate)
+			fps = imx568->set_framerate; // Cap the framerate to max supported by the sensor mode
+
+		/* cam_set_framerate() re-sends curr_exposure with the rate, so publish
+		 * the new exposure first and the pair it sends stays consistent. */
+		imx568->curr_exposure = exposure_us;
+
+		/* Exposure must fit the frame period at every step. Raising the rate
+		 * shortens the period, so the shorter exposure goes first; lowering it
+		 * lengthens the period, so the rate goes first. */
+		if (fps > imx568->curr_framerate) {
+			ret = cam_set_exposure (imx568->i2c_client, imx568, exposure_us);
+			if (ret < 0)
+				goto restore;
+
+			/* The MCU latches exposure only when the rate command accompanies it. */
+			ret = cam_set_framerate (imx568->i2c_client, imx568, (fps * MULTIPLY_FACTOR));
+			if (ret < 0)
+				goto restore;
+		} else {
+			ret = cam_set_framerate (imx568->i2c_client, imx568, (fps * MULTIPLY_FACTOR));
+			if (ret < 0)
+				goto restore;
+
+			ret = cam_set_exposure (imx568->i2c_client, imx568, exposure_us);
+			if (ret < 0)
+				goto restore;
 		}
-    }
+		imx568->curr_framerate = fps;
+	}
+
+    return ret;
+
+restore:
+	dev_err(&imx568->i2c_client->dev, "%s[%d] Failed to set exposure %u us at %u fps\n",
+			__func__, __LINE__, exposure_us, fps);
+	imx568->curr_exposure = prev_exposure;
 
     return ret;
 }
@@ -531,20 +600,145 @@ static int imx568_set_ctrl(struct v4l2_ctrl *ctrl)
 	struct imx568 *imx568 =
 		container_of(ctrl->handler, struct imx568, ctrl_handler);
 	struct i2c_client *client = v4l2_get_subdevdata(&imx568->sd);
-	int ret = 0;
+	int ret = 0, retry = 5;
 
-		switch (ctrl->id) {
+	switch (ctrl->id) {
+	case EXPOSURE_CTRL_ID:
+		while (--retry > 0) {
+			ret = cam_set_ctrl(client, imx568,
+					EXPOSURE_CTRL_ID,
+					CTRL_EXTENDED,
+					ctrl->val);
+			if (ret < 0) {
+				dev_dbg(&client->dev, "%s[%d] Fail! retrying\n",
+						__func__, __LINE__);
+				continue;
+			}
+			imx568->curr_exposure = ctrl->val;
+			break;
+		}
+		if (ret < 0)
+			dev_err(&client->dev, "%s[%d] - %s Set Control Failed after all retries\n",
+					__func__, __LINE__, ctrl->name);
+		break;
+
+	case GAIN_CTRL_ID:
+		while (--retry > 0) {
+			ret = cam_set_ctrl(client, imx568, GAIN_CTRL_ID, CTRL_EXTENDED, ctrl->val);
+			if (ret < 0) {
+				dev_dbg(&client->dev, "%s[%d] Fail! retrying\n",
+						__func__, __LINE__);
+				continue;
+			}
+			break;
+		}
+		if (ret < 0)
+			dev_err(&client->dev, "%s[%d] - %s Set Control Failed after all retries\n",
+					__func__, __LINE__, ctrl->name);
+		break;
+
+	case FRAMERATE_CTRL_ID:
+		while (--retry > 0) {
+			ret = cam_set_ctrl(client, imx568,
+					FRAMERATE_CTRL_ID,
+					CTRL_EXTENDED,
+					ctrl->val);
+			if (ret < 0) {
+				dev_dbg(&client->dev, "%s[%d] Fail! retrying\n",
+						__func__, __LINE__);
+				continue;
+			}
+			imx568->set_framerate = (ctrl->val)/ MULTIPLY_FACTOR;
+			/* Hard ceiling on the validated rate. */
+			if (imx568->variant && imx568->variant->max_fps &&
+			    imx568->set_framerate > imx568->variant->max_fps)
+				imx568->set_framerate = imx568->variant->max_fps;
+			break;
+		}
+		if (ret < 0) {
+			dev_err(&client->dev, "%s[%d] - %s Set Control Failed after all retries\n",
+					__func__, __LINE__, ctrl->name);
+			break;
+		}
+
+		retry = 5;
+		while (--retry > 0) {
+			ret = cam_set_ctrl(client, imx568,
+					EXPOSURE_CTRL_ID,
+					CTRL_EXTENDED,
+					imx568->curr_exposure);
+			if (ret < 0) {
+				dev_dbg(&client->dev, "%s[%d] Fail! retrying\n",
+						__func__, __LINE__);
+				continue;
+			}
+			break;
+		}
+		if (ret < 0)
+			dev_err(&client->dev, "%s[%d] - Exposure Set Control Failed after all retries\n",
+					__func__, __LINE__);
+		break;
 		case V4L2_CID_ANALOGUE_GAIN:
+			dev_dbg(&client->dev, "DBG: imx568 analogue gain = %d\n", ctrl->val);
 			ret = sensor_set_analogue_gain(imx568, ctrl->val);
 			break;
-    	case V4L2_CID_EXPOSURE:
+		case V4L2_CID_EXPOSURE:
 			ret = sensor_set_exposure(imx568, ctrl->val);
 			break;
-    	case V4L2_CID_DIGITAL_GAIN:
+		case V4L2_CID_DIGITAL_GAIN:
+			dev_dbg(&client->dev, "DBG: imx568 digital gain = %d\n", ctrl->val);
 			ret = sensor_set_digital_gain(imx568, ctrl->val);
 			break;
+		case IMX568_CID_EXPOSURE_MIN_US: {
+			/* Narrow/widen the lower bound of the live exposure window.
+			 * Held under the ctrl-handler lock here, so use the lock-free
+			 * __v4l2_ctrl_modify_range() variant to avoid deadlock. */
+			s64 new_min = ctrl->val;
+			s64 cur_max, def;
+
+			if (!imx568->exposure)
+				break;
+			cur_max = imx568->exposure->maximum;
+			if (new_min > cur_max) {
+				dev_warn(&client->dev,
+						"%s: manual_exposure_min %lld > current max %lld us, ignoring\n",
+						__func__, new_min, cur_max);
+				break;
+			}
+			def = clamp_t(s64, IMX568_EXPOSURE_DEFAULT, new_min, cur_max);
+			ret = __v4l2_ctrl_modify_range(imx568->exposure, new_min, cur_max,
+					imx568->exposure->step, def);
+			if (ret)
+				dev_err(&client->dev,
+						"%s: failed to set exposure min to %lld us (%d)\n",
+						__func__, new_min, ret);
+			break;
+		}
+		case IMX568_CID_EXPOSURE_MAX_US: {
+			/* Narrow/widen the upper bound of the live exposure window. */
+			s64 new_max = ctrl->val;
+			s64 cur_min, def;
+
+			if (!imx568->exposure)
+				break;
+			cur_min = imx568->exposure->minimum;
+			if (new_max < cur_min) {
+				dev_warn(&client->dev,
+						"%s: manual_exposure_max %lld < current min %lld us, ignoring\n",
+						__func__, new_max, cur_min);
+				break;
+			}
+			def = clamp_t(s64, IMX568_EXPOSURE_DEFAULT, cur_min, new_max);
+			ret = __v4l2_ctrl_modify_range(imx568->exposure, cur_min, new_max,
+					imx568->exposure->step, def);
+			if (ret)
+				dev_err(&client->dev,
+						"%s: failed to set exposure max to %lld us (%d)\n",
+						__func__, new_max, ret);
+			break;
+		}
 	}
-	
+
 	return ret;
 }
 
@@ -552,9 +746,79 @@ static const struct v4l2_ctrl_ops imx568_ctrl_ops = {
 	.s_ctrl = imx568_set_ctrl,
 };
 
+/* Get bayer order based on flip setting. */
+static u32 imx568_get_format_code(struct imx568 *imx568, u32 code)
+{
+	unsigned int i;
+
+	lockdep_assert_held(&imx568->mutex);
+
+	for (i = 0; i < ARRAY_SIZE(codes); i+=4)
+		if (codes[i] == code)
+			break;
+
+	if (i >= ARRAY_SIZE(codes))
+		i = 0;
+
+	return codes[i];
+}
+
+static const struct v4l2_ctrl_config imx568_ctrls[] = {
+	{ // Exposure
+		.ops = &imx568_ctrl_ops,
+		.id = EXPOSURE_CTRL_ID,
+		.name = "manual_exposure",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.min = 30,
+		.max = 1000000,
+		.step = 1,
+		.def = 5000,
+	},
+	{ // Gain
+		.ops = &imx568_ctrl_ops,
+		.id = GAIN_CTRL_ID,
+		.name = "manual_gain",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.min = 0,
+		.max = 480,
+		.step = 1,
+		.def = 0,
+	},
+	{ // Frame rate
+		.ops = &imx568_ctrl_ops,
+		.id = FRAMERATE_CTRL_ID,
+		.name = "manual_framerate",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.min = 0,
+		.max = 153000000,
+		.step = 1,
+		.def = 30000000,
+	},
+	{ // Exposure window - minimum limit (microseconds)
+		.ops = &imx568_ctrl_ops,
+		.id = IMX568_CID_EXPOSURE_MIN_US,
+		.name = "manual_exposure_min",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.min = IMX568_EXPOSURE_MIN,
+		.max = IMX568_EXPOSURE_MAX,
+		.step = 1,
+		.def = IMX568_EXPOSURE_MIN,
+	},
+	{ // Exposure window - maximum limit (microseconds)
+		.ops = &imx568_ctrl_ops,
+		.id = IMX568_CID_EXPOSURE_MAX_US,
+		.name = "manual_exposure_max",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.min = IMX568_EXPOSURE_MIN,
+		.max = IMX568_EXPOSURE_MAX,
+		.step = 1,
+		.def = IMX568_EXPOSURE_MAX,
+	},
+};
+
 static int imx568_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
-				 struct v4l2_subdev_mbus_code_enum *code)
+		struct v4l2_subdev_state *sd_state,
+		struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct imx568 *imx568 = to_imx568(sd);
 
@@ -562,10 +826,12 @@ static int imx568_enum_mbus_code(struct v4l2_subdev *sd,
 		return -EINVAL;
 
 	if (code->pad == IMAGE_PAD) {
-		if (code->index > 0)
+		if (code->index >= (ARRAY_SIZE(codes) / 4))
 			return -EINVAL;
 
-		code->code = codes[code->index];
+		mutex_lock(&imx568->mutex);
+		code->code = imx568_get_format_code(imx568, codes[code->index * 4]);
+		mutex_unlock(&imx568->mutex);
 	} else {
 		if (code->index > 0)
 			return -EINVAL;
@@ -577,21 +843,49 @@ static int imx568_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int imx568_enum_frame_size(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_state *sd_state,
-				  struct v4l2_subdev_frame_size_enum *fse)
+		struct v4l2_subdev_state *sd_state,
+		struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct imx568 *imx568 = to_imx568(sd);
+	u32 code;
 
 	if (fse->pad >= NUM_PADS)
 		return -EINVAL;
 
 	if (fse->pad == IMAGE_PAD) {
+		u32 slot = fse->index;
+
 		if (fse->index >= imx568->nr_supported_formats)
 			return -EINVAL;
 
-		fse->min_width = imx568->cam_frmfmt[fse->index].size.width;
+		mutex_lock(&imx568->mutex);
+		code = imx568_get_format_code(imx568, fse->code);
+		mutex_unlock(&imx568->mutex);
+
+		if (fse->code != code)
+			return -EINVAL;
+
+		/* Skip modes above the ceiling; a hole would end enumeration. */
+		if (imx568->variant && imx568->variant->only_width) {
+			u32 seen = 0;
+
+			for (slot = 0; slot < imx568->nr_supported_formats; slot++) {
+				if (imx568->cam_frmfmt[slot].size.width !=
+					    imx568->variant->only_width ||
+				    imx568->cam_frmfmt[slot].size.height !=
+					    imx568->variant->only_height)
+					continue;
+				if (seen == fse->index)
+					break;
+				seen++;
+			}
+			if (slot >= imx568->nr_supported_formats)
+				return -EINVAL;
+		}
+
+		fse->min_width = imx568->cam_frmfmt[slot].size.width;
 		fse->max_width = fse->min_width;
-		fse->min_height = imx568->cam_frmfmt[fse->index].size.height;
+		fse->min_height = imx568->cam_frmfmt[slot].size.height;
 		fse->max_height = fse->min_height;
 	} else {
 		if (fse->code != MEDIA_BUS_FMT_SENSOR_DATA || fse->index > 0)
@@ -612,14 +906,16 @@ static void imx568_reset_colorspace(struct v4l2_mbus_framefmt *fmt)
 	fmt->colorspace = V4L2_COLORSPACE_RAW;
 	fmt->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(fmt->colorspace);
 	fmt->quantization = V4L2_MAP_QUANTIZATION_DEFAULT(true,
-							  fmt->colorspace,
-							  fmt->ycbcr_enc);
+			fmt->colorspace,
+			fmt->ycbcr_enc);
 	fmt->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(fmt->colorspace);
 }
 
 static void imx568_update_image_pad_format(struct imx568 *imx568,
-					   struct v4l2_subdev_format *fmt)
+		struct v4l2_subdev_format *fmt)
 {
+	fmt->format.width = imx568->cam_frmfmt[imx568->frmfmt_mode].size.width;
+	fmt->format.height = imx568->cam_frmfmt[imx568->frmfmt_mode].size.height;
 	fmt->format.field = V4L2_FIELD_NONE;
 	imx568_reset_colorspace(&fmt->format);
 }
@@ -633,8 +929,8 @@ static void imx568_update_metadata_pad_format(struct v4l2_subdev_format *fmt)
 }
 
 static int imx568_get_pad_format(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
-				 struct v4l2_subdev_format *fmt)
+		struct v4l2_subdev_state *sd_state,
+		struct v4l2_subdev_format *fmt)
 {
 	struct imx568 *imx568 = to_imx568(sd);
 
@@ -646,19 +942,17 @@ static int imx568_get_pad_format(struct v4l2_subdev *sd,
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		struct v4l2_mbus_framefmt *try_fmt =
 			v4l2_subdev_state_get_format(sd_state,
-						   fmt->pad);
-		/* update the code which could change due to vflip or hflip: */
-		try_fmt->code = MEDIA_BUS_FMT_SRGGB12_1X12;
+					fmt->pad);
+		try_fmt->code = fmt->pad == IMAGE_PAD ?
+				imx568_get_format_code(imx568, try_fmt->code) :
+				MEDIA_BUS_FMT_SENSOR_DATA;
 		fmt->format = *try_fmt;
 	} else {
 		if (fmt->pad == IMAGE_PAD) {
 			imx568_update_image_pad_format(imx568, fmt);
-			fmt->format.code = MEDIA_BUS_FMT_SRGGB12_1X12;
-			fmt->format.width = imx568->cam_frmfmt[imx568->frmfmt_mode].size.width;
-			fmt->format.height = imx568->cam_frmfmt[imx568->frmfmt_mode].size.height;
-		} else {
+			fmt->format.code = imx568_get_format_code(imx568, imx568->fmt_code);
+		} else
 			imx568_update_metadata_pad_format(fmt);
-		}
 	}
 
 	mutex_unlock(&imx568->mutex);
@@ -666,123 +960,124 @@ static int imx568_get_pad_format(struct v4l2_subdev *sd,
 }
 
 static int cam_stream_config(struct i2c_client *client, struct imx568 *priv,
-			uint32_t format, int mode, int frate_index)
+		uint32_t format, int mode, int frate_index)
 {
-        unsigned char mc_data[100];
-        uint32_t payload_len = 0;
+	unsigned char mc_data[100];
+	uint32_t payload_len = 0;
 
-        uint16_t cmd_status = 0, index = 0xFFFF;
-        uint8_t retcode = 0, cmd_id = 0;
-        int loop = 0, ret = 0, err = 0, retry = 10;
+	uint16_t cmd_status = 0, index = 0xFFFF;
+	uint8_t retcode = 0, cmd_id = 0;
+	int loop = 0, ret = 0, err = 0, retry = 10;
 
-        // Find Index of the streaming mode
-        for (loop = 0; (&priv->streamdb[loop])!= NULL; loop++) {
-                if (priv->streamdb[loop] == mode) {
-                        index = loop + frate_index;
-                        break;
-                }
-        }
-        if (index == 0xFFFF) {
-                ret = -EINVAL;
-                goto exit;
-        }
+	// Find Index of the streaming mode
+	for (loop = 0; loop < priv->num_fmts; loop++) {
+		if (priv->streamdb[loop] == mode) {
+			index = loop + frate_index;
+			break;
+		}
+	}
+	if (index == 0xFFFF) {
+		ret = -EINVAL;
+		goto exit;
+	}
 
-	dev_info (&client->dev, "Mode: %d, Width: %d, Height: %d, Format: 0x%x Framerate: %d\n",index,
-		priv->cam_frmfmt[mode].size.width, priv->cam_frmfmt[mode].size.height, format,
-		priv->cam_frmfmt[mode].framerates[frate_index]);
+	dev_info(&client->dev, "Mode: %d, Width: %d, Height: %d, Format: 0x%x Framerate: %d\n",
+			index, priv->cam_frmfmt[mode].size.width,
+			priv->cam_frmfmt[mode].size.height, format,
+			priv->cam_frmfmt[mode].framerates[frate_index]);
 
-        // Payload length
+	// Payload length
 	payload_len = 14;
 
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_STREAM_CONFIG;
-        mc_data[2] = payload_len >> 8;
-        mc_data[3] = payload_len & 0xFF;
-        mc_data[4] = errorcheck(&mc_data[2], 2);
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_STREAM_CONFIG;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
 
-        cam_write(client, mc_data, TX_LEN_PKT);
+	cam_write(client, mc_data, TX_LEN_PKT);
 
 	mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_STREAM_CONFIG;
-        mc_data[2] = index >> 8;
-        mc_data[3] = index & 0xFF;
+	mc_data[1] = CMD_ID_STREAM_CONFIG;
+	mc_data[2] = index >> 8;
+	mc_data[3] = index & 0xFF;
 
-        mc_data[4] = format >> 24;
-        mc_data[5] = format >> 16;
-        mc_data[6] = format >> 8;
-        mc_data[7] = format & 0xFF;
+	mc_data[4] = format >> 24;
+	mc_data[5] = format >> 16;
+	mc_data[6] = format >> 8;
+	mc_data[7] = format & 0xFF;
 
-        /* width */
-        mc_data[8] = priv->cam_frmfmt[mode].size.width >> 8;
-        mc_data[9] = priv->cam_frmfmt[mode].size.width & 0xFF;
+	/* width */
+	mc_data[8] = priv->cam_frmfmt[mode].size.width >> 8;
+	mc_data[9] = priv->cam_frmfmt[mode].size.width & 0xFF;
 
-        /* height */
-        mc_data[10] = priv->cam_frmfmt[mode].size.height >> 8;
-        mc_data[11] = priv->cam_frmfmt[mode].size.height & 0xFF;
+	/* height */
+	mc_data[10] = priv->cam_frmfmt[mode].size.height >> 8;
+	mc_data[11] = priv->cam_frmfmt[mode].size.height & 0xFF;
 
-        /* frame rate num */
-        mc_data[12] = priv->cam_frmfmt[mode].framerates[frate_index] >> 8;
-        mc_data[13] = priv->cam_frmfmt[mode].framerates[frate_index] & 0xFF;
+	/* frame rate num */
+	mc_data[12] = priv->cam_frmfmt[mode].framerates[frate_index] >> 8;
+	mc_data[13] = priv->cam_frmfmt[mode].framerates[frate_index] & 0xFF;
 
-        /* frame rate denom */
-        mc_data[14] = 0x00;
-        mc_data[15] = 0x01;
+	/* frame rate denom */
+	mc_data[14] = 0x00;
+	mc_data[15] = 0x01;
 
-        mc_data[16] = errorcheck(&mc_data[2], payload_len); // CRC
-	err = cam_write(client, mc_data, payload_len + 3); // Payload_len + CMD_SIGNATURE + CMD_ID + CRC
+	mc_data[16] = errorcheck(&mc_data[2], payload_len); // CRC
+	// Payload_len + CMD_SIGNATURE + CMD_ID + CRC
+	err = cam_write(client, mc_data, payload_len + 3);
 	if (err != 0) {
-                dev_err(&client->dev," %s(%d) MCU Stream Config Error - %d \n",
+		dev_err(&client->dev, " %s(%d) MCU Stream Config Error - %d\n",
 				__func__, __LINE__, err);
-                ret = -1;
-                goto exit;
-        }
+		ret = -1;
+		goto exit;
+	}
 
-        while (--retry > 0) {
-		/* test Some time for processing command */
-                yield();
-
-                cmd_id = CMD_ID_STREAM_CONFIG;
-                if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
-                    0) {
-                       dev_err(&client->dev,
-				       " %s(%d) MCU GET CMD Status Error : loop : %d \n",
-				       __func__, __LINE__, loop);
+	while (--retry > 0) {
+		cmd_id = CMD_ID_STREAM_CONFIG;
+		if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
+				0) {
+			dev_err(&client->dev,
+					" %s(%d) MCU GET CMD Status Error : loop : %d\n",
+					__func__, __LINE__, loop);
 			ret = -1;
-                        continue;
-                }
+			continue;
+		}
 
-                if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
-                    (retcode == ERRCODE_SUCCESS)) {
-                        dev_info(&client->dev, " %s(%d) Status Success !! \n", __func__, __LINE__);
+		if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
+				(retcode == ERRCODE_SUCCESS)) {
+			dev_info(&client->dev, " %s(%d) Status Success !!\n", __func__, __LINE__);
 			ret = 0;
-                        goto exit;
-                }
+			goto exit;
+		}
 
-                if ((retcode != ERRCODE_BUSY) &&
-                    ((cmd_status != MCU_CMD_STATUS_PENDING))) {
-                       dev_err(&client->dev,
-                            "(%s) %d ISP Get CMD Error STATUS = 0x%04x RET = 0x%02x\n",
-                             __func__, __LINE__, cmd_status, retcode);
+		if ((retcode != ERRCODE_BUSY) &&
+				((cmd_status != MCU_CMD_STATUS_PENDING))) {
+			dev_err(&client->dev,
+					"(%s) %d ISP Get CMD Error STATUS = 0x%04x RET = 0x%02x\n",
+					__func__, __LINE__, cmd_status, retcode);
 			ret = -1;
-                       	continue;
-                }
+			continue;
+		}
 		mdelay(1);
-        }
+	}
 
 exit:
-        return ret;
+	return ret;
 }
 
+static int sensor_reg_read(struct i2c_client *client, struct imx568 *priv,
+		uint16_t reg_addr, uint8_t reg_len);
+
 static int imx568_set_pad_format(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
-				 struct v4l2_subdev_format *fmt)
+		struct v4l2_subdev_state *sd_state,
+		struct v4l2_subdev_format *fmt)
 {
 	struct v4l2_mbus_framefmt *framefmt;
 	struct imx568 *imx568 = to_imx568(sd);
 	struct i2c_client *client = imx568->i2c_client;
 	int err = 0, ret = 0, i = 0;
 	int retry = 5;
-	uint64_t curr_framerate = 0;
 
 
 	if (fmt->pad >= NUM_PADS)
@@ -791,7 +1086,40 @@ static int imx568_set_pad_format(struct v4l2_subdev *sd,
 	mutex_lock(&imx568->mutex);
 
 	if (fmt->pad == IMAGE_PAD) {
-		fmt->format.code = MEDIA_BUS_FMT_SRGGB12_1X12;
+		/* Pin to the one geometry that streams. */
+		if (imx568->variant && imx568->variant->only_width &&
+		    (fmt->format.width != imx568->variant->only_width ||
+		     fmt->format.height != imx568->variant->only_height)) {
+			dev_info(&client->dev,
+					"%ux%u not supported in this mode, using %ux%u\n",
+					fmt->format.width, fmt->format.height,
+					imx568->variant->only_width,
+					imx568->variant->only_height);
+			fmt->format.width = imx568->variant->only_width;
+			fmt->format.height = imx568->variant->only_height;
+		}
+
+		fmt->format.code = imx568_get_format_code(imx568, fmt->format.code);
+		switch (fmt->format.code) {
+			case MEDIA_BUS_FMT_SRGGB12_1X12:
+				imx568->format_fourcc = V4L2_PIX_FMT_SRGGB12;
+				break;
+			case MEDIA_BUS_FMT_SRGGB10_1X10:
+				imx568->format_fourcc = V4L2_PIX_FMT_SRGGB10;
+				break;
+		}
+
+		for (i = 0; i < imx568->frm_fmt_size; i++) {
+			if ((imx568->cam_frmfmt[i].size.width == fmt->format.width)
+				&& (imx568->cam_frmfmt[i].size.height ==
+					fmt->format.height) && (imx568->cam_frmfmt[i].fourcc == imx568->format_fourcc)) {
+				imx568->frmfmt_mode = imx568->cam_frmfmt[i].mode;
+				imx568->frate_index = 0;
+				imx568->fmt_code = fmt->format.code;
+				break;
+			}
+		}
+
 		imx568_update_image_pad_format(imx568, fmt);
 
 		if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
@@ -809,131 +1137,194 @@ static int imx568_set_pad_format(struct v4l2_subdev *sd,
 		}
 	}
 
-	switch (fmt->format.code) {
-		case MEDIA_BUS_FMT_SRGGB12_1X12:
-			imx568->format_fourcc = V4L2_PIX_FMT_SRGGB12;
-			break;
-		case MEDIA_BUS_FMT_SRGGB10_1X10:
-			imx568->format_fourcc = V4L2_PIX_FMT_SRGGB10;
-			break;
-	}
-
-	for (i = 0; i < imx568->frm_fmt_size; i++) {
-		if ((imx568->cam_frmfmt[i].size.width == fmt->format.width)
-				&& (imx568->cam_frmfmt[i].size.height ==
-					fmt->format.height) && (imx568->cam_frmfmt[i].fourcc == imx568->format_fourcc)) {
-			imx568->frmfmt_mode = imx568->cam_frmfmt[i].mode;
-			imx568->frate_index = 0;
-			break;
-		}
-	}
-
 	mutex_unlock(&imx568->mutex);
-	while (retry-- > 0 ) {
-		if((err = cam_set_ctrl(imx568->i2c_client, imx568, SENSOR_MODE_CTRL_ID,
-					CTRL_STANDARD, (int64_t)imx568->frmfmt_mode)) < 0)
-			dev_err(&client->dev,"%s[%d]\n",__func__,__LINE__);
+	while (retry-- > 0) {
+		err = cam_set_ctrl(imx568->i2c_client, imx568, SENSOR_MODE_CTRL_ID,
+						CTRL_STANDARD, (int64_t)imx568->frmfmt_mode);
+		if (err < 0)
+			dev_dbg(&client->dev, "%s[%d] - Set Control Failed, error : %d, retrying\n", __func__, __LINE__, err);
 		else
 			break;
 	}
 
-	if (retry < 0)
+	if (retry < 0) {
+		dev_err(&client->dev, "%s[%d] - Set Control Failed, error : %d\n", __func__, __LINE__, err);
 		return err;
+	}
 
-	curr_framerate = imx568->cam_frmfmt[imx568->frate_index].framerates;
+	struct v4l2_ctrl *framerate_ctrl = v4l2_ctrl_find(&imx568->ctrl_handler, FRAMERATE_CTRL_ID);
+	if (framerate_ctrl)
+		imx568->set_framerate = (framerate_ctrl->default_value) / MULTIPLY_FACTOR;
+	else
+		imx568->set_framerate = imx568->cam_frmfmt[imx568->frmfmt_mode].framerates[imx568->frate_index];
+
+	/* Hard ceiling on the validated rate. */
+	if (imx568->variant && imx568->variant->max_fps &&
+	    imx568->set_framerate > imx568->variant->max_fps)
+		imx568->set_framerate = imx568->variant->max_fps;
 
 	// set frame rate based on resolution
 	retry = 5;
-	while (retry-- > 0 ) {
-		if ((err = cam_set_framerate (client, imx568, curr_framerate  * MULTIPLY_FACTOR)) < 0)
-			dev_err(&client->dev,"%s[%d]\n",__func__,__LINE__);
-		else
+	while (retry-- > 0) {
+		err = cam_set_framerate(client, imx568, (imx568->set_framerate) * MULTIPLY_FACTOR);
+		if (err < 0) {
+			dev_dbg(&client->dev, "%s[%d]\n", __func__, __LINE__);
+		} else {
 			break;
+		}
 	}
-	if (retry < 0)
+	if (retry < 0) {
+		dev_err(&client->dev, "%s[%d] Set Framerate Failed\n", __func__, __LINE__);
 		return err;
+	}
+
+	imx568->curr_exposure = EXPOSURE_FACTOR / imx568->set_framerate; // To retain the exposure, if frame rate changes.
+	imx568->exp_state_valid = false;
 
 	mutex_lock(&imx568->mutex);
 
 	retry = 5;
-	while (retry-- > 0 ) {
-		if((err = cam_stream_config(imx568->i2c_client, imx568, imx568->format_fourcc,
-					imx568->frmfmt_mode, imx568->frate_index)) < 0) {
-			dev_err(&client->dev,"%s[%d]\n",__func__,__LINE__);
+	while (retry-- > 0) {
+		err = cam_stream_config(imx568->i2c_client, imx568, imx568->format_fourcc,
+						imx568->frmfmt_mode, imx568->frate_index);
+		if (err < 0) {
+			dev_dbg(&client->dev, "%s[%d]\n", __func__, __LINE__);
 			ret = err;
 		} else
 			break;
 	}
 
 	if (retry < 0) {
+		dev_err(&client->dev, "%s[%d] Stream Config Failed, error: %d\n", __func__, __LINE__, err);
 		mutex_unlock(&imx568->mutex);
 		return ret;
 	}
 
 	mutex_unlock(&imx568->mutex);
 
+	/* cam_stream_config re-times the FPGA at the mode-table rate (e.g. 64),
+	 * silently overriding the framerate set above while curr_framerate
+	 * still reads set_framerate — the exposure path then never issues a
+	 * corrective write (fps caps to set_framerate == curr_framerate) and
+	 * the sensor streams above the CSI timing until CRC-fatal. Re-assert
+	 * the intended rate after stream config. */
+	retry = 5;
+	while (retry-- > 0) {
+		err = cam_set_framerate(client, imx568, (imx568->set_framerate) * MULTIPLY_FACTOR);
+		if (err == 0)
+			break;
+	}
+	if (retry < 0) {
+		dev_err(&client->dev, "%s[%d] Framerate re-assert after stream config failed\n", __func__, __LINE__);
+		return err;
+	}
+
+	/* Start from a defined exposure; the cache above does not program the MCU. */
+	if (!imx568->exp_state_valid) {
+		u32 def_exp = imx568->exposure ? (u32)imx568->exposure->default_value
+					       : IMX568_EXPOSURE_DEFAULT;
+
+		if (cam_set_exposure(client, imx568, def_exp) == 0) {
+			imx568->curr_exposure = def_exp;
+			imx568->exp_state_valid = true;
+		}
+	}
+
+	/* Per-mode timing from the sensor over MCU passthrough: HMAX = line length in
+	 * timing clocks, VMAX = frame length. Falls back to the mode table. */
+	if (imx568->pixel_rate) {
+		u32 w = imx568->cam_frmfmt[imx568->frmfmt_mode].size.width;
+		u32 h = imx568->cam_frmfmt[imx568->frmfmt_mode].size.height;
+		int hmax = sensor_reg_read(client, imx568, IMX568_REG_HMAX, 2);
+		int vmax = sensor_reg_read(client, imx568, IMX568_REG_VMAX, 2);
+		s64 rate;
+
+		/* sensor_reg_read() is < 0 on failure, so this rejects both a failed
+		 * read and an out-of-range one. */
+		if (hmax <= 0 || hmax > 0xffff)
+			hmax = imx568->cam_frmfmt[imx568->frmfmt_mode].hmax;
+		if ((vmax <= (int)h || vmax > 0xffff) && hmax && imx568->set_framerate)
+			vmax = div_u64((u64)SENSOR_PIXEL_CLOCK,
+				       (u64)hmax * imx568->set_framerate);
+
+		if (hmax > 0) {
+			rate = div_s64((s64)w * SENSOR_PIXEL_CLOCK, hmax);
+			v4l2_ctrl_modify_range(imx568->pixel_rate, rate, rate, 1, rate);
+
+			if (imx568->vblank && vmax > (int)h) {
+				s32 vb = vmax - h;
+
+				v4l2_ctrl_modify_range(imx568->vblank, vb, 0xffff, 1, vb);
+				v4l2_ctrl_s_ctrl(imx568->vblank, vb);
+			}
+
+			dev_dbg(&client->dev, "timing: HMAX %d VMAX %d -> pixel_rate %lld\n",
+				hmax, vmax, rate);
+		}
+	}
+
 	return ret;
 }
 
 static int cam_stream_on(struct i2c_client *client, struct imx568 *priv)
 {
-        unsigned char mc_data[100];
-        uint32_t payload_len = 0;
+	unsigned char mc_data[100];
+	uint32_t payload_len = 0;
 
-        uint16_t cmd_status = 0;
-        uint8_t retcode = 0, cmd_id = 0;
-		int retry = 5, err = 0;
+	uint16_t cmd_status = 0;
+	uint8_t retcode = 0, cmd_id = 0;
+	int retry = 5, err = 0;
 
-        payload_len = 0;
+	payload_len = 0;
 
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_STREAM_ON;
-        mc_data[2] = payload_len >> 8;
-        mc_data[3] = payload_len & 0xFF;
-        mc_data[4] = errorcheck(&mc_data[2], 2);
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_STREAM_ON;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
 
-        cam_write(client, mc_data, TX_LEN_PKT);
+	cam_write(client, mc_data, TX_LEN_PKT);
 
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_STREAM_ON;
-        err = cam_write(client, mc_data, 2);
-        if (err != 0) {
-                dev_err(&client->dev,
-				" %s(%d) MCU Stream On Write Error - %d \n", __func__, __LINE__, err);
-                goto exit;
-        }
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_STREAM_ON;
+	err = cam_write(client, mc_data, 2);
+	if (err != 0) {
+		dev_err(&client->dev,
+				" %s(%d) MCU Stream On Write Error - %d\n",
+				__func__, __LINE__, err);
+		goto exit;
+	}
 
-        while (--retry > 0) {
-                /* Some Sleep for init to process */
-                yield();
+	while (--retry > 0) {
+		cmd_id = CMD_ID_STREAM_ON;
+		if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
+				0) {
+			dev_dbg(&client->dev,
+					" %s(%d) MCU Get CMD Stream On Error\n",
+					__func__, __LINE__);
+			err = -1;
+			continue;
+		}
 
-                cmd_id = CMD_ID_STREAM_ON;
-                if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
-                    0) {
-                       dev_err(&client->dev,
-				       " %s(%d) MCU Get CMD Stream On Error \n", __func__, __LINE__);
-		       err = -1;
-		       continue;
-                }
-
-                if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
-                    (retcode == ERRCODE_SUCCESS)) {
-                        dev_info(&client->dev,
-					" %s %dMCU Stream On Success !! \n", __func__, __LINE__);
+		if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
+				(retcode == ERRCODE_SUCCESS)) {
+			dev_dbg(&client->dev,
+					" %s %dMCU Stream On Success !!\n",
+					__func__, __LINE__);
 			err = 0;
 			goto exit;
-                }
+		}
 
-                if ((retcode != ERRCODE_BUSY) &&
-                    ((cmd_status != MCU_CMD_STATUS_PENDING))) {
-                       dev_err(&client->dev,
-                            "(%s) %d MCU Get CMD Stream On Error STATUS = "
-			    "0x%04x RET = 0x%02x\n", __func__, __LINE__, cmd_status, retcode);
-		       err = -1;
-		       continue;
-                }
+		if ((retcode != ERRCODE_BUSY) &&
+				((cmd_status != MCU_CMD_STATUS_PENDING))) {
+			dev_dbg(&client->dev,
+					"(%s) %d MCU Get CMD Stream On Error STATUS = 0x%04x RET = 0x%02x\n",
+					__func__, __LINE__, cmd_status, retcode);
+			err = -1;
+			continue;
+		}
 		mdelay(1);
-        }
+	}
 exit:
 	return err;
 }
@@ -964,24 +1355,25 @@ static int cam_stream_off(struct i2c_client *client, struct imx568 *priv)
 	msleep(1);
 	if (err != 0) {
 		dev_err(&client->dev,
-				"%s(%d) MCU Stream OFF Write Error - %d \n", __func__, __LINE__, err);
+				"%s(%d) MCU Stream OFF Write Error - %d\n",
+				__func__, __LINE__, err);
 		goto exit;
 	}
 
 	while (--retry > 0) {
-		/* Some Sleep for init to process */
-		yield();
 		cmd_id = CMD_ID_STREAM_OFF;
 		if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) < 0) {
 			dev_err(&client->dev,
-					"%s(%d) MCU Get CMD Stream Off Error \n", __func__, __LINE__);
+					"%s(%d) MCU Get CMD Stream Off Error\n",
+					__func__, __LINE__);
 			err = -1;
 			continue;
 		}
 		if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
 				(retcode == ERRCODE_SUCCESS)) {
 			dev_info(&client->dev,
-					" %s %d MCU Get CMD Stream off Success !! \n", __func__, __LINE__ );
+					" %s %d MCU Get CMD Stream off Success !!\n",
+					__func__, __LINE__);
 			err = 0;
 			goto exit;
 		}
@@ -989,8 +1381,8 @@ static int cam_stream_off(struct i2c_client *client, struct imx568 *priv)
 		if ((retcode != ERRCODE_BUSY) &&
 				((cmd_status != MCU_CMD_STATUS_PENDING))) {
 			dev_err(&client->dev,
-					"(%s) %d MCU Get CMD Stream off Error STATUS = "
-					"0x%04x RET = 0x%02x\n", __func__, __LINE__, cmd_status, retcode);
+					"(%s) %d MCU Get CMD Stream off Error STATUS = 0x%04x RET = 0x%02x\n",
+					__func__, __LINE__, cmd_status, retcode);
 			err = -1;
 			continue;
 		}
@@ -1012,14 +1404,14 @@ static int imx568_start_streaming(struct imx568 *imx568)
 		return ret;
 
 	while (retry-- > 0) {
-		if ((ret = cam_stream_on(client, imx568)) > 0)
+		ret = cam_stream_on(client, imx568);
+		if (ret < 0)
 			continue;
 		else
 			break;
 	}
-	if(retry < 0){
-		dev_err(&client->dev,"%s (%d) Stream_On - Failed\n", __func__, __LINE__);
-	}
+	if (retry < 0)
+		dev_err(&client->dev, "%s (%d) Stream_On - Failed\n", __func__, __LINE__);
 
 	return ret;
 }
@@ -1031,14 +1423,14 @@ static void imx568_stop_streaming(struct imx568 *imx568)
 	int ret = 0, retry = 5;
 
 	while (retry-- > 0) {
-		if ((ret = cam_stream_off(client, imx568)) > 0)
+		ret = cam_stream_off(client, imx568);
+		if (ret < 0)
 			continue;
 		else
 			break;
 	}
-	if(retry < 0){
-		dev_err(&client->dev,"%s (%d) Stream_OFF - Failed\n", __func__, __LINE__);
-	}
+	if (retry < 0)
+		dev_err(&client->dev, "%s (%d) Stream_OFF - Failed\n", __func__, __LINE__);
 }
 
 static int imx568_set_stream(struct v4l2_subdev *sd, int enable)
@@ -1060,10 +1452,7 @@ static int imx568_set_stream(struct v4l2_subdev *sd, int enable)
 			goto err_unlock;
 		}
 
-		/*
-		 * Apply default & customized values
-		 * and then start streaming.
-		 */
+		// start streaming
 		ret = imx568_start_streaming(imx568);
 		if (ret)
 			goto err_rpm_put;
@@ -1095,17 +1484,17 @@ static int imx568_power_on(struct device *dev)
 	int ret;
 
 	ret = regulator_bulk_enable(IMX568_NUM_SUPPLIES,
-				    imx568->supplies);
+			imx568->supplies);
 	if (ret) {
 		dev_err(&client->dev, "%s: failed to enable regulators\n",
-			__func__);
+				__func__);
 		return ret;
 	}
 
 	ret = clk_prepare_enable(imx568->xclk);
 	if (ret) {
 		dev_err(&client->dev, "%s: failed to enable clock\n",
-			__func__);
+				__func__);
 		goto reg_off;
 	}
 	return 0;
@@ -1175,8 +1564,8 @@ static int imx568_get_regulators(struct imx568 *imx568)
 		imx568->supplies[i].supply = imx568_supply_name[i];
 
 	return devm_regulator_bulk_get(&client->dev,
-				       IMX568_NUM_SUPPLIES,
-				       imx568->supplies);
+			IMX568_NUM_SUPPLIES,
+			imx568->supplies);
 }
 
 static int imx568_get_mbus_config(struct v4l2_subdev *sd,
@@ -1225,7 +1614,7 @@ static int imx568_init_controls(struct imx568 *imx568)
 	int ret;
 
 	ctrl_hdlr = &imx568->ctrl_handler;
-	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 10);
+	ret = v4l2_ctrl_handler_init(ctrl_hdlr, imx568->num_ctrls + IMX568_DEFAULT_CONTROLS);
 	if (ret)
 		return ret;
 
@@ -1261,23 +1650,51 @@ static int imx568_init_controls(struct imx568 *imx568)
     imx568->hblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx568_ctrl_ops,
                        V4L2_CID_HBLANK, 0, 0xffff, 1, 0);
 
+	/* Advertise the DT window from probe: consumers snapshot it before stream-on. */
 	imx568->exposure = v4l2_ctrl_new_std(ctrl_hdlr, &imx568_ctrl_ops,
                          V4L2_CID_EXPOSURE,
-                         IMX568_EXPOSURE_MIN,
-                         IMX568_EXPOSURE_MAX,
+                         imx568->exposure_min,
+                         imx568->exposure_max,
                          IMX568_EXPOSURE_STEP,
-                         IMX568_EXPOSURE_DEFAULT);
+                         clamp_t(u32, IMX568_EXPOSURE_DEFAULT,
+                                 imx568->exposure_min, imx568->exposure_max));
 
+	for (i=0; i < ARRAY_SIZE(imx568_ctrls); i++) {
+		struct v4l2_ctrl_config cfg = imx568_ctrls[i];
+
+		/*
+		 * Default the exposure-window limit controls to the values
+		 * supplied through the device tree. Clamp into the control's
+		 * static [min, max] so an out-of-range DT value degrades
+		 * gracefully instead of failing control registration.
+		 */
+		if (cfg.id == IMX568_CID_EXPOSURE_MIN_US ||
+		    cfg.id == IMX568_CID_EXPOSURE_MAX_US) {
+			s64 want = (cfg.id == IMX568_CID_EXPOSURE_MIN_US) ?
+				   imx568->exposure_min : imx568->exposure_max;
+
+			cfg.def = clamp_t(s64, want, cfg.min, cfg.max);
+			if (cfg.def != want)
+				dev_warn(&client->dev,
+					 "%s default %lld out of range [%lld, %lld], clamped to %lld\n",
+					 cfg.name, want, cfg.min, cfg.max,
+					 cfg.def);
+		}
+
+		v4l2_ctrl_new_custom(ctrl_hdlr, &cfg, NULL);
+	}
+
+	if (ctrl_hdlr->error) {
+		ret = ctrl_hdlr->error;
+		dev_err(&client->dev, "%s control init failed (%d)\n",
+				__func__, ret);
+		goto error;
+	}
 	imx568->sd.ctrl_handler = ctrl_hdlr;
-	// No controls to initialize
-	mutex_unlock(&imx568->mutex);
-
 	return 0;
 
 error:
 	v4l2_ctrl_handler_free(ctrl_hdlr);
-	mutex_destroy(&imx568->mutex);
-
 	return ret;
 }
 
@@ -1311,13 +1728,14 @@ static int imx568_check_hwcfg(struct device *dev)
 
 	/* Number of MIPI CSI2 data lanes */
 	switch (ep_cfg.bus.mipi_csi2.num_data_lanes) {
-		case 2:
-		case 4:
-			imx568->mipi_lane_config = ep_cfg.bus.mipi_csi2.num_data_lanes;
-			break;
-		default:
-			dev_err(dev,"Invalid number of CSI2 data lanes %d\n", ep_cfg.bus.mipi_csi2.num_data_lanes);
-			goto error_out;
+	case 2:
+	case 4:
+		imx568->mipi_lane_config = ep_cfg.bus.mipi_csi2.num_data_lanes;
+		break;
+	default:
+		dev_err(dev, "Invalid number of CSI2 data lanes %d\n",
+				ep_cfg.bus.mipi_csi2.num_data_lanes);
+		goto error_out;
 	}
 
 	/* Check the link frequency set in device tree */
@@ -1327,9 +1745,9 @@ static int imx568_check_hwcfg(struct device *dev)
 	}
 
 	if (ep_cfg.nr_of_link_frequencies != 1 ||
-	    ep_cfg.link_frequencies[0] != IMX568_DEFAULT_LINK_FREQ) {
+			ep_cfg.link_frequencies[0] != IMX568_DEFAULT_LINK_FREQ) {
 		dev_err(dev, "Link frequency not supported: %lld\n",
-			ep_cfg.link_frequencies[0]);
+				ep_cfg.link_frequencies[0]);
 		goto error_out;
 	}
 
@@ -1342,41 +1760,53 @@ error_out:
 	return ret;
 }
 
+/* Controller mode: the fixed IPI porches only fit 1920x1080 at 30 fps. */
+static const struct econ_imx568_variant econ_imx568_controller = {
+	.name		= "econ-imx568",
+	.only_width	= 1920,
+	.only_height	= 1080,
+	.max_fps	= 30,
+};
+
+/* KOBE1 and econ FPGA: camera mode, no ceiling. */
+static const struct econ_imx568_variant econ_imx568_fpga = {
+	.name		= "econ-imx568-fpga",
+};
+
 static const struct of_device_id imx568_dt_ids[] = {
-	{ .compatible = "sony,imx568"},
+	{ .compatible = "econ,imx568", .data = &econ_imx568_controller },
+	{ .compatible = "econ,imx568-fpga", .data = &econ_imx568_fpga },
 	{ /* sentinel */ }
 };
 
 // MCU Firmware file read from rootfs - /lib/firmware
 static int ecam_firmware_load(struct i2c_client *client)
 {
-        unsigned char fw_version[32] = {0}, bin_fw_version[32] = {0};
-        int ret = 0;
-        unsigned long bin_fw_pos = 0;
+	int ret = 0;
+	unsigned long bin_fw_pos = 0;
 
-        /* Request firmware from the rootfs */
-        ret = request_firmware(&cam_fw, cam_fw_name, &client->dev);
+	/* Request firmware from the rootfs */
+	ret = request_firmware(&cam_fw, cam_fw_name, &client->dev);
 
 	if (ret < 0)
-                return -ENOENT;
+		return -ENOENT;
 
-        bin_fw_pos = cam_fw->size - VERSION_FILE_OFFSET;
-        cam_fw_buf = kmalloc (cam_fw->size + 1, GFP_KERNEL);
-        cam_fw_buf[cam_fw->size] = '\0';
-        memcpy(cam_fw_buf, cam_fw->data, cam_fw->size);
+	bin_fw_pos = cam_fw->size - VERSION_FILE_OFFSET;
+	cam_fw_buf = kmalloc(cam_fw->size + 1, GFP_KERNEL);
+	cam_fw_buf[cam_fw->size] = '\0';
+	memcpy(cam_fw_buf, cam_fw->data, cam_fw->size);
 
-        return ERRCODE_SUCCESS;
+	return ERRCODE_SUCCESS;
 }
 
 int cam_bload_ascii2hex(unsigned char ascii)
 {
-	if (ascii <= '9') {
+	if (ascii <= '9')
 		return (ascii - '0');
-	} else if ((ascii >= 'a') && (ascii <= 'f')) {
+	else if ((ascii >= 'a') && (ascii <= 'f'))
 		return (0xA + (ascii - 'a'));
-	} else if ((ascii >= 'A') && (ascii <= 'F')) {
+	else if ((ascii >= 'A') && (ascii <= 'F'))
 		return (0xA + (ascii - 'A'));
-	}
 
 	return -1;
 }
@@ -1394,16 +1824,16 @@ static int is_fw_update_required(struct i2c_client *client, struct imx568 *priv,
 	mutex_lock(&priv->mutex);
 
 	for (loop = bin_fw_pos; loop < (bin_fw_pos + 64); loop = loop + 2) {
-		* (bin_fw_version + i) = (cam_bload_ascii2hex(cam_fw_buf[loop]) << 4 |
+		*(bin_fw_version + i) = (cam_bload_ascii2hex(cam_fw_buf[loop]) << 4 |
 				cam_bload_ascii2hex(cam_fw_buf[loop + 1]));
-		i ++;
+		i++;
 	}
 
 	/* Check for forced/always update field in the text firmware version */
 	if (bin_fw_version[17] == '1') {
 #ifdef EN_DEBUG_PRINTS
-		dev_info(&client->dev,"Forced MCU Update Flag Enabled - Firmware Version - (%.32s) \n"
-				,bin_fw_version);
+		dev_info(&client->dev, "Forced MCU Update Flag Enabled - Firmware Version - (%.32s)\n",
+				bin_fw_version);
 #endif
 		ret = 2;
 		goto exit;
@@ -1424,16 +1854,16 @@ static int is_fw_update_required(struct i2c_client *client, struct imx568 *priv,
 		mc_data[1] = CMD_ID_VERSION;
 		err = cam_write(client, mc_data, 2);
 		if (err != 0) {
-			dev_err(&client->dev," %s(%d) MCU CMD ID Write PKT fw Version Error - %d \n", __func__,
-					__LINE__, err);
+			dev_err(&client->dev, " %s(%d) MCU CMD ID Write PKT fw Version Error - %d\n",
+					__func__, __LINE__, err);
 			ret = -1;
 			goto exit;
 		}
 
 		err = cam_read(client, mc_ret_data, RX_LEN_PKT);
 		if (err != 0) {
-			dev_err(&client->dev," %s(%d) MCU CMD ID Read PKT fw Version Error - %d \n", __func__,
-					__LINE__, err);
+			dev_err(&client->dev, " %s(%d) MCU CMD ID Read PKT fw Version Error - %d\n",
+					__func__, __LINE__, err);
 			ret = -1;
 			goto exit;
 		}
@@ -1442,7 +1872,7 @@ static int is_fw_update_required(struct i2c_client *client, struct imx568 *priv,
 		orig_crc = mc_ret_data[4];
 		calc_crc = errorcheck(&mc_ret_data[2], 2);
 		if (orig_crc != calc_crc) {
-			dev_err(&client->dev," %s(%d) MCU CMD ID fw Version Error CRC 0x%02x != 0x%02x \n",
+			dev_err(&client->dev, " %s(%d) MCU CMD ID fw Version Error CRC 0x%02x != 0x%02x\n",
 					__func__, __LINE__, orig_crc, calc_crc);
 			ret = -1;
 			goto exit;
@@ -1450,8 +1880,8 @@ static int is_fw_update_required(struct i2c_client *client, struct imx568 *priv,
 
 		errcode = mc_ret_data[5];
 		if (errcode != ERRCODE_SUCCESS) {
-			dev_err(&client->dev," %s(%d) MCU CMD ID fw Errcode - 0x%02x \n", __func__,
-					__LINE__, errcode);
+			dev_err(&client->dev, " %s(%d) MCU CMD ID fw Errcode - 0x%02x\n",
+					__func__, __LINE__, errcode);
 			ret = -1;
 			goto exit;
 		}
@@ -1462,7 +1892,8 @@ static int is_fw_update_required(struct i2c_client *client, struct imx568 *priv,
 		memset(mc_ret_data, 0x00, payload_len);
 		ret = cam_read(client, mc_ret_data, payload_len);
 		if (ret != 0) {
-			dev_err(&client->dev," %s(%d) MCU fw CMD ID Read Version Error - %d \n", __func__,
+			dev_err(&client->dev, " %s(%d) MCU fw CMD ID Read Version Error - %d\n",
+					__func__,
 					__LINE__, ret);
 			ret = -1;
 			goto exit;
@@ -1472,7 +1903,7 @@ static int is_fw_update_required(struct i2c_client *client, struct imx568 *priv,
 		orig_crc = mc_ret_data[payload_len - 2];
 		calc_crc = errorcheck(&mc_ret_data[2], 32);
 		if (orig_crc != calc_crc) {
-			dev_err(&client->dev," %s(%d) MCU fw  CMD ID Version CRC ERROR 0x%02x != 0x%02x \n",
+			dev_err(&client->dev, " %s(%d) MCU fw  CMD ID Version CRC ERROR 0x%02x != 0x%02x\n",
 					__func__, __LINE__, orig_crc, calc_crc);
 			ret = -1;
 			goto exit;
@@ -1481,8 +1912,8 @@ static int is_fw_update_required(struct i2c_client *client, struct imx568 *priv,
 		/* Verify Errcode */
 		errcode = mc_ret_data[payload_len - 1];
 		if (errcode != ERRCODE_SUCCESS) {
-			dev_err(&client->dev," %s(%d) MCU fw CMD ID Read Payload Error - 0x%02x \n", __func__,
-					__LINE__, errcode);
+			dev_err(&client->dev, " %s(%d) MCU fw CMD ID Read Payload Error - 0x%02x\n",
+					__func__, __LINE__, errcode);
 			ret = -1;
 			goto exit;
 		}
@@ -1491,12 +1922,11 @@ static int is_fw_update_required(struct i2c_client *client, struct imx568 *priv,
 			*(fw_version+loop) = mc_ret_data[2+loop];
 
 
-		for(i = 0; i < VERSION_SIZE; i++)
-		{
-			if(bin_fw_version[i] != fw_version[i]) {
-				dev_info(&client->dev,"Previous Firmware Version - (%.32s)\n",
+		for (i = 0; i < VERSION_SIZE; i++) {
+			if (bin_fw_version[i] != fw_version[i]) {
+				dev_info(&client->dev, "Previous Firmware Version - (%.32s)\n",
 						fw_version);
-				dev_info(&client->dev,"Current Firmware Version - (%.32s)\n",
+				dev_info(&client->dev, "Current Firmware Version - (%.32s)\n",
 						bin_fw_version);
 				ret = 1;
 				goto exit;
@@ -1522,32 +1952,33 @@ int cam_bload_get_version(struct i2c_client *client)
 
 	ret = cam_write(client, g_bload_buf, 2);
 	if (ret < 0) {
-		dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
+		dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
 		return -1;
 	}
 
 	/*   Wait for ACK or NACK */
 	ret = cam_read(client, g_bload_buf, 1);
 	if (ret < 0) {
-		dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
 		return -1;
 	}
 
 	if (g_bload_buf[0] != 'y') {
 		/*   NACK Received */
-		dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
+		dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+				__func__, __LINE__);
 		return -1;
 	}
 
 	ret = cam_read(client, g_bload_buf, 1);
 	if (ret < 0) {
-		dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
 		return -1;
 	}
 
 	ret = cam_read(client, g_bload_buf, 1);
 	if (ret < 0) {
-		dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
 		return -1;
 	}
 
@@ -1557,496 +1988,505 @@ int cam_bload_get_version(struct i2c_client *client)
 }
 int cam_bload_erase_flash(struct i2c_client *client)
 {
-        unsigned short int pagenum = 0x0000;
-        int ret = 0, i = 0, checksum = 0;
+	unsigned short int pagenum = 0x0000;
+	int ret = 0, i = 0, checksum = 0;
 
-        /* --------------- ERASE FLASH --------------------- */
+	/* --------------- ERASE FLASH --------------------- */
 
-	dev_info(&client->dev," Erasing camera firmware...\n");
+	dev_info(&client->dev, " Erasing camera firmware...\n");
 
-        for (i = 0; i < NUM_ERASE_CYCLES; i++) {
+	for (i = 0; i < NUM_ERASE_CYCLES; i++) {
 
-                checksum = 0x00;
-                /*   Write Erase Pages CMD */
-                g_bload_buf[0] = BL_ERASE_MEM_NS;
-                g_bload_buf[1] = ~(BL_ERASE_MEM_NS);
+		checksum = 0x00;
+		/*   Write Erase Pages CMD */
+		g_bload_buf[0] = BL_ERASE_MEM_NS;
+		g_bload_buf[1] = ~(BL_ERASE_MEM_NS);
 
-                ret = cam_write(client, g_bload_buf, 2);
-                if (ret < 0) {
-                        dev_err(&client->dev,"Write Failed \n");
-                        return -1;
-                }
+		ret = cam_write(client, g_bload_buf, 2);
+		if (ret < 0) {
+			dev_err(&client->dev, "Write Failed\n");
+			return -1;
+		}
 
-                /*   Wait for ACK or NACK */
-                ret = cam_read(client, g_bload_buf, 1);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+		/*   Wait for ACK or NACK */
+		ret = cam_read(client, g_bload_buf, 1);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
-                if (g_bload_buf[0] != RESP_ACK) {
-                        /*   NACK Received */
-                        dev_err(&client->dev," NACK Received... exiting.. \n");
-                        return -1;
-                }
+		if (g_bload_buf[0] != RESP_ACK) {
+			/*   NACK Received */
+			dev_err(&client->dev, " NACK Received... exiting..\n");
+			return -1;
+		}
 
-                g_bload_buf[0] = (MAX_PAGES - 1) >> 8;
-                g_bload_buf[1] = (MAX_PAGES - 1) & 0xFF;
-                g_bload_buf[2] = g_bload_buf[0] ^ g_bload_buf[1];
+		g_bload_buf[0] = (MAX_PAGES - 1) >> 8;
+		g_bload_buf[1] = (MAX_PAGES - 1) & 0xFF;
+		g_bload_buf[2] = g_bload_buf[0] ^ g_bload_buf[1];
 
-                ret = cam_write(client, g_bload_buf, 3);
-                if (ret < 0) {
-                        dev_err(&client->dev,"Write Failed \n");
-                        return -1;
-                }
+		ret = cam_write(client, g_bload_buf, 3);
+		if (ret < 0) {
+			dev_err(&client->dev, "Write Failed\n");
+			return -1;
+		}
 
-                /*   Wait for ACK or NACK */
-                ret = cam_read(client, g_bload_buf, 1);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+		/*   Wait for ACK or NACK */
+		ret = cam_read(client, g_bload_buf, 1);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
-                if (g_bload_buf[0] != RESP_ACK) {
-                        /*   NACK Received */
-                        dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                        return -1;
-                }
+		if (g_bload_buf[0] != RESP_ACK) {
+			/*   NACK Received */
+			dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+					__func__, __LINE__);
+			return -1;
+		}
 
-                for (pagenum = 0; pagenum < MAX_PAGES; pagenum++) {
-                        g_bload_buf[(2 * pagenum)] =
-                            (pagenum + (i * MAX_PAGES)) >> 8;
-                        g_bload_buf[(2 * pagenum) + 1] =
-                            (pagenum + (i * MAX_PAGES)) & 0xFF;
-                        checksum =
-                            checksum ^ g_bload_buf[(2 * pagenum)] ^
-                            g_bload_buf[(2 * pagenum) + 1];
-                }
-                g_bload_buf[2 * MAX_PAGES] = checksum;
+		for (pagenum = 0; pagenum < MAX_PAGES; pagenum++) {
+			g_bload_buf[(2 * pagenum)] =
+				(pagenum + (i * MAX_PAGES)) >> 8;
+			g_bload_buf[(2 * pagenum) + 1] =
+				(pagenum + (i * MAX_PAGES)) & 0xFF;
+			checksum =
+				checksum ^ g_bload_buf[(2 * pagenum)] ^
+				g_bload_buf[(2 * pagenum) + 1];
+		}
+		g_bload_buf[2 * MAX_PAGES] = checksum;
 
-                ret = cam_write(client, g_bload_buf, (2 * MAX_PAGES) + 1);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+		ret = cam_write(client, g_bload_buf, (2 * MAX_PAGES) + 1);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
- poll_busy:
-                /*   Wait for ACK or NACK */
-                ret = cam_read(client, g_bload_buf, 1);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+poll_busy:
+		/*   Wait for ACK or NACK */
+		ret = cam_read(client, g_bload_buf, 1);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
-                if (g_bload_buf[0] == RESP_BUSY)
-                        goto poll_busy;
+		if (g_bload_buf[0] == RESP_BUSY)
+			goto poll_busy;
 
-                if (g_bload_buf[0] != RESP_ACK) {
-                        /*   NACK Received */
-                        dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                        return -1;
-                }
-        }
+		if (g_bload_buf[0] != RESP_ACK) {
+			/*   NACK Received */
+			dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+					__func__, __LINE__);
+			return -1;
+		}
+	}
 
-        /* ------------ ERASE FLASH END ----------------------- */
+	/* ------------ ERASE FLASH END ----------------------- */
 
-        return 0;
+	return 0;
 }
 unsigned short int cam_bload_calc_crc16(unsigned char *buf, int len)
 {
-        unsigned short int crc = 0;
-        int i = 0;
+	unsigned short int crc = 0;
+	int i = 0;
 
-        if (!buf || !(buf + len))
-                return 0;
+	if (!buf)
+		return 0;
 
-        for (i = 0; i < len; i++) {
-                crc ^= buf[i];
-        }
+	for (i = 0; i < len; i++)
+		crc ^= buf[i];
 
-        return crc;
+	return crc;
 }
 unsigned char cam_bload_inv_errorcheck(unsigned char *buf, int len)
 {
-        unsigned int checksum = 0x00;
-        int i = 0;
+	unsigned int checksum = 0x00;
+	int i = 0;
 
-        if (!buf || !(buf + len))
-                return 0;
+	if (!buf)
+		return 0;
 
-        for (i = 0; i < len; i++) {
-                checksum = (checksum + buf[i]);
-        }
+	for (i = 0; i < len; i++)
+		checksum = (checksum + buf[i]);
 
-        checksum &= (0xFF);
-        return (~(checksum) + 1);
+	checksum &= (0xFF);
+	return (~(checksum) + 1);
 }
 
 int cam_bload_parse_send_cmd(struct i2c_client *client,
-                   unsigned char *bytearray, int rec_len,
-		   unsigned short int *orig_crc16)
+		unsigned char *bytearray, int rec_len,
+		unsigned short int *orig_crc16)
 {
-        IHEX_RECORD *ihex_rec = NULL;
-        unsigned char checksum = 0, calc_checksum = 0;
-        int i = 0, ret = 0;
+	struct _ihex_rec *ihex_rec = NULL;
+	unsigned char checksum = 0, calc_checksum = 0;
+	int i = 0, ret = 0;
 
-        if (!bytearray)
-                return -1;
+	if (!bytearray)
+		return -1;
 
-        ihex_rec = (IHEX_RECORD *) bytearray;
-        ihex_rec->addr = htons(ihex_rec->addr);
+	ihex_rec = (struct _ihex_rec *)bytearray;
+	ihex_rec->addr = htons(ihex_rec->addr);
 
-        checksum = bytearray[rec_len - 1];
+	checksum = bytearray[rec_len - 1];
 
-        calc_checksum = cam_bload_inv_errorcheck(bytearray, rec_len - 1);
-        if (checksum != calc_checksum) {
-                dev_err(&client->dev," Invalid Checksum 0x%02x != 0x%02x !! \n",
+	calc_checksum = cam_bload_inv_errorcheck(bytearray, rec_len - 1);
+	if (checksum != calc_checksum) {
+		dev_err(&client->dev, " Invalid Checksum 0x%02x != 0x%02x !!\n",
 				checksum, calc_checksum);
-                return -1;
-        }
+		return -1;
+	}
 
-        /*   TODO: send I2C Commands to Write */
-        if ((ihex_rec->rectype == REC_TYPE_ELA) && (ihex_rec->addr == 0x0000) &&
-            (ihex_rec->datasize = 0x02)) {
-                /*   Upper 32-bit configuration */
-                g_bload_flashaddr = (ihex_rec->recdata[0] <<
-                                                        24) | (ihex_rec->
-                                                               recdata[1]
-                                                               << 16);
-        } else if (ihex_rec->rectype == REC_TYPE_DATA) {
-                /*   Flash Data into Flashaddr */
+	/*   TODO: send I2C Commands to Write */
+	if ((ihex_rec->rectype == REC_TYPE_ELA) && (ihex_rec->addr == 0x0000) &&
+			(ihex_rec->datasize == 0x02)) {
+		/*   Upper 32-bit configuration */
+		g_bload_flashaddr = (ihex_rec->recdata[0] << 24) |
+					(ihex_rec->recdata[1] << 16);
+		return 0;
+	} else if (ihex_rec->rectype == REC_TYPE_DATA) {
+		/*   Flash Data into Flashaddr */
 
-                g_bload_flashaddr =
-                    (g_bload_flashaddr & 0xFFFF0000) | (ihex_rec->addr);
-                *orig_crc16 ^=
-                    cam_bload_calc_crc16(ihex_rec->recdata, ihex_rec->datasize);
+		g_bload_flashaddr =
+			(g_bload_flashaddr & 0xFFFF0000) | (ihex_rec->addr);
+		*orig_crc16 ^=
+			cam_bload_calc_crc16(ihex_rec->recdata, ihex_rec->datasize);
 
-                /*   Write Erase Pages CMD */
-                g_bload_buf[0] = BL_WRITE_MEM_NS;
-                g_bload_buf[1] = ~(BL_WRITE_MEM_NS);
+		/*   Write Erase Pages CMD */
+		g_bload_buf[0] = BL_WRITE_MEM_NS;
+		g_bload_buf[1] = ~(BL_WRITE_MEM_NS);
 
-                ret = cam_write(client, g_bload_buf, 2);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+		ret = cam_write(client, g_bload_buf, 2);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
-                /*   Wait for ACK or NACK */
-                ret = cam_read(client, g_bload_buf, 1);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+		/*   Wait for ACK or NACK */
+		ret = cam_read(client, g_bload_buf, 1);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
-                if (g_bload_buf[0] != RESP_ACK) {
-                        /*   NACK Received */
-                        dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                        return -1;
-                }
+		if (g_bload_buf[0] != RESP_ACK) {
+			/*   NACK Received */
+			dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+					__func__, __LINE__);
+			return -1;
+		}
 
-                g_bload_buf[0] = (g_bload_flashaddr & 0xFF000000) >> 24;
-                g_bload_buf[1] = (g_bload_flashaddr & 0x00FF0000) >> 16;
-                g_bload_buf[2] = (g_bload_flashaddr & 0x0000FF00) >> 8;
-                g_bload_buf[3] = (g_bload_flashaddr & 0x000000FF);
-                g_bload_buf[4] =
-                    g_bload_buf[0] ^ g_bload_buf[1] ^ g_bload_buf[2] ^
-                    g_bload_buf[3];
+		g_bload_buf[0] = (g_bload_flashaddr & 0xFF000000) >> 24;
+		g_bload_buf[1] = (g_bload_flashaddr & 0x00FF0000) >> 16;
+		g_bload_buf[2] = (g_bload_flashaddr & 0x0000FF00) >> 8;
+		g_bload_buf[3] = (g_bload_flashaddr & 0x000000FF);
+		g_bload_buf[4] =
+			g_bload_buf[0] ^ g_bload_buf[1] ^ g_bload_buf[2] ^
+			g_bload_buf[3];
 
-                ret = cam_write(client, g_bload_buf, 5);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+		ret = cam_write(client, g_bload_buf, 5);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
-                /*   Wait for ACK or NACK */
-                ret = cam_read(client, g_bload_buf, 1);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+		/*   Wait for ACK or NACK */
+		ret = cam_read(client, g_bload_buf, 1);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
-                if (g_bload_buf[0] != RESP_ACK) {
-                        /*   NACK Received */
-                        dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                        return -1;
-                }
+		if (g_bload_buf[0] != RESP_ACK) {
+			/*   NACK Received */
+			dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+					__func__, __LINE__);
+			return -1;
+		}
 
-                g_bload_buf[0] = ihex_rec->datasize - 1;
-                checksum = g_bload_buf[0];
-                for (i = 0; i < ihex_rec->datasize; i++) {
-                        g_bload_buf[i + 1] = ihex_rec->recdata[i];
-                        checksum ^= g_bload_buf[i + 1];
-                }
+		g_bload_buf[0] = ihex_rec->datasize - 1;
+		checksum = g_bload_buf[0];
+		for (i = 0; i < ihex_rec->datasize; i++) {
+			g_bload_buf[i + 1] = ihex_rec->recdata[i];
+			checksum ^= g_bload_buf[i + 1];
+		}
 
-                g_bload_buf[i + 1] = checksum;
+		g_bload_buf[i + 1] = checksum;
 
-                ret = cam_write(client, g_bload_buf, i + 2);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+		ret = cam_write(client, g_bload_buf, i + 2);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
- poll_busy:
-                /*   Wait for ACK or NACK */
-                ret = cam_read(client, g_bload_buf, 1);
-                if (ret < 0) {
-                        dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                        return -1;
-                }
+poll_busy:
+		/*   Wait for ACK or NACK */
+		ret = cam_read(client, g_bload_buf, 1);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+			return -1;
+		}
 
-                if (g_bload_buf[0] == RESP_BUSY)
-                        goto poll_busy;
+		if (g_bload_buf[0] == RESP_BUSY)
+			goto poll_busy;
 
-                if (g_bload_buf[0] != RESP_ACK) {
-                        /*   NACK Received */
-                        dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                        return -1;
-                }
+		if (g_bload_buf[0] != RESP_ACK) {
+			/*   NACK Received */
+			dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+					__func__, __LINE__);
+			return -1;
+		}
+		return 0;
 
-        } else if (ihex_rec->rectype == REC_TYPE_SLA) {
-                /*   Update Instruction pointer to this address */
+	} else if (ihex_rec->rectype == REC_TYPE_SLA) {
+		/*   Update Instruction pointer to this address */
+		return 0;
 
-        } else if (ihex_rec->rectype == REC_TYPE_EOF) {
-                /*   End of File - Issue I2C Go Command */
-                return 0;
-        } else {
-
-                /*   Unhandled Type */
-                dev_err(&client->dev,"Unhandled Command Type \n");
-                return -1;
-        }
-
-        return 0;
+	} else if (ihex_rec->rectype == REC_TYPE_EOF) {
+		/*   End of File - Issue I2C Go Command */
+		return 0;
+	}
+	/*   Unhandled Type */
+	dev_err(&client->dev, "Unhandled Command Type\n");
+	return -1;
 }
 int cam_bload_read_fw(struct i2c_client *client,
-			unsigned short int *orig_crc16)
+		unsigned short int *orig_crc16)
 {
-        /* exclude NULL character at end of string */
+	/* exclude NULL character at end of string */
 	unsigned long hex_file_size = strlen(cam_fw_buf) - 1;
-        unsigned char wbuf[MAX_BUF_LEN];
-        int i = 0, recindex = 0, ret = 0;
+	struct device *dev = &client->dev;
+	unsigned char *wbuf;
+	int i = 0, recindex = 0, ret = 0;
 
-	dev_info(&client->dev,"Flashing camera firmware...\n");
+	wbuf = devm_kzalloc(dev, MAX_BUF_LEN, GFP_KERNEL);
+	if (!wbuf)
+		return -ENOMEM;
 
-        for (i = 0; i < hex_file_size; i++) {
-                if ((recindex == 0) && (cam_fw_buf[i] == ':')) {
-                } else if (cam_fw_buf[i] == CR) {
-				} else if (cam_fw_buf[i] ==
-						'"' || cam_fw_buf[i] =='\\' ||
-						cam_fw_buf[i] == 'n') {
-                } else if (cam_fw_buf[i] == LF) {
-                        if (recindex == 0) {
-                                break;
-                        }
+	dev_info(&client->dev, "Flashing camera firmware...\n");
 
-                        /*   Analyze Packet and Send Commands */
-                        ret = cam_bload_parse_send_cmd(client, wbuf, recindex,
+	for (i = 0; i < hex_file_size; i++) {
+		if ((recindex == 0) && (cam_fw_buf[i] == ':')) {
+		} else if (cam_fw_buf[i] == CR) {
+		} else if (cam_fw_buf[i] ==
+				'"' || cam_fw_buf[i] == '\\' ||
+				cam_fw_buf[i] == 'n') {
+		} else if (cam_fw_buf[i] == LF) {
+			if (recindex == 0)
+				break;
+
+			/*   Analyze Packet and Send Commands */
+			ret = cam_bload_parse_send_cmd(client, wbuf, recindex,
 					orig_crc16);
-                        if (ret < 0) {
-                                dev_err(&client->dev,"Error in Processing Commands \n");
-                                break;
-                        }
+			if (ret < 0) {
+				dev_err(&client->dev, "Error in Processing Commands\n");
+				break;
+			}
 
-                        recindex = 0;
+			recindex = 0;
 
-                } else {
-                        /*   Parse Rec Data */
-                        if ((ret = cam_bload_ascii2hex(cam_fw_buf[i])) < 0) {
-                                dev_err(&client->dev,
-						"Invalid Character - 0x%02x !! \n", cam_fw_buf[i]);
-                                break;
-                        }
+		} else {
+			/*   Parse Rec Data */
+			ret = cam_bload_ascii2hex(cam_fw_buf[i]);
+			if (ret < 0) {
+				dev_err(&client->dev,
+						"Invalid Character - 0x%02x !!\n", cam_fw_buf[i]);
+				break;
+			}
 
-                        wbuf[recindex] = (0xF0 & (ret << 4));
-                        i++;
+			wbuf[recindex] = (0xF0 & (ret << 4));
+			i++;
 
-                        if ((ret = cam_bload_ascii2hex(cam_fw_buf[i])) < 0) {
-                                dev_err(&client->dev,"Invalid Character - 0x%02x !!!! \n",
-                                       cam_fw_buf[i]);
-                                break;
-                        }
+			ret = cam_bload_ascii2hex(cam_fw_buf[i]);
+			if (ret < 0) {
+				dev_err(&client->dev, "Invalid Character - 0x%02x !!!!\n",
+						cam_fw_buf[i]);
+				break;
+			}
 
-                        wbuf[recindex] |= (0x0F & ret);
-                        recindex++;
-                }
-        }
+			wbuf[recindex] |= (0x0F & ret);
+			recindex++;
+		}
+	}
 
-        /* ------------ PROGRAM FLASH END ----------------------- */
-
-        return ret;
+	/* ------------ PROGRAM FLASH END ----------------------- */
+	return ret;
 }
 int cam_bload_read(struct i2c_client *client, unsigned int g_bload_flashaddr,
-                   char *bytearray, unsigned int len)
+		char *bytearray, unsigned int len)
 {
-        int ret = 0;
+	int ret = 0;
 
-        g_bload_buf[0] = BL_READ_MEM;
-        g_bload_buf[1] = ~(BL_READ_MEM);
+	g_bload_buf[0] = BL_READ_MEM;
+	g_bload_buf[1] = ~(BL_READ_MEM);
 
-        ret = cam_write(client, g_bload_buf, 2);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	ret = cam_write(client, g_bload_buf, 2);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        /*   Wait for ACK or NACK */
-        ret = cam_read(client, g_bload_buf, 1);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	/*   Wait for ACK or NACK */
+	ret = cam_read(client, g_bload_buf, 1);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        if (g_bload_buf[0] != RESP_ACK) {
-                /*   NACK Received */
-                dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                return -1;
-        }
+	if (g_bload_buf[0] != RESP_ACK) {
+		/*   NACK Received */
+		dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+				__func__, __LINE__);
+		return -1;
+	}
 
-        g_bload_buf[0] = (g_bload_flashaddr & 0xFF000000) >> 24;
-        g_bload_buf[1] = (g_bload_flashaddr & 0x00FF0000) >> 16;
-        g_bload_buf[2] = (g_bload_flashaddr & 0x0000FF00) >> 8;
-        g_bload_buf[3] = (g_bload_flashaddr & 0x000000FF);
-        g_bload_buf[4] =
-            g_bload_buf[0] ^ g_bload_buf[1] ^ g_bload_buf[2] ^ g_bload_buf[3];
+	g_bload_buf[0] = (g_bload_flashaddr & 0xFF000000) >> 24;
+	g_bload_buf[1] = (g_bload_flashaddr & 0x00FF0000) >> 16;
+	g_bload_buf[2] = (g_bload_flashaddr & 0x0000FF00) >> 8;
+	g_bload_buf[3] = (g_bload_flashaddr & 0x000000FF);
+	g_bload_buf[4] =
+		g_bload_buf[0] ^ g_bload_buf[1] ^ g_bload_buf[2] ^ g_bload_buf[3];
 
-        ret = cam_write(client, g_bload_buf, 5);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	ret = cam_write(client, g_bload_buf, 5);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        /*   Wait for ACK or NACK */
-        ret = cam_read(client, g_bload_buf, 1);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	/*   Wait for ACK or NACK */
+	ret = cam_read(client, g_bload_buf, 1);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        if (g_bload_buf[0] != RESP_ACK) {
-                /*   NACK Received */
-                dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                return -1;
-        }
+	if (g_bload_buf[0] != RESP_ACK) {
+		/*   NACK Received */
+		dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+				__func__, __LINE__);
+		return -1;
+	}
 
-        g_bload_buf[0] = len - 1;
-        g_bload_buf[1] = ~(len - 1);
+	g_bload_buf[0] = len - 1;
+	g_bload_buf[1] = ~(len - 1);
 
-        ret = cam_write(client, g_bload_buf, 2);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	ret = cam_write(client, g_bload_buf, 2);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        /*   Wait for ACK or NACK */
-        ret = cam_read(client, g_bload_buf, 1);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	/*   Wait for ACK or NACK */
+	ret = cam_read(client, g_bload_buf, 1);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        if (g_bload_buf[0] != RESP_ACK) {
-                dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                return -1;
-        }
+	if (g_bload_buf[0] != RESP_ACK) {
+		dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+				__func__, __LINE__);
+		return -1;
+	}
 
-        ret = cam_read(client, bytearray, len);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	ret = cam_read(client, bytearray, len);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        return 0;
+	return 0;
 }
 int cam_bload_verify_flash(struct i2c_client *client,
-                           unsigned short int orig_crc)
+		unsigned short int orig_crc)
 {
-        char bytearray[FLASH_READ_LEN];
-        unsigned short int calc_crc = 0;
-        unsigned int flash_addr = FLASH_START_ADDRESS, i = 0;
+	char bytearray[FLASH_READ_LEN];
+	unsigned short int calc_crc = 0;
+	unsigned int flash_addr = FLASH_START_ADDRESS, i = 0;
 
-        while ((i + FLASH_READ_LEN) <= FLASH_SIZE) {
-                memset(bytearray, 0x0, FLASH_READ_LEN);
+	while ((i + FLASH_READ_LEN) <= FLASH_SIZE) {
+		memset(bytearray, 0x0, FLASH_READ_LEN);
 
-                if (cam_bload_read
-                    (client, flash_addr + i, bytearray, FLASH_READ_LEN) < 0) {
-                        dev_err(&client->dev," i2c_bload_read FAIL !! \n");
-                        return -1;
-                }
+		if (cam_bload_read
+				(client, flash_addr + i, bytearray, FLASH_READ_LEN) < 0) {
+			dev_err(&client->dev, " i2c_bload_read FAIL !!\n");
+			return -1;
+		}
 
-                calc_crc ^= cam_bload_calc_crc16(bytearray, FLASH_READ_LEN);
-                i += FLASH_READ_LEN;
-        }
+		calc_crc ^= cam_bload_calc_crc16(bytearray, FLASH_READ_LEN);
+		i += FLASH_READ_LEN;
+	}
 
-        if ((FLASH_SIZE - i) > 0) {
-                memset(bytearray, 0x0, FLASH_READ_LEN);
+	if ((FLASH_SIZE - i) > 0) {
+		memset(bytearray, 0x0, FLASH_READ_LEN);
 
-                if (cam_bload_read
-                    (client, flash_addr + i, bytearray, (FLASH_SIZE - i))
-                    < 0) {
-                        dev_err(&client->dev," i2c_bload_read FAIL !! \n");
-                        return -1;
-                }
+		if (cam_bload_read
+				(client, flash_addr + i, bytearray, (FLASH_SIZE - i))
+				< 0) {
+			dev_err(&client->dev, " i2c_bload_read FAIL !!\n");
+			return -1;
+		}
 
-                calc_crc ^= cam_bload_calc_crc16(bytearray, FLASH_READ_LEN);
-        }
+		calc_crc ^= cam_bload_calc_crc16(bytearray, FLASH_READ_LEN);
+	}
 
-        if (orig_crc != calc_crc) {
-                dev_err(&client->dev,
-				"CRC verification fail !! 0x%04x != 0x%04x \n", orig_crc, calc_crc);
-                return -1;
-        }
+	if (orig_crc != calc_crc) {
+		dev_err(&client->dev,
+				"CRC verification fail !! 0x%04x != 0x%04x\n", orig_crc, calc_crc);
+		return -1;
+	}
 
-        dev_info(&client->dev,
-			"CRC Verification Success 0x%04x == 0x%04x \n", orig_crc, calc_crc);
+	dev_info(&client->dev,
+			"CRC Verification Success 0x%04x == 0x%04x\n", orig_crc, calc_crc);
 
-        return 0;
+	return 0;
 }
 int cam_bload_go(struct i2c_client *client)
 {
-        int ret = 0;
+	int ret = 0;
 
-        g_bload_buf[0] = BL_GO;
-        g_bload_buf[1] = ~(BL_GO);
+	g_bload_buf[0] = BL_GO;
+	g_bload_buf[1] = ~(BL_GO);
 
-        ret = cam_write(client, g_bload_buf, 2);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	ret = cam_write(client, g_bload_buf, 2);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        ret = cam_read(client, g_bload_buf, 1);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	ret = cam_read(client, g_bload_buf, 1);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        /*   Start Address */
-        g_bload_buf[0] = (FLASH_START_ADDRESS & 0xFF000000) >> 24;
-        g_bload_buf[1] = (FLASH_START_ADDRESS & 0x00FF0000) >> 16;
-        g_bload_buf[2] = (FLASH_START_ADDRESS & 0x0000FF00) >> 8;
-        g_bload_buf[3] = (FLASH_START_ADDRESS & 0x000000FF);
-        g_bload_buf[4] =
-            g_bload_buf[0] ^ g_bload_buf[1] ^ g_bload_buf[2] ^ g_bload_buf[3];
+	/*   Start Address */
+	g_bload_buf[0] = (FLASH_START_ADDRESS & 0xFF000000) >> 24;
+	g_bload_buf[1] = (FLASH_START_ADDRESS & 0x00FF0000) >> 16;
+	g_bload_buf[2] = (FLASH_START_ADDRESS & 0x0000FF00) >> 8;
+	g_bload_buf[3] = (FLASH_START_ADDRESS & 0x000000FF);
+	g_bload_buf[4] =
+		g_bload_buf[0] ^ g_bload_buf[1] ^ g_bload_buf[2] ^ g_bload_buf[3];
 
-        ret = cam_write(client, g_bload_buf, 5);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Write Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	ret = cam_write(client, g_bload_buf, 5);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Write Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        ret = cam_read(client, g_bload_buf, 1);
-        if (ret < 0) {
-                dev_err(&client->dev,"%s (%d) - Read Failed \n", __func__, __LINE__);
-                return -1;
-        }
+	ret = cam_read(client, g_bload_buf, 1);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s (%d) - Read Failed\n", __func__, __LINE__);
+		return -1;
+	}
 
-        if (g_bload_buf[0] != RESP_ACK) {
-                /*   NACK Received */
-                dev_err(&client->dev,"%s (%d) - NACK Received... exiting..\n", __func__, __LINE__);
-                return -1;
-        }
+	if (g_bload_buf[0] != RESP_ACK) {
+		/*   NACK Received */
+		dev_err(&client->dev, "%s (%d) - NACK Received... exiting..\n",
+				__func__, __LINE__);
+		return -1;
+	}
 
-        return 0;
+	return 0;
 }
 
 static int cam_fw_update(struct i2c_client *client, unsigned char *cam_fw_version)
@@ -2056,34 +2496,34 @@ static int cam_fw_update(struct i2c_client *client, unsigned char *cam_fw_versio
 
 	ret = cam_bload_get_version(client);
 	if (ret < 0) {
-		dev_err(&client->dev," Error in Get Version \n");
+		dev_err(&client->dev, " Error in Get Version\n");
 		goto exit;
 	}
 
 	/* Erase firmware present in the MCU and flash new firmware*/
-        ret = cam_bload_erase_flash(client);
-        if (ret < 0) {
-                dev_err(&client->dev," Error in Erase Flash \n");
-                goto exit;
-        }
+	ret = cam_bload_erase_flash(client);
+	if (ret < 0) {
+		dev_err(&client->dev, " Error in Erase Flash\n");
+		goto exit;
+	}
 
-        if (cam_bload_read_fw(client,&bload_crc16) < 0) {
-                dev_err(&client->dev," verify_flash FAIL !! \n");
-                goto exit;
-        }
+	if (cam_bload_read_fw(client, &bload_crc16) < 0) {
+		dev_err(&client->dev, " verify_flash FAIL !!\n");
+		goto exit;
+	}
 
-        if (cam_bload_verify_flash(client, bload_crc16) < 0) {
-                dev_err(&client->dev," verify_flash FAIL !! \n");
-                goto exit;
-        }
+	if (cam_bload_verify_flash(client, bload_crc16) < 0) {
+		dev_err(&client->dev, " verify_flash FAIL !!\n");
+		goto exit;
+	}
 
 	/* Reverting from bootloader mode */
-        if (cam_bload_go(client) < 0) {
-                dev_err(&client->dev," i2c_bload_go FAIL !! \n");
-                goto exit;
-        }
-	dev_info(&client->dev,"(%s) - Firware Updated - (%.32s)\n",
-			__func__,cam_fw_version);
+	if (cam_bload_go(client) < 0) {
+		dev_err(&client->dev, " i2c_bload_go FAIL !!\n");
+		goto exit;
+	}
+	dev_info(&client->dev, "(%s) - Firmware Updated - (%.32s)\n",
+			__func__, cam_fw_version);
 exit:
 	return 0;
 }
@@ -2092,7 +2532,7 @@ static int cam_jump_bload(struct i2c_client *client, struct imx568 *priv)
 {
 	uint32_t payload_len = 0;
 	int err = 0;
-	uint8_t mc_data[512], mc_ret_data[512];
+	uint8_t mc_data[512];
 
 	/*lock semaphore */
 	mutex_lock(&priv->mutex);
@@ -2106,8 +2546,8 @@ static int cam_jump_bload(struct i2c_client *client, struct imx568 *priv)
 	mc_data[4] = errorcheck(&mc_data[2], 2);
 
 	err = cam_write(client, mc_data, TX_LEN_PKT);
-	if (err !=0 ) {
-		dev_err(&client->dev, " %s(%d) Error - %d \n",
+	if (err != 0) {
+		dev_err(&client->dev, " %s(%d) Error - %d\n",
 				__func__, __LINE__, err);
 		goto exit;
 	}
@@ -2116,8 +2556,8 @@ static int cam_jump_bload(struct i2c_client *client, struct imx568 *priv)
 	mc_data[1] = CMD_ID_FW_UPDT;
 	err = cam_write(client, mc_data, 2);
 	if (err != 0) {
-		dev_err(&client->dev, " %s(%d) Error - %d \n",
-			__func__, __LINE__, err);
+		dev_err(&client->dev, " %s(%d) Error - %d\n",
+				__func__, __LINE__, err);
 		goto exit;
 	}
 
@@ -2132,463 +2572,461 @@ static int cam_lane_configuration(struct i2c_client *client, struct imx568 *priv
 {
 	int ret = 0, err;
 	uint16_t payload_data;
-        unsigned char mc_data[10];
-        uint32_t payload_len = 0;
-        uint16_t cmd_status = 0;
-        uint8_t retcode = 0, cmd_id = 0;
+	unsigned char mc_data[10];
+	uint32_t payload_len = 0;
+	uint16_t cmd_status = 0;
+	uint8_t retcode = 0, cmd_id = 0;
 	int retry = 5;
 
-        /* lock semaphore */
-        mutex_lock(&priv->mutex);
+	/* lock semaphore */
+	mutex_lock(&priv->mutex);
 
 	payload_len = 2;
 
 	mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_LANE_CONFIG;
-        mc_data[2] = payload_len >> 8;
-        mc_data[3] = payload_len & 0xFF;
-        mc_data[4] = errorcheck(&mc_data[2], 2);
+	mc_data[1] = CMD_ID_LANE_CONFIG;
+	mc_data[2] = payload_len >> 8;
+	mc_data[3] = payload_len & 0xFF;
+	mc_data[4] = errorcheck(&mc_data[2], 2);
 
-        cam_write(client, mc_data, TX_LEN_PKT);
+	cam_write(client, mc_data, TX_LEN_PKT);
 
-        /* Second Txn */
-        mc_data[0] = CMD_SIGNATURE;
-        mc_data[1] = CMD_ID_LANE_CONFIG;
+	/* Second Txn */
+	mc_data[0] = CMD_SIGNATURE;
+	mc_data[1] = CMD_ID_LANE_CONFIG;
 
-        /* Lane Configuration */
+	/* Lane Configuration */
 	payload_data = priv->mipi_lane_config == 4 ? NUM_LANES_4 : NUM_LANES_2;
-        mc_data[2] = payload_data >> 8;
-        mc_data[3] = payload_data & 0xff;
+	mc_data[2] = payload_data >> 8;
+	mc_data[3] = payload_data & 0xff;
 
 	/* CRC */
 	mc_data[4] = errorcheck(&mc_data[2], payload_len);
 	err = cam_write(client, mc_data, payload_len+3);
 
-        if (err != 0) {
-                dev_err(&client->dev," %s(%d) MCU Set Ctrl Error - %d \n",
+	if (err != 0) {
+		dev_err(&client->dev, " %s(%d) MCU Set Ctrl Error - %d\n",
 				__func__, __LINE__, err);
-                ret = -1;
-                goto exit;
-        }
+		ret = -1;
+		goto exit;
+	}
 
 	while (--retry > 0) {
-		yield();
-                cmd_id = CMD_ID_LANE_CONFIG;
-                if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) < 0) {
-                        dev_err(&client->dev,
-					" %s(%d) MCU Get CMD Status Error \n",
+		cmd_id = CMD_ID_LANE_CONFIG;
+		if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) < 0) {
+			dev_err(&client->dev,
+					" %s(%d) MCU Get CMD Status Error\n",
 					__func__, __LINE__);
-                        ret = -1;
-                        goto exit;
-                }
+			ret = -1;
+			goto exit;
+		}
 
-                if ((cmd_status == MCU_CMD_STATUS_ISP_UNINIT) &&
-                    (retcode == ERRCODE_SUCCESS)) {
-                        ret = 0;
-                        goto exit;
-                }
+		if ((cmd_status == MCU_CMD_STATUS_ISP_UNINIT) &&
+				(retcode == ERRCODE_SUCCESS)) {
+			ret = 0;
+			goto exit;
+		}
 
-                if ((retcode != ERRCODE_BUSY) &&
-                    ((cmd_status != MCU_CMD_STATUS_ISP_UNINIT))) {
-                       dev_err(&client->dev,
-                           "(%s) %d MCU Get CMD Error STATUS = 0x%04x "
-			   "RET = 0x%02x\n", __func__, __LINE__, cmd_status, retcode);
-                        ret = -1;
-                        goto exit;
-                }
-        }
+		if ((retcode != ERRCODE_BUSY) &&
+				((cmd_status != MCU_CMD_STATUS_ISP_UNINIT))) {
+			dev_err(&client->dev,
+					"(%s) %d MCU Get CMD Error STATUS = 0x%04x RET = 0x%02x\n",
+					__func__, __LINE__, cmd_status, retcode);
+			ret = -1;
+			goto exit;
+		}
+	}
 
- exit:
-        /* unlock semaphore */
-        mutex_unlock(&priv->mutex);
+exit:
+	/* unlock semaphore */
+	mutex_unlock(&priv->mutex);
 
-        return ret;
+	return ret;
 }
 
 static int cam_list_ctrls(struct i2c_client *client, struct imx568 *priv,
-                          ISP_CTRL_INFO * cam_ctrl_info)
+		struct _isp_ctrl_info_std *cam_ctrl_info)
 {
-        /* MCU communication variables */
-        unsigned char mc_data[100];
-        unsigned char mc_ret_data[100];
-        uint32_t payload_len = 0;
-        uint8_t errcode = ERRCODE_SUCCESS, orig_crc = 0, calc_crc = 0;
-        uint16_t index = 0;
-        int ret = 0, err =0,i;
+	/* MCU communication variables */
+	unsigned char mc_data[100];
+	unsigned char mc_ret_data[100];
+	uint32_t payload_len = 0;
+	uint8_t errcode = ERRCODE_SUCCESS, orig_crc = 0, calc_crc = 0;
+	uint16_t index = 0;
+	int ret = 0, err = 0, i;
 	int retry = 100;
 
-        /* lock semaphore */
-        mutex_lock(&priv->mutex);
+	/* lock semaphore */
+	mutex_lock(&priv->mutex);
 
-        /* Array of Ctrl Info */
-        while (--retry > 0) {
-                payload_len = 2;
+	/* Array of Ctrl Info */
+	while (--retry > 0) {
+		payload_len = 2;
 
-                mc_data[0] = CMD_SIGNATURE;
-                mc_data[1] = CMD_ID_GET_CTRL_INFO;
-                mc_data[2] = payload_len >> 8;
-                mc_data[3] = payload_len & 0xFF;
-                mc_data[4] = errorcheck(&mc_data[2], 2);
+		mc_data[0] = CMD_SIGNATURE;
+		mc_data[1] = CMD_ID_GET_CTRL_INFO;
+		mc_data[2] = payload_len >> 8;
+		mc_data[3] = payload_len & 0xFF;
+		mc_data[4] = errorcheck(&mc_data[2], 2);
 
-                cam_write(client, mc_data, TX_LEN_PKT);
-                msleep(1);
+		cam_write(client, mc_data, TX_LEN_PKT);
+		msleep(1);
 
-                mc_data[0] = CMD_SIGNATURE;
-                mc_data[1] = CMD_ID_GET_CTRL_INFO;
-                mc_data[2] = index >> 8;
-                mc_data[3] = index & 0xFF;
-                mc_data[4] = errorcheck(&mc_data[2], 2);
-                err = cam_write(client, mc_data, 5);
-                msleep(1);
-                if (err != 0) {
-                        dev_err(&client->dev," %s(%d) MCU CMD ID CTRLS Write "
-					"Error - %d \n", __func__, __LINE__, err);
-                        ret = -1;
-                        goto exit;
-                }
+		mc_data[0] = CMD_SIGNATURE;
+		mc_data[1] = CMD_ID_GET_CTRL_INFO;
+		mc_data[2] = index >> 8;
+		mc_data[3] = index & 0xFF;
+		mc_data[4] = errorcheck(&mc_data[2], 2);
+		err = cam_write(client, mc_data, 5);
+		msleep(1);
+		if (err != 0) {
+			dev_err(&client->dev, "%s(%d) MCU CMD ID CTRLS Write Error - %d\n",
+					__func__, __LINE__, err);
+			ret = -1;
+			goto exit;
+		}
 
-                err = cam_read(client, mc_ret_data, RX_LEN_PKT);
-                msleep(1);
-                if (err != 0) {
-                        dev_err(&client->dev," %s(%d) MCU CMD ID List Ctrls "
-					"Error - %d \n", __func__, __LINE__, err);
-                        ret = -1;
-                        goto exit;
-                }
+		err = cam_read(client, mc_ret_data, RX_LEN_PKT);
+		msleep(1);
+		if (err != 0) {
+			dev_err(&client->dev, "%s(%d) MCU CMD ID List Ctrls Error - %d\n",
+					__func__, __LINE__, err);
+			ret = -1;
+			goto exit;
+		}
 
-                /* Verify CRC */
-                orig_crc = mc_ret_data[4];
-                calc_crc = errorcheck(&mc_ret_data[2], 2);
-                if (orig_crc != calc_crc) {
-                        dev_err(&client->dev,
-					" %s(%d) MCU CMD ID List Ctrls Error CRC 0x%02x != 0x%02x \n",
+		/* Verify CRC */
+		orig_crc = mc_ret_data[4];
+		calc_crc = errorcheck(&mc_ret_data[2], 2);
+		if (orig_crc != calc_crc) {
+			dev_err(&client->dev,
+					"%s(%d) MCU CMD ID List Ctrls Error CRC 0x%02x != 0x%02x\n",
 					__func__, __LINE__, orig_crc, calc_crc);
-                        ret = -1;
-                        goto exit;
-                }
+			ret = -1;
+			goto exit;
+		}
 
-                if (((mc_ret_data[2] << 8) | mc_ret_data[3]) == 0) {
-                        priv->num_ctrls = index;
-                        break;
-                }
+		if (((mc_ret_data[2] << 8) | mc_ret_data[3]) == 0) {
+			priv->num_ctrls = index;
+			break;
+		}
 
-                payload_len =
-                    ((mc_ret_data[2] << 8) | mc_ret_data[3]) +
-                    HEADER_FOOTER_SIZE;
-                errcode = mc_ret_data[5];
-                if (errcode != ERRCODE_SUCCESS) {
-                        dev_err(&client->dev,
-					" %s(%d) MCU CMD ID List Ctrls Errcode - 0x%02x \n",
+		payload_len =
+			((mc_ret_data[2] << 8) | mc_ret_data[3]) +
+			HEADER_FOOTER_SIZE;
+		errcode = mc_ret_data[5];
+		if (errcode != ERRCODE_SUCCESS) {
+			dev_err(&client->dev,
+					"%s(%d) MCU CMD ID List Ctrls Errcode - 0x%02x\n",
 					__func__, __LINE__, errcode);
-                        ret = -1;
-                        goto exit;
-                }
+			ret = -1;
+			goto exit;
+		}
 
-                memset(mc_ret_data, 0x00, payload_len);
-                err = cam_read(client, mc_ret_data, payload_len);
-                if (err != 0) {
-                       dev_err(&client->dev,
-				       " %s(%d) MCU CMD ID List Ctrls Read Error - %d \n",
-				       __func__, __LINE__, err);
-                        ret = -1;
-                        goto exit;
-                }
+		memset(mc_ret_data, 0x00, payload_len);
+		err = cam_read(client, mc_ret_data, payload_len);
+		if (err != 0) {
+			dev_err(&client->dev,
+					"%s(%d) MCU CMD ID List Ctrls Read Error - %d\n",
+					__func__, __LINE__, err);
+			ret = -1;
+			goto exit;
+		}
 
-                /* Verify CRC */
-                orig_crc = mc_ret_data[payload_len - 2];
-                calc_crc =
-                    errorcheck(&mc_ret_data[2],
-                                 payload_len - HEADER_FOOTER_SIZE);
-                if (orig_crc != calc_crc) {
-                        dev_err(&client->dev,
-					" %s(%d) MCU CMD ID List Ctrls Error CRC 0x%02x != 0x%02x \n",
+		/* Verify CRC */
+		orig_crc = mc_ret_data[payload_len - 2];
+		calc_crc =
+			errorcheck(&mc_ret_data[2],
+					payload_len - HEADER_FOOTER_SIZE);
+		if (orig_crc != calc_crc) {
+			dev_err(&client->dev,
+					"%s(%d) MCU CMD ID List Ctrls Error CRC 0x%02x != 0x%02x\n",
 					__func__, __LINE__, orig_crc, calc_crc);
-                        ret = -1;
-                        goto exit;
-                }
+			ret = -1;
+			goto exit;
+		}
 
-                /* Verify Errcode */
-                errcode = mc_ret_data[payload_len - 1];
-                if (errcode != ERRCODE_SUCCESS) {
-                        dev_err(&client->dev,
-					" %s(%d) MCU CMD ID List Ctrls Errcode - 0x%02x \n",
+		/* Verify Errcode */
+		errcode = mc_ret_data[payload_len - 1];
+		if (errcode != ERRCODE_SUCCESS) {
+			dev_err(&client->dev,
+					"%s(%d) MCU CMD ID List Ctrls Errcode - 0x%02x\n",
 					__func__, __LINE__, errcode);
-                        ret = -1;
-                        goto exit;
-                }
-		if(cam_ctrl_info != NULL) {
+			ret = -1;
+			goto exit;
+		}
+		if (cam_ctrl_info != NULL) {
 			/* append ctrl info in array */
 			cam_ctrl_info[index].ctrl_id =
-			    mc_ret_data[2] << 24 | mc_ret_data[3] << 16 | mc_ret_data[4]
-			    << 8 | mc_ret_data[5];
+				mc_ret_data[2] << 24 | mc_ret_data[3] << 16 | mc_ret_data[4]
+				<< 8 | mc_ret_data[5];
 			cam_ctrl_info[index].ctrl_type = mc_ret_data[6];
 			switch (cam_ctrl_info[index].ctrl_type) {
-				case CTRL_STANDARD:
-				        cam_ctrl_info[index].ctrl_data.std.ctrl_min =
-				            mc_ret_data[7] << 24 | mc_ret_data[8] << 16 |
-				            mc_ret_data[9] << 8 | mc_ret_data[10];
+			case CTRL_STANDARD:
+				cam_ctrl_info[index].ctrl_data.std.ctrl_min =
+					mc_ret_data[7] << 24 | mc_ret_data[8] << 16 |
+					mc_ret_data[9] << 8 | mc_ret_data[10];
 
-				        cam_ctrl_info[index].ctrl_data.std.ctrl_max =
-				            mc_ret_data[11] << 24 | mc_ret_data[12] << 16 |
-				            mc_ret_data[13]
-				            << 8 | mc_ret_data[14];
+				cam_ctrl_info[index].ctrl_data.std.ctrl_max =
+					mc_ret_data[11] << 24 | mc_ret_data[12] << 16 |
+					mc_ret_data[13]
+					<< 8 | mc_ret_data[14];
 
-				        cam_ctrl_info[index].ctrl_data.std.ctrl_def =
-				            mc_ret_data[15] << 24 | mc_ret_data[16] << 16 |
-				            mc_ret_data[17]
-				            << 8 | mc_ret_data[18];
+				cam_ctrl_info[index].ctrl_data.std.ctrl_def =
+					mc_ret_data[15] << 24 | mc_ret_data[16] << 16 |
+					mc_ret_data[17]
+					<< 8 | mc_ret_data[18];
 
-				        cam_ctrl_info[index].ctrl_data.std.ctrl_step =
-				            mc_ret_data[19] << 24 | mc_ret_data[20] << 16 |
-				            mc_ret_data[21]
-				            << 8 | mc_ret_data[22];
-				        break;
+				cam_ctrl_info[index].ctrl_data.std.ctrl_step =
+					mc_ret_data[19] << 24 | mc_ret_data[20] << 16 |
+					mc_ret_data[21]
+					<< 8 | mc_ret_data[22];
+				break;
 
-				case CTRL_EXTENDED:
-					cam_ctrl_info[index].ctrl_data.ext.val_type = mc_ret_data[7];
-					cam_ctrl_info[index].ctrl_data.ext.val_length =
-						mc_ret_data[8] << 24 | mc_ret_data[9] << 16 |
-							mc_ret_data[10] << 8 | mc_ret_data[11];
-					for(i = 0 ; i < cam_ctrl_info[index].ctrl_data.ext.val_length ; i++)
-						cam_ctrl_info[index].ctrl_data.ext.val_data[i] = mc_ret_data[12+i];
-					if (cam_ctrl_info[index].ctrl_data.ext.val_type ==
-							V4L2_CTRL_TYPE_INTEGER64) {
-						for (i = 0; i < EXTENDED_CTRL_SIZE; i++) {
-							cam_ctrl_info[index].ctrl_data.ext.ctrl_min |=
-								cam_ctrl_info[index].ctrl_data.ext.val_data[i] << 8 * (7-i);
-							cam_ctrl_info[index].ctrl_data.ext.ctrl_max |=
-								cam_ctrl_info[index].ctrl_data.ext.val_data[8+i] << 8 * (7-i);
-							cam_ctrl_info[index].ctrl_data.ext.ctrl_def |=
-								cam_ctrl_info[index].ctrl_data.ext.val_data[16+i] << 8 * (7-i);
-							cam_ctrl_info[index].ctrl_data.ext.ctrl_step |=
-								cam_ctrl_info[index].ctrl_data.ext.val_data[24+i] << 8 * (7-i);
-						}
-					} else if(cam_ctrl_info[index].ctrl_data.ext.val_type ==
-							V4L2_CTRL_TYPE_STRING) {
-						for (i = 0; i < EXTENDED_CTRL_SIZE; i++) {
-							cam_ctrl_info[index].ctrl_data.ext.ctrl_min |=
-								cam_ctrl_info[index].ctrl_data.ext.val_data[i] << 8 * (7-i);
-							cam_ctrl_info[index].ctrl_data.ext.ctrl_max |=
-								cam_ctrl_info[index].ctrl_data.ext.val_data[8+i] << 8 * (7-i);
-							cam_ctrl_info[index].ctrl_data.ext.ctrl_step |=
-								cam_ctrl_info[index].ctrl_data.ext.val_data[24+i] << 8 * (7-i);
-						}
+			case CTRL_EXTENDED:
+				cam_ctrl_info[index].ctrl_data.ext.val_type = mc_ret_data[7];
+				cam_ctrl_info[index].ctrl_data.ext.val_length =
+					mc_ret_data[8] << 24 | mc_ret_data[9] << 16 |
+					mc_ret_data[10] << 8 | mc_ret_data[11];
+				for (i = 0 ; i < cam_ctrl_info[index].ctrl_data.ext.val_length; i++)
+					cam_ctrl_info[index].ctrl_data.ext.val_data[i] =
+						mc_ret_data[12+i];
+				if (cam_ctrl_info[index].ctrl_data.ext.val_type ==
+						V4L2_CTRL_TYPE_INTEGER64) {
+					for (i = 0; i < EXTENDED_CTRL_SIZE; i++) {
+						cam_ctrl_info[index].ctrl_data.ext.ctrl_min |=
+							cam_ctrl_info[index].ctrl_data.ext.val_data[i] << 8 * (7 - i);
+						cam_ctrl_info[index].ctrl_data.ext.ctrl_max |=
+							cam_ctrl_info[index].ctrl_data.ext.val_data[8 + i] << 8 * (7 - i);
+						cam_ctrl_info[index].ctrl_data.ext.ctrl_def |=
+							cam_ctrl_info[index].ctrl_data.ext.val_data[16 + i] << 8 * (7 - i);
+						cam_ctrl_info[index].ctrl_data.ext.ctrl_step |=
+							cam_ctrl_info[index].ctrl_data.ext.val_data[24 + i] << 8 * (7 - i);
 					}
-					break;
+				} else if (cam_ctrl_info[index].ctrl_data.ext.val_type ==
+						V4L2_CTRL_TYPE_STRING) {
+					for (i = 0; i < EXTENDED_CTRL_SIZE; i++) {
+						cam_ctrl_info[index].ctrl_data.ext.ctrl_min |=
+							cam_ctrl_info[index].ctrl_data.ext.val_data[i] << 8 * (7 - i);
+						cam_ctrl_info[index].ctrl_data.ext.ctrl_max |=
+							cam_ctrl_info[index].ctrl_data.ext.val_data[8 + i] << 8 * (7 - i);
+						cam_ctrl_info[index].ctrl_data.ext.ctrl_step |=
+							cam_ctrl_info[index].ctrl_data.ext.val_data[24 + i] << 8 * (7 - i);
+					}
+				}
+				break;
 			}
 			priv->ctrldb[index] = cam_ctrl_info[index].ctrl_id;
 		}
-                index++;
-        }
+		index++;
+	}
 
- exit:
-        /* unlock semaphore */
-        mutex_unlock(&priv->mutex);
+exit:
+	/* unlock semaphore */
+	mutex_unlock(&priv->mutex);
 
-        return ret;
+	return ret;
 
 }
 static int cam_list_fmts(struct i2c_client *client, struct imx568 *priv,
-			ISP_STREAM_INFO *stream_info, int *frm_fmt_size)
+		struct _isp_stream_info *stream_info, int *frm_fmt_size)
 {
-        /* MCU communication variables */
-        unsigned char mc_data[100];
-        unsigned char mc_ret_data[100];
-        uint32_t payload_len = 0, err = 0;
-        uint8_t errcode = ERRCODE_SUCCESS, orig_crc = 0, calc_crc = 0;
-        uint16_t index = 0, mode = 0;
+	/* MCU communication variables */
+	unsigned char mc_data[100];
+	unsigned char mc_ret_data[100];
+	uint32_t payload_len = 0, err = 0;
+	uint8_t errcode = ERRCODE_SUCCESS, orig_crc = 0, calc_crc = 0;
+	uint16_t index = 0, mode = 0;
 
-        int num_frates = 0, ret = 0, default_fmt_fourcc = 0;
+	int num_frates = 0, ret = 0, default_fmt_fourcc = 0;
+	u32 rate = 0;
 
-        /* Stream Info Variables */
+	/* Stream Info Variables */
 
-        /* lock semaphore */
-        mutex_lock(&priv->mutex);
+	/* lock semaphore */
+	mutex_lock(&priv->mutex);
 
-        /* List all formats from MCU and append to cam_frmfmt array */
+	/* List all formats from MCU and append to cam_frmfmt array */
 
-        for (index = 0;; index++) {
-                payload_len = 2;
+	for (index = 0;; index++) {
+		payload_len = 2;
 
-                mc_data[0] = CMD_SIGNATURE;
-                mc_data[1] = CMD_ID_GET_STREAM_INFO;
-                mc_data[2] = payload_len >> 8;
-                mc_data[3] = payload_len & 0xFF;
-                mc_data[4] = errorcheck(&mc_data[2], 2);
+		mc_data[0] = CMD_SIGNATURE;
+		mc_data[1] = CMD_ID_GET_STREAM_INFO;
+		mc_data[2] = payload_len >> 8;
+		mc_data[3] = payload_len & 0xFF;
+		mc_data[4] = errorcheck(&mc_data[2], 2);
 
-                cam_write(client, mc_data, TX_LEN_PKT);
-                msleep(1);
+		cam_write(client, mc_data, TX_LEN_PKT);
+		msleep(1);
 
-                mc_data[0] = CMD_SIGNATURE;
-                mc_data[1] = CMD_ID_GET_STREAM_INFO;
-                mc_data[2] = index >> 8;
-                mc_data[3] = index & 0xFF;
-                mc_data[4] = errorcheck(&mc_data[2], 2);
-                err = cam_write(client, mc_data, 5);
-                msleep(1);
-                if (err != 0) {
-                        dev_err(&client->dev,
-					" %s(%d) i2c error while writing command to MCU -%d \n",
+		mc_data[0] = CMD_SIGNATURE;
+		mc_data[1] = CMD_ID_GET_STREAM_INFO;
+		mc_data[2] = index >> 8;
+		mc_data[3] = index & 0xFF;
+		mc_data[4] = errorcheck(&mc_data[2], 2);
+		err = cam_write(client, mc_data, 5);
+		msleep(1);
+		if (err != 0) {
+			dev_err(&client->dev,
+					"%s(%d) i2c error while writing command to MCU -%d\n",
 					__func__, __LINE__, err);
-                        ret = -1;
-                        goto exit;
-                }
+			ret = -1;
+			goto exit;
+		}
 
-                err = cam_read(client, mc_ret_data, RX_LEN_PKT);
-                msleep(1);
-                if (err != 0) {
-                        dev_err(&client->dev,
-					" %s(%d) i2c error while reading stream info. length from MCU - %d \n",
+		err = cam_read(client, mc_ret_data, RX_LEN_PKT);
+		msleep(1);
+		if (err != 0) {
+			dev_err(&client->dev,
+					"%s(%d) i2c error while reading stream info. length from MCU - %d\n",
 					__func__, __LINE__, err);
-                        ret = -1;
-                        goto exit;
-                }
+			ret = -1;
+			goto exit;
+		}
 
-                /* Verify CRC */
-                orig_crc = mc_ret_data[4];
-                calc_crc = errorcheck(&mc_ret_data[2], 2);
-                if (orig_crc != calc_crc) {
-                        dev_err(&client->dev,
-					" %s(%d)Checksum' mismatch in  MCU provided stream info. length: "
-					"0x%02x != 0x%02x \n", __func__, __LINE__, orig_crc, calc_crc);
-                        ret = -1;
-                        goto exit;
-                }
-                if (((mc_ret_data[2] << 8) | mc_ret_data[3]) == 0) {
-			if(stream_info == NULL) {
+		/* Verify CRC */
+		orig_crc = mc_ret_data[4];
+		calc_crc = errorcheck(&mc_ret_data[2], 2);
+		if (orig_crc != calc_crc) {
+			dev_err(&client->dev,
+					"%s(%d)Checksum' mismatch in  MCU provided stream info. length: 0x%02x != 0x%02x\n",
+					__func__, __LINE__, orig_crc, calc_crc);
+			ret = -1;
+			goto exit;
+		}
+		if (((mc_ret_data[2] << 8) | mc_ret_data[3]) == 0) {
+			if (stream_info == NULL) {
 				*frm_fmt_size = index;
 				priv->frm_fmt_size = index;
 			} else {
 				*frm_fmt_size = mode;
 				priv->frm_fmt_size = mode;
 			}
-                        break;
-                }
+			break;
+		}
 
-                payload_len =
-                    ((mc_ret_data[2] << 8) | mc_ret_data[3]) +
-                    HEADER_FOOTER_SIZE;
-                errcode = mc_ret_data[5];
-                if (errcode != ERRCODE_SUCCESS) {
-                        dev_err(&client->dev,
-					" %s(%d) MCU's return code has error set - 0x%02x \n",
+		payload_len =
+			((mc_ret_data[2] << 8) | mc_ret_data[3]) +
+			HEADER_FOOTER_SIZE;
+		errcode = mc_ret_data[5];
+		if (errcode != ERRCODE_SUCCESS) {
+			dev_err(&client->dev,
+					"%s(%d) MCU's return code has error set - 0x%02x\n",
 					__func__, __LINE__, errcode);
-                        ret = -1;
-                        goto exit;
-                }
+			ret = -1;
+			goto exit;
+		}
 
-                memset(mc_ret_data, 0x00, payload_len);
-                err = cam_read(client, mc_ret_data, payload_len);
-                msleep(1);
-                if (err != 0) {
-                        dev_err(&client->dev,
-					" %s(%d) i2c error while reading actual stream info. - %d \n",
+		memset(mc_ret_data, 0x00, payload_len);
+		err = cam_read(client, mc_ret_data, payload_len);
+		msleep(1);
+		if (err != 0) {
+			dev_err(&client->dev,
+					"%s(%d) i2c error while reading actual stream info. - %d\n",
 					__func__, __LINE__, err);
-                        ret = -1;
-                        goto exit;
-                }
+			ret = -1;
+			goto exit;
+		}
 
-                /* Verify CRC */
-                orig_crc = mc_ret_data[payload_len - 2];
-                calc_crc =
-                    errorcheck(&mc_ret_data[2],
-                                 payload_len - HEADER_FOOTER_SIZE);
-                if (orig_crc != calc_crc) {
-                        dev_err(&client->dev,
-					" %s(%d) Checksum' mismatch error in MCU provided stream info. : "
-					"0x%02x != 0x%02x \n", __func__, __LINE__, orig_crc, calc_crc);
-                        ret = -1;
-                        goto exit;
-                }
+		/* Verify CRC */
+		orig_crc = mc_ret_data[payload_len - 2];
+		calc_crc =
+			errorcheck(&mc_ret_data[2],
+					payload_len - HEADER_FOOTER_SIZE);
+		if (orig_crc != calc_crc) {
+			dev_err(&client->dev,
+					"%s(%d) Checksum' mismatch error in MCU provided stream info. : 0x%02x != 0x%02x\n",
+					__func__, __LINE__, orig_crc, calc_crc);
+			ret = -1;
+			goto exit;
+		}
 
-                /* Verify Errcode */
-                errcode = mc_ret_data[payload_len - 1];
-                if (errcode != ERRCODE_SUCCESS) {
-                        dev_err(&client->dev,
-					" %s(%d) MCU's response has errcode set - 0x%02x \n",
+		/* Verify Errcode */
+		errcode = mc_ret_data[payload_len - 1];
+		if (errcode != ERRCODE_SUCCESS) {
+			dev_err(&client->dev,
+					" %s(%d) MCU's response has errcode set - 0x%02x\n",
 					__func__, __LINE__, errcode);
-                        ret = -1;
-                        goto exit;
-                }
-		if(stream_info != NULL) {
-			/* check if any other format than UYVY is queried - do not append in array */
+			ret = -1;
+			goto exit;
+		}
+		if (stream_info != NULL) {
 			stream_info->fmt_fourcc =
 				mc_ret_data[2] << 24 | mc_ret_data[3] << 16 | mc_ret_data[4]
 				<< 8 | mc_ret_data[5];
-			if(index == 0)
+			if (index == 0)
 				default_fmt_fourcc = stream_info->fmt_fourcc;
 			stream_info->width = mc_ret_data[6] << 8 | mc_ret_data[7];
 			stream_info->height = mc_ret_data[8] << 8 | mc_ret_data[9];
 			stream_info->frame_rate_type = mc_ret_data[10];
 
 			switch (stream_info->frame_rate_type) {
-				case FRAME_RATE_DISCRETE:
-					stream_info->frame_rate.disc.frame_rate_num =
-						mc_ret_data[11] << 8 | mc_ret_data[12];
+			case FRAME_RATE_DISCRETE:
+				stream_info->frame_rate.disc.frame_rate_num =
+					mc_ret_data[11] << 8 | mc_ret_data[12];
 
-					stream_info->frame_rate.disc.frame_rate_denom =
-						mc_ret_data[13] << 8 | mc_ret_data[14];
+				stream_info->frame_rate.disc.frame_rate_denom =
+					mc_ret_data[13] << 8 | mc_ret_data[14];
 
-					break;
+				break;
 
-				case FRAME_RATE_CONTINOUS:
-					dev_err(&client->dev,
-							" The Stream format at index 0x%04x has FRAME_RATE_CONTINOUS,"
-							"which is unsupported !! \n", index);
+			case FRAME_RATE_CONTINOUS:
+				dev_err(&client->dev,
+						"The Stream format at index 0x%04x has FRAME_RATE_CONTINOUS, which is unsupported !!\n",
+						index);
 
-					continue;
+				continue;
 			}
-			switch (stream_info->fmt_fourcc){
-				case V4L2_PIX_FMT_SRGGB12:
-				case V4L2_PIX_FMT_SGBRG12:
-				case V4L2_PIX_FMT_SGBRG10:
-				case V4L2_PIX_FMT_SRGGB10:
-				case V4L2_PIX_FMT_SRGGB8:
-					priv->cam_frmfmt[mode].size.width = stream_info->width;
-					priv->cam_frmfmt[mode].size.height =
-						stream_info->height;
-					num_frates = priv->cam_frmfmt[mode].num_framerates;
 
-					*((int *)(priv->cam_frmfmt[mode].framerates)+num_frates) =
-						(int)(stream_info->frame_rate.disc.frame_rate_num /
-								stream_info->frame_rate.disc.frame_rate_denom);
-					priv->cam_frmfmt[mode].num_framerates++;
-					priv->cam_frmfmt[mode].mode = mode;
-					priv->streamdb[index] = mode;
-					priv->cam_frmfmt[mode].fourcc = stream_info->fmt_fourcc;
+			switch (stream_info->fmt_fourcc) {
+			case V4L2_PIX_FMT_SRGGB12:
+			case V4L2_PIX_FMT_SGBRG12:
+			case V4L2_PIX_FMT_SGBRG10:
+			case V4L2_PIX_FMT_SRGGB10:
+			case V4L2_PIX_FMT_SRGGB8:
+				priv->cam_frmfmt[mode].size.width = stream_info->width;
+				priv->cam_frmfmt[mode].size.height =
+					stream_info->height;
+				num_frates = priv->cam_frmfmt[mode].num_framerates;
+
+				/* Native rate verbatim: the MCU rejects a rate the mode lacks. */
+				rate = (u32)(stream_info->frame_rate.disc.frame_rate_num /
+						stream_info->frame_rate.disc.frame_rate_denom);
+				*((int *)(priv->cam_frmfmt[mode].framerates)+num_frates) = (int)rate;
+				priv->cam_frmfmt[mode].num_framerates++;
+				priv->cam_frmfmt[mode].mode = mode;
+				priv->streamdb[index] = mode;
+				priv->cam_frmfmt[mode].fourcc = stream_info->fmt_fourcc;
 #ifdef EN_DEBUG_PRINTS
-					dev_info(&client->dev, "stream mode : %d width : %d height : %d framerate : %d\n",
-							priv->cam_frmfmt[mode].mode, stream_info->width, stream_info->height,
-							priv->cam_frmfmt[mode].num_framerates);
-					dev_info(&client->dev, "stream_info->frame_rate.disc.frame_rate_num = %d --------------\n",
-							stream_info->frame_rate.disc.frame_rate_num);
+				dev_info(&client->dev, "stream mode : %d width : %d height : %d framerate : %d\n",
+						priv->cam_frmfmt[mode].mode, stream_info->width,
+						stream_info->height,
+						priv->cam_frmfmt[mode].num_framerates);
+				dev_info(&client->dev, "stream_info->frame_rate.disc.frame_rate_num = %d --------------\n",
+						stream_info->frame_rate.disc.frame_rate_num);
 #endif
-
-					if ((stream_info->fmt_fourcc == V4L2_PIX_FMT_SRGGB12) ||
-							(stream_info->fmt_fourcc == V4L2_PIX_FMT_SGBRG12)) {
-						priv->cam_frmfmt[mode].hmax = 965;
-						priv->cam_frmfmt[mode].vmax = 1192;
-					}
-					mode++;
-					break;
-
-				default:
-					dev_err(&client->dev,
-							" The Stream format at index 0x%04x has format 0x%08x ,"
-							"which is unsupported \nSupported Formats are 0x%08x and 0x%08x!! \n",
-							index, stream_info->fmt_fourcc, V4L2_PIX_FMT_SRGGB12,
-							V4L2_PIX_FMT_SRGGB10);
+				/* vmax is the vendor seed; the live frame length follows the rate. */
+				if ((stream_info->fmt_fourcc == V4L2_PIX_FMT_SRGGB12) ||
+						(stream_info->fmt_fourcc == V4L2_PIX_FMT_SGBRG12)) {
+					priv->cam_frmfmt[mode].hmax = 965;
+					priv->cam_frmfmt[mode].vmax = 1192;
+				}
+				mode++;
+				break;
+			default:
+				dev_err(&client->dev,
+						"The Stream format at index 0x%04x has format 0x%08x, which is unsupported\nSupported Formats are 0x%08x and 0x%08x!!\n",
+						index, stream_info->fmt_fourcc,
+						V4L2_PIX_FMT_SRGGB12, V4L2_PIX_FMT_SRGGB10);
 			}
-
 		}
+	}
+exit:
+	/* unlock semaphore */
+	mutex_unlock(&priv->mutex);
 
-        }
-
- exit:
-        /* unlock semaphore */
-        mutex_unlock(&priv->mutex);
-
-        return ret;
+	return ret;
 
 }
 
@@ -2596,43 +3034,60 @@ static int cam_list_fmts(struct i2c_client *client, struct imx568 *priv,
 
 int cam_core_initialize(struct imx568 *priv)
 {
-        struct i2c_client *client = priv->i2c_client;
+	struct i2c_client *client = priv->i2c_client;
 	struct device *dev = &client->dev;
 	struct device_node *node = dev->of_node;
 	unsigned char fw_version[32] = {0}, bin_fw_version[32] = {0};
-	int ret, loop, err = 0, pwdn_gpio_toggle = 0, retry = 5;
+	int ret, loop, err = 0, retry = 5;
 	int frm_fmt_size = 0;
 	uint32_t lanes = 0;
 
 	ret = of_property_read_u32(node, "camera_mipi_lanes", &lanes);
 	if (ret < 0) {
-	    dev_err(dev, "Error in getting Camera MIPI Lanes\n");
-	    return -EINVAL;
+		dev_err(dev, "Error in getting Camera MIPI Lanes\n");
+		return -EINVAL;
 	}
 	priv->mipi_lane_config = lanes;
 
 	// Read MCU firmware bin name from device tree
-	ret = of_property_read_string(node, "cam_fw_name",&cam_fw_name);
+	ret = of_property_read_string(node, "cam_fw_name", &cam_fw_name);
 
 	if (ret) {
-                dev_err(dev, "Unable to get cam firmware name from the Device tree\n");
+		dev_err(dev, "Unable to get cam firmware name from the Device tree\n");
 		return -EINVAL;
+	}
+
+	/*
+	 * Optional exposure window limits (microseconds) from the device tree.
+	 * Fall back to the sensor's hardware limits when the properties are
+	 * absent. These seed the default value of the manual_exposure_min and
+	 * manual_exposure_max controls.
+	 */
+	priv->exposure_min = IMX568_EXPOSURE_MIN;
+	priv->exposure_max = IMX568_EXPOSURE_MAX;
+	of_property_read_u32(node, "simaai,manual_exposure_min", &priv->exposure_min);
+	of_property_read_u32(node, "simaai,manual_exposure_max", &priv->exposure_max);
+	if (priv->exposure_min > priv->exposure_max) {
+		dev_warn(dev,
+			 "simaai,manual_exposure_min (%u) > simaai,manual_exposure_max (%u) in DT, using defaults\n",
+			 priv->exposure_min, priv->exposure_max);
+		priv->exposure_min = IMX568_EXPOSURE_MIN;
+		priv->exposure_max = IMX568_EXPOSURE_MAX;
 	}
 
 	// Check if the CAM firmware is loaded or not
 	// If not loaded already, load the CAM firmware
 	if (!is_fw_loaded) {
-		if (ecam_firmware_load(client) < ERRCODE_SUCCESS) {
+		ret = ecam_firmware_load(client);
+		if (ret != ERRCODE_SUCCESS) {
 			dev_err(dev, "Failed to load cam firmware\n");
 			return -ENOENT;
-		} else {
-#ifdef EN_DEBUG_PRINTS
-			dev_info (dev, "Firmware Load Success\n");
-#endif
-			is_fw_loaded = 1;
 		}
+#ifdef EN_DEBUG_PRINTS
+		dev_info(dev, "Firmware Load Success\n");
+#endif
+		is_fw_loaded = 1;
 	}
-
 	// MCU Reset Sequence
 	toggle_gpio_mcu(priv->reset_gpio, 0);
 	toggle_gpio_mcu(priv->boot_gpio, 0);
@@ -2640,24 +3095,28 @@ int cam_core_initialize(struct imx568 *priv)
 	toggle_gpio_mcu(priv->reset_gpio, 1);
 	msleep(100); // Delay required to boot the MCU
 
-	if ((ret = is_fw_update_required(client, priv, fw_version, bin_fw_version)) != 0) {
+	ret = is_fw_update_required(client, priv, fw_version, bin_fw_version);
+	if (ret != 0) {
 		if (ret > 0) {
-			if((err = cam_jump_bload(client, priv)) < 0) {
-				dev_err(dev," Cannot go into bootloader mode\n");
+			err = cam_jump_bload(client, priv);
+			if (err < 0) {
+				dev_err(dev, " Cannot go into bootloader mode\n");
 				return -EIO;
 			}
 			msleep(100);
 		} else {
 			/* ret value has to be -1 */
 #ifdef EN_DEBUG_PRINTS
-			dev_info(dev," Switching MCU to Bootloader mode \n");
+			dev_info(dev, " Switching MCU to Bootloader mode\n");
 #endif
 		}
 
 		ret = cam_bload_get_version(client);
 		if (ret < 0) {
-			dev_err(dev," Error in Get Version \n");
-			/* Since error in reading the bootloader version: set MCU to bootloader mode */
+			dev_err(dev, " Error in Get Version\n");
+			/* Since error in reading the bootloader version:
+			 * set MCU to bootloader mode
+			 */
 
 			toggle_gpio_mcu(priv->reset_gpio, 0);
 			toggle_gpio_mcu(priv->boot_gpio, 1);
@@ -2666,7 +3125,7 @@ int cam_core_initialize(struct imx568 *priv)
 			msleep(10);
 
 			/* Reading the MCU Firmware version from bootloader mode */
-			for(loop = 0;loop < MAX_ATTEMPTS; loop++) {
+			for (loop = 0; loop < MAX_ATTEMPTS; loop++) {
 				ret = cam_bload_get_version(client);
 				if (ret < 0) {
 					dev_err(dev, "Error getting Firmware version.. Retrying...\n");
@@ -2677,17 +3136,20 @@ int cam_core_initialize(struct imx568 *priv)
 				}
 			}
 
-			/* Failed reading FW version in bootloader mode even after MAX_attempts. Return Failure */
+			/* Failed reading FW version in bootloader mode even after MAX_attempts.
+			 * Return Failure
+			 */
 			if (loop == MAX_ATTEMPTS) {
-				dev_err(dev, "%s (%d) Error in reading MCU FW version"
-						"in bootloader mode also. Exiting. \n", __func__, __LINE__);
+				dev_err(dev, "%s (%d) Error in reading MCU FW versionin bootloader mode also. Exiting.\n",
+						__func__, __LINE__);
 				return -EINVAL;
 			}
 		}
 
 		/*Attempt Firmware Update */
-		if (cam_fw_update(client,bin_fw_version) < 0) {
-			dev_err(dev, "%s (%d) Error Updating MCU FW. Exiting. \n", __func__, __LINE__);
+		if (cam_fw_update(client, bin_fw_version) < 0) {
+			dev_err(dev, "%s (%d) Error Updating MCU FW. Exiting.\n",
+					__func__, __LINE__);
 			return -EFAULT;
 		}
 
@@ -2700,7 +3162,7 @@ int cam_core_initialize(struct imx568 *priv)
 
 	} else {
 		/* Same Firmware version in MCU and bin file */
-		dev_info(dev,"Cam Firmware Version - (%.32s)\n",
+		dev_info(dev, "Cam Firmware Version - (%.32s)\n",
 				fw_version);
 	}
 
@@ -2708,51 +3170,52 @@ int cam_core_initialize(struct imx568 *priv)
 	retry = 5;
 	while (--retry > 0) {
 		if (cam_lane_configuration(client, priv) < 0) {
-			dev_err(dev, "%s, Failed to set lane CONFIG Data. retrying!\n",__func__);
+			dev_err(dev, "%s, Failed to set lane CONFIG Data. retrying!\n", __func__);
 			continue;
 		} else {
 			break;
 		}
 	}
 	if (retry < 0) {
-		dev_err(dev, "%s, Failed to set lane CONFIG Data!\n",__func__);
+		dev_err(dev, "%s, Failed to set lane CONFIG Data!\n", __func__);
 		return -EFAULT;
 	}
 
 	/* Query the number of controls from MCU */
 	retry = 5;
 	while (--retry > 0) {
-		if(cam_list_ctrls(client, priv, NULL) < 0) {
-			dev_err(dev,"%s, init controls failure. retrying\n",__func__);
+		if (cam_list_ctrls(client, priv, NULL) < 0) {
+			dev_err(dev, "%s, init controls failure. retrying\n", __func__);
 			continue;
 		} else {
 			break;
 		}
 	}
 	if (retry < 0) {
-		dev_err(dev, "%s, Failed to init controls!\n",__func__);
+		dev_err(dev, "%s, Failed to init controls!\n", __func__);
 		return -EFAULT;
 	}
 
 	priv->cam_ctrl_info = devm_kzalloc(dev,
-			sizeof(ISP_CTRL_INFO) * priv->num_ctrls, GFP_KERNEL);
-	if(!priv->cam_ctrl_info) {
-		dev_err(dev,"Unable to allocate memory!\n");
+			sizeof(struct _isp_ctrl_info_std) * priv->num_ctrls, GFP_KERNEL);
+	if (!priv->cam_ctrl_info) {
+		dev_err(dev, "Failed to allocate memory for camera control info!\n");
+
 		return -ENOMEM;
 	}
 
 	priv->ctrldb = devm_kzalloc(dev,
-			sizeof(uint32_t) * priv->num_ctrls , GFP_KERNEL);
+			sizeof(uint32_t) * priv->num_ctrls, GFP_KERNEL);
 	if (!priv->ctrldb) {
-		dev_err(dev,"Unable to allocate memory!\n");
+		dev_err(dev, "Failed to allocate memory for camera control database!\n");
 		return -ENOMEM;
 	}
 
 	/* Fill the controls */
 	retry = 5;
 	while (--retry > 0) {
-		if(cam_list_ctrls(client, priv, priv->cam_ctrl_info) < 0) {
-			dev_err(dev,"%s, Failed to init controls\n",__func__);
+		if (cam_list_ctrls(client, priv, priv->cam_ctrl_info) < 0) {
+			dev_err(dev, "%s, Failed to init controls\n", __func__);
 		} else {
 #ifdef EN_DEBUG_PRINTS
 			dev_info(dev, "Num of Controls - %d\n", priv->num_ctrls);
@@ -2761,53 +3224,54 @@ int cam_core_initialize(struct imx568 *priv)
 		}
 	}
 	if (retry < 0) {
-		dev_err(dev, "%s, Failed to init formats!\n",__func__);
+		dev_err(dev, "%s, Failed to init formats!\n", __func__);
 		return -EFAULT;
 	}
 
 	/* Query the number of formats available from MCU */
 	retry = 5;
 	while (--retry > 0) {
-		if(cam_list_fmts(client, priv, NULL, &frm_fmt_size) < 0) {
-			dev_err(dev,"%s, Failed to init formats\n",__func__);
+		if (cam_list_fmts(client, priv, NULL, &frm_fmt_size) < 0) {
+			dev_err(dev, "%s, Failed to init formats\n", __func__);
 			continue;
 		} else {
+			priv->num_fmts = frm_fmt_size;
 			break;
 		}
 	}
 	if (retry < 0) {
-		dev_err(dev, "%s, Failed to init formats!\n",__func__);
+		dev_err(dev, "%s, Failed to init formats!\n", __func__);
 		return -EFAULT;
 	}
 
 	priv->nr_supported_formats = frm_fmt_size;
-	priv->stream_info = devm_kzalloc (dev,
-			sizeof(ISP_STREAM_INFO) * (frm_fmt_size + 1), GFP_KERNEL);
+	priv->stream_info = devm_kzalloc(dev,
+			sizeof(struct _isp_stream_info) * (frm_fmt_size + 1), GFP_KERNEL);
 	priv->streamdb = devm_kzalloc(dev, sizeof(int) * (frm_fmt_size + 1), GFP_KERNEL);
-	if(!priv->streamdb ) {
-		dev_err(dev, "unable to allocate memory\n");
+	if (!priv->streamdb) {
+		dev_err(dev, "Failed to allocate memory for camera stream database!\n");
 		return -ENOMEM;
 	}
 
 	priv->cam_frmfmt = devm_kzalloc(dev,
-			sizeof(struct camera_common_frmfmt) * (frm_fmt_size + 1) ,GFP_KERNEL);
-	if(!priv->cam_frmfmt ) {
-		dev_err(dev,"Unable to allocate memory\n");
+			sizeof(struct camera_common_frmfmt) * (frm_fmt_size + 1), GFP_KERNEL);
+	if (!priv->cam_frmfmt) {
+		dev_err(dev, "Failed to allocate memory for camera frame formats!\n");
 		return -ENOMEM;
 	}
 
 	/* Initialise the ISP */
 	if (cam_init(client) < 0) {
-                dev_err(dev, "Unable to INIT ISP \n");
-                return -EFAULT;
-        }
+		dev_err(dev, "Unable to INIT ISP\n");
+		return -EFAULT;
+	}
 
 	for (loop = 0; loop <= (frm_fmt_size); loop++) {
 		/* create Frame Rate array */
-		priv->cam_frmfmt[loop].framerates = devm_kzalloc (dev,
+		priv->cam_frmfmt[loop].framerates = devm_kzalloc(dev,
 				sizeof(int) * MAX_NUM_FRATES, GFP_KERNEL);
 		if (!priv->cam_frmfmt[loop].framerates) {
-			dev_err(dev,"Unable to create memory\n");
+			dev_err(dev, "Failed to allocate memory for camera frame rates!\n");
 			return -ENOMEM;
 		}
 	}
@@ -2816,14 +3280,14 @@ int cam_core_initialize(struct imx568 *priv)
 	retry = 5;
 	while (--retry > 0) {
 		if (cam_list_fmts(client, priv, priv->stream_info, &frm_fmt_size) < 0) {
-	                dev_err(dev, "Unable to List Fmts. retrying! \n");
+			dev_err(dev, "Unable to List Fmts. retrying!\n");
 			continue;
-	        } else {
+		} else {
 			break;
 		}
 	}
 	if (retry < 0) {
-		dev_err(dev, "%s, Failed to List formats!\n",__func__);
+		dev_err(dev, "%s, Failed to List formats!\n", __func__);
 		return -EFAULT;
 	}
 	return 0;
@@ -2838,7 +3302,7 @@ static int sensor_reg_read(struct i2c_client *client, struct imx568 *priv,
 {
 	uint8_t mc_data[512], mc_ret_data[512];
 	uint16_t reg_val = 0;
-	uint16_t size = 0, send_len =0, payload_len = 0;
+	uint16_t send_len = 0, payload_len = 0;
 	int retcode = ERRCODE_SUCCESS;
 	int err = ERRCODE_SUCCESS;
 
@@ -2862,16 +3326,16 @@ static int sensor_reg_read(struct i2c_client *client, struct imx568 *priv,
 
 	err = cam_write(client, mc_data, RX_LEN_PKT);
 	if (err != ERRCODE_SUCCESS) {
-		dev_err(&client->dev," %s(%d) MCU Write Error - %d \n",
-				__func__,__LINE__, err);
+		dev_err(&client->dev, " %s(%d) MCU Write Error - %d\n",
+				__func__, __LINE__, err);
 		goto exit;
 	}
 
-	memset(mc_ret_data, 0 ,512);
+	memset(mc_ret_data, 0, 512);
 	err = cam_read(client, mc_ret_data, RX_LEN_PKT);
 	if (err != ERRCODE_SUCCESS) {
-		dev_err(&client->dev," %s(%d) Error - %d \n",
-				__func__,__LINE__, err);
+		dev_err(&client->dev, " %s(%d) Error - %d\n",
+				__func__, __LINE__, err);
 		goto exit;
 	}
 
@@ -2879,23 +3343,32 @@ static int sensor_reg_read(struct i2c_client *client, struct imx568 *priv,
 
 	payload_len = send_len + HEADER_FOOTER_SIZE;
 
-	memset(mc_ret_data, 0 ,512);
-	err = cam_read(client, mc_ret_data,
-			send_len + HEADER_FOOTER_SIZE);
-	if (err != ERRCODE_SUCCESS) {
-		dev_err(&client->dev," %s(%d) Error - %d \n",
-				__func__,__LINE__, err);
+	/* send_len comes from the MCU; it indexes mc_ret_data below. */
+	if (payload_len > sizeof(mc_ret_data) || send_len < 2) {
+		dev_err(&client->dev, "%s(%d) bad payload len %u\n",
+				__func__, __LINE__, send_len);
+		err = -EIO;
 		goto exit;
 	}
 
+	memset(mc_ret_data, 0, 512);
+	err = cam_read(client, mc_ret_data, payload_len);
+	if (err != ERRCODE_SUCCESS) {
+		dev_err(&client->dev, " %s(%d) Error - %d\n",
+				__func__, __LINE__, err);
+		goto exit;
+	}
 	reg_val = mc_ret_data[4] << 8;
 	reg_val = reg_val | mc_ret_data[5];
 
-	retcode = mc_ret_data [payload_len - 1];
+	retcode = mc_ret_data[payload_len - 1];
 
+	/* Return -EIO, not the MCU code: the caller cannot tell a positive error
+	 * code from a register value of the same number. */
 	if (retcode != ERRCODE_SUCCESS) {
-		dev_err (&client->dev, "Error read %d\n", __LINE__);
-		err = retcode;
+		dev_err(&client->dev, "%s(%d) MCU read error 0x%02x\n",
+				__func__, __LINE__, retcode);
+		err = -EIO;
 		goto exit;
 	}
 	/* Unlock semaphore */
@@ -2906,7 +3379,6 @@ exit:
 	mutex_unlock(&priv->mutex);
 	return err;
 }
-
 /*
  * Sensor register write:
  * Only 2-byte write is supported
@@ -2914,8 +3386,7 @@ exit:
 static int sensor_reg_write(struct i2c_client *client, struct imx568 *priv,
 		uint16_t reg_addr, uint16_t reg_val)
 {
-	uint8_t mc_data[512], mc_ret_data[512];
-	uint16_t size = 0, send_len =0, payload_len = 0;
+	uint8_t mc_data[512];
 	int err = 0;
 
 	/* lock semaphore */
@@ -2941,8 +3412,8 @@ static int sensor_reg_write(struct i2c_client *client, struct imx568 *priv,
 
 	err = cam_write(client, mc_data, 8);
 	if (err != ERRCODE_SUCCESS) {
-		dev_err(&client->dev," %s(%d) MCU Write Error - %d \n"
-				, __func__,__LINE__, err);
+		dev_err(&client->dev, " %s(%d) MCU Write Error - %d\n"
+				, __func__, __LINE__, err);
 		goto exit;
 	}
 	/* Unlock semaphore */
@@ -2962,7 +3433,6 @@ static int imx568_probe(struct i2c_client *client)
 	struct imx568 *imx568;
 	const struct of_device_id *match;
 	int ret = 0, retry = 5;
-	u32 tm_of;
 	uint16_t sensor_id = 0;
 
 	imx568 = devm_kzalloc(&client->dev, sizeof(*imx568), GFP_KERNEL);
@@ -2975,6 +3445,12 @@ static int imx568_probe(struct i2c_client *client)
 	match = of_match_device(imx568_dt_ids, dev);
 	if (!match)
 		return -ENODEV;
+
+	/* Entity name selects the libcamera tuning. */
+	imx568->variant = match->data;
+	if (imx568->variant && imx568->variant->name)
+		v4l2_i2c_subdev_set_name(&imx568->sd, client,
+					 imx568->variant->name, NULL);
 
 	/* Check the hardware configuration in device tree */
 	if (imx568_check_hwcfg(dev))
@@ -2990,14 +3466,13 @@ static int imx568_probe(struct i2c_client *client)
 	imx568->xclk_freq = clk_get_rate(imx568->xclk);
 	if (imx568->xclk_freq != IMX568_XCLK_FREQ) {
 		dev_err(dev, "xclk frequency not supported: %d Hz\n",
-			imx568->xclk_freq);
+				imx568->xclk_freq);
 		return -EINVAL;
 	}
 
 	ret = imx568_get_regulators(imx568);
-	if (ret) {
+	if (ret)
 		dev_err(dev, "Regulators not found  %d\n", ret);
-	}
 
 	/* Request cam reset pin */
 	imx568->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
@@ -3029,24 +3504,25 @@ static int imx568_probe(struct i2c_client *client)
 		ret = sensor_reg_write(client, imx568, 0x3000, 0x00);
 		if (ret)
 			continue;
-	
-		msleep (20);
+
+		msleep(20);
 		// Sensor Register Read
 		sensor_id = sensor_reg_read(client, imx568, 0x3816, 2);
-	
+
 		// Sensor register Write
 		ret = sensor_reg_write(client, imx568, 0x3000, 0x01);
 		if (ret)
 			continue;
-	
+
 		sensor_id = sensor_id >> 5;
-	
+
 		if (sensor_id != IMX568_SENSOR_ID)
 			continue;
 		break;
 	}
 
-	if (retry < 0){
+	if (retry < 0) {
+		dev_err(dev, "Unable to read sensor ID\n");
 		ret = -EINVAL;
 		goto error_power_off;
 	}
@@ -3054,7 +3530,7 @@ static int imx568_probe(struct i2c_client *client)
 	dev_dbg(dev, "IMX568 Sensor ID: %d\n", sensor_id);
 
 	if (sensor_id != IMX568_SENSOR_ID) {
-		dev_err (dev, "The Connected camera is not IMX568 - %d != 568\n", sensor_id);
+		dev_err(dev, "The Connected camera is not IMX568 - %d != 568\n", sensor_id);
 		ret = -EINVAL;
 		goto error_power_off;
 	}
@@ -3062,10 +3538,12 @@ static int imx568_probe(struct i2c_client *client)
 	/* Initialize default format */
 	imx568_set_default_format(imx568);
 
+	msleep(1);
 	// Set exposure to 5ms
 	retry = 5;
-	while (retry -- > 0) {
-		if ((ret = cam_set_exposure (client, imx568, DEFAULT_EXPOSURE)) < 0)
+	while (retry-- > 0) {
+		ret = cam_set_exposure(client, imx568, (EXPOSURE_FACTOR / (imx568->set_framerate)));
+		if (ret < 0)
 			continue;
 		else
 			break;
@@ -3084,7 +3562,7 @@ static int imx568_probe(struct i2c_client *client)
 	/* Initialize subdev */
 	imx568->sd.internal_ops = &imx568_internal_ops;
 	imx568->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
-			    V4L2_SUBDEV_FL_HAS_EVENTS;
+		V4L2_SUBDEV_FL_HAS_EVENTS;
 	imx568->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
 	/* Initialize source pads */
@@ -3131,9 +3609,10 @@ error_power_off:
 }
 
 #define FREE_SAFE(dev, ptr) \
-	if(ptr) { \
-		devm_kfree(dev, ptr); \
-	}
+{ \
+	devm_kfree(dev, ptr); \
+}
+
 static void imx568_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
@@ -3146,17 +3625,17 @@ static void imx568_remove(struct i2c_client *client)
 
 	/* Releasing the MCU firmware by the driver when rmmod is issued */
 	if (is_fw_loaded == 1) {
-		release_firmware (cam_fw);
+		release_firmware(cam_fw);
 		cam_fw = NULL;
 
 		if (cam_fw_buf != NULL) {
-			kfree (cam_fw_buf);
+			kfree(cam_fw_buf);
 			cam_fw_buf = NULL;
 		}
 
 		is_fw_loaded = 0;
 #ifdef EN_DEBUG_PRINTS
-		dev_info (&client->dev, "Firmware Release Success\n");
+		dev_info(&client->dev, "Firmware Release Success\n");
 #endif
 	}
 
@@ -3169,9 +3648,8 @@ static void imx568_remove(struct i2c_client *client)
 
 	FREE_SAFE(&client->dev, imx568->cam_ctrl_info);
 
-	for(loop = 0; loop < imx568->frm_fmt_size; loop++ ) {
+	for (loop = 0; loop < imx568->frm_fmt_size; loop++)
 		FREE_SAFE(&client->dev, (void *)imx568->cam_frmfmt[loop].framerates);
-	}
 
 	FREE_SAFE(&client->dev, imx568->cam_frmfmt);
 
@@ -3186,12 +3664,12 @@ MODULE_DEVICE_TABLE(of, imx568_dt_ids);
 
 static const struct dev_pm_ops imx568_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(imx568_suspend, imx568_resume)
-	SET_RUNTIME_PM_OPS(imx568_power_off, imx568_power_on, NULL)
+		SET_RUNTIME_PM_OPS(imx568_power_off, imx568_power_on, NULL)
 };
 
 static struct i2c_driver imx568_i2c_driver = {
 	.driver = {
-		.name = "imx568",
+		.name = "econ-imx568",
 		.of_match_table	= imx568_dt_ids,
 		.pm = &imx568_pm_ops,
 	},

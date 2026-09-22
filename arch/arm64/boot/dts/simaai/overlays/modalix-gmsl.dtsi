@@ -13,7 +13,6 @@
         #address-cells = <1>;
         #size-cells = <0>;
         i2c-alias-pool = <0x44 0x45 0x46 0x47>;
-        simaai,rm_dts = <0x37>;
 
         max_des0_i2c_adapter: i2c-atr {
             #address-cells = <1>;

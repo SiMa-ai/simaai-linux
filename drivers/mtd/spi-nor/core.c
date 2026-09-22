@@ -366,21 +366,36 @@ int spi_nor_write_any_volatile_reg(struct spi_nor *nor, struct spi_mem_op *op,
  */
 int spi_nor_write_enable(struct spi_nor *nor)
 {
-	int ret;
+	int ret = 0, retry;
 
-	if (nor->spimem) {
-		struct spi_mem_op op = SPI_NOR_WREN_OP;
+	/*
+	 * Some native-CS controllers intermittently fail to frame a single-byte
+	 * command (no clean CS rising edge after the 8th bit), so the flash does
+	 * not execute WREN and WEL stays 0 (IS25WX01G datasheet 8.7). Verify WEL
+	 * and retry WREN so write-enable is reliable.
+	 */
+	for (retry = 0; retry < 5; retry++) {
+		if (nor->spimem) {
+			struct spi_mem_op op = SPI_NOR_WREN_OP;
 
-		spi_nor_spimem_setup_op(nor, &op, nor->reg_proto);
+			spi_nor_spimem_setup_op(nor, &op, nor->reg_proto);
+			ret = spi_mem_exec_op(nor->spimem, &op);
+		} else {
+			ret = spi_nor_controller_ops_write_reg(nor, SPINOR_OP_WREN,
+							       NULL, 0);
+		}
 
-		ret = spi_mem_exec_op(nor->spimem, &op);
-	} else {
-		ret = spi_nor_controller_ops_write_reg(nor, SPINOR_OP_WREN,
-						       NULL, 0);
+		if (ret) {
+			dev_dbg(nor->dev, "error %d on Write Enable\n", ret);
+			return ret;
+		}
+
+		/* Confirm the Write Enable Latch actually set. */
+		if (spi_nor_read_sr(nor, nor->bouncebuf))
+			break;	/* can't verify, assume the WREN took */
+		if (nor->bouncebuf[0] & SR_WEL)
+			break;
 	}
-
-	if (ret)
-		dev_dbg(nor->dev, "error %d on Write Enable\n", ret);
 
 	return ret;
 }
@@ -1801,24 +1816,41 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 	/* "sector"-at-a-time erase */
 	} else if (spi_nor_has_uniform_erase(nor)) {
 		while (len) {
-			ret = spi_nor_lock_device(nor);
-			if (ret)
-				goto erase_err;
+			int er_retry;
 
-			ret = spi_nor_write_enable(nor);
-			if (ret) {
+			/*
+			 * The DW native CS intermittently fails to frame the
+			 * multi-byte erase command, so the flash does not execute
+			 * it and WEL is not consumed (IS25WX01G datasheet 8.7).
+			 * A successful erase clears WEL; verify that and re-issue
+			 * WREN+erase until the command actually takes.
+			 */
+			for (er_retry = 0; er_retry < 5; er_retry++) {
+				ret = spi_nor_lock_device(nor);
+				if (ret)
+					goto erase_err;
+
+				ret = spi_nor_write_enable(nor);
+				if (ret) {
+					spi_nor_unlock_device(nor);
+					goto erase_err;
+				}
+
+				ret = spi_nor_erase_sector(nor, addr);
 				spi_nor_unlock_device(nor);
-				goto erase_err;
+				if (ret)
+					goto erase_err;
+
+				ret = spi_nor_wait_till_ready(nor);
+				if (ret)
+					goto erase_err;
+
+				/* Erase executed iff WEL was consumed. */
+				if (spi_nor_read_sr(nor, nor->bouncebuf))
+					break;	/* can't verify, assume done */
+				if (!(nor->bouncebuf[0] & SR_WEL))
+					break;
 			}
-
-			ret = spi_nor_erase_sector(nor, addr);
-			spi_nor_unlock_device(nor);
-			if (ret)
-				goto erase_err;
-
-			ret = spi_nor_wait_till_ready(nor);
-			if (ret)
-				goto erase_err;
 
 			addr += mtd->erasesize;
 			len -= mtd->erasesize;

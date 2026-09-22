@@ -24,7 +24,7 @@
 #include "acamera_math.h"
 #include "acamera_metering_mem_config.h"
 #include "bitop.h"
-#include "sbuf.h"
+#include "isp-v4l2-meta-stats.h"
 #include "util_crc16.h"
 
 #undef LOG_MODULE
@@ -49,11 +49,11 @@ static void awb_zone_weights_update( AWB_fsm_ptr_t p_fsm )
     const uint16_t horz_zones = acamera_isp_metering_awb_nodes_used_horiz_read( p_ictx->settings.isp_base );
     const uint16_t vert_zones = acamera_isp_metering_awb_nodes_used_vert_read( p_ictx->settings.isp_base );
 
-    const uint16_t *ptr_awb_zone_wght_h = calib_mgr_u16_lut_get( p_ictx->calib_mgr_data, CALIBRATION_AWB_ZONE_WGHT_HOR );
-    const uint16_t *ptr_awb_zone_wght_v = calib_mgr_u16_lut_get( p_ictx->calib_mgr_data, CALIBRATION_AWB_ZONE_WGHT_VER );
+    const uint16_t *ptr_awb_zone_wght_h = calib_mgr_u16_lut_get( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AWB_ZONE_WGHT_HOR );
+    const uint16_t *ptr_awb_zone_wght_v = calib_mgr_u16_lut_get( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AWB_ZONE_WGHT_VER );
 
-    const uint32_t awb_zone_wght_hor_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, CALIBRATION_AWB_ZONE_WGHT_HOR );
-    const uint32_t awb_zone_wght_ver_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, CALIBRATION_AWB_ZONE_WGHT_VER );
+    const uint32_t awb_zone_wght_hor_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AWB_ZONE_WGHT_HOR );
+    const uint32_t awb_zone_wght_ver_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AWB_ZONE_WGHT_VER );
 
     if ( ( horz_zones * vert_zones ) > ISP_METERING_HISTOGRAM_ZONES_MAX ) {
         LOG( LOG_CRIT, "AWB zone weights update failed. Number of zones configured (%d * %d = %d) is out of range (%d)",
@@ -123,7 +123,7 @@ static void awb_process_light_source( AWB_fsm_t *p_fsm )
          p_fsm->temperature_detected );
 #endif
 
-    const int high_gain = ( get_context_param( p_ictx, STATUS_INFO_LDR_GAIN_LOG2_ID_PARAM ) >= calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CCM_ONE_GAIN_THRESHOLD )[0] ) ? 1 : 0;
+    const int high_gain = ( get_context_param( p_ictx, STATUS_INFO_LDR_GAIN_LOG2_ID_PARAM ) >= calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CCM_ONE_GAIN_THRESHOLD )[0] ) ? 1 : 0;
 
     // Get the CCM info before use and update it
     WRAP_GENERAL_CMD( ACAMERA_FSM2ICTX_PTR( p_fsm ), CMD_ID_CCM_INFO, CMD_DIRECTION_GET, NULL, (uint32_t *)&ccm_info );
@@ -180,109 +180,16 @@ static void awb_process_light_source( AWB_fsm_t *p_fsm )
     p_fsm->light_source_detected = p_fsm->light_source_candidate;
 }
 
-static void awb_write_values( AWB_fsm_t *p_fsm )
-{
-    /* This function drives the cooling warming effect according to colour temperature.
-See kruithof curve for a reference and background theory about this functionality
-Tuning luts default
-CALIBRATION_AWB_WARMING_LS_A = {256,256,256}; // u4.8
-CALIBRATION_AWB_WARMING_LS_D50= {256,256,256};// u4.8
-CALIBRATION_AWB_WARMING_LS_D75= {256,256,256};// u4.8
-awb_warming_cct={7500,6000,4700,2800};// in Kelvin  // AWB_colour_preference
-
-| blue gain
-|   .                   .   .
-|       .           .
-|           . .  . .
-|       .             .
-|Red. gain                      .
-|.                          .
------|------|------|--------|-------
-    70000  6000    4700     2800    CCT in kelvin
-*/
-
-    int32_t temperature = p_fsm->temperature_detected;
-
-    // Calibration table: AWB Colour preference.
-    //int16_t awb_warming_cct[4] = {7500,6000,4700,2800};
-    acamera_calib_mgr_entry_t *p_calimgr = ACAMERA_FSM2CM_PTR( p_fsm );
-    const int16_t *awb_warming_cct = (const int16_t *)calib_mgr_u16_lut_get( p_calimgr, CALIBRATION_AWB_WARMING_CCT );
-
-    const int16_t *awb_warming_A = (const int16_t *)calib_mgr_u16_lut_get( p_calimgr, CALIBRATION_AWB_WARMING_LS_A );
-    const int16_t *awb_warming_D75 = (const int16_t *)calib_mgr_u16_lut_get( p_calimgr, CALIBRATION_AWB_WARMING_LS_D75 );
-    const int16_t *awb_warming_D50 = (const int16_t *)calib_mgr_u16_lut_get( p_calimgr, CALIBRATION_AWB_WARMING_LS_D50 );
-
-    int16_t m = 0;
-    if ( temperature >= awb_warming_cct[1] ) {
-        // High temp
-
-        // RED
-        m = ( awb_warming_D50[0] - awb_warming_D75[0] ) / ( ( awb_warming_cct[1] - awb_warming_cct[0] ) ?: 1 );
-        if ( m == 0 ) {
-            p_fsm->awb_warming[0] = awb_warming_D50[0] >> 8;
-        } else {
-            p_fsm->awb_warming[0] = ( m * ( temperature - awb_warming_cct[0] ) + awb_warming_D75[0] ) >> 8;
-        }
-        // GREEN
-        m = ( awb_warming_D50[1] - awb_warming_D75[1] ) / ( ( awb_warming_cct[1] - awb_warming_cct[0] ) ?: 1 );
-        if ( m == 0 ) {
-            p_fsm->awb_warming[1] = awb_warming_D50[1] >> 8;
-        } else {
-            p_fsm->awb_warming[1] = ( m * ( temperature - awb_warming_cct[0] ) + awb_warming_D75[1] ) >> 8;
-        }
-        // BLUE
-        m = ( awb_warming_D50[2] - awb_warming_D75[2] ) / ( ( awb_warming_cct[1] - awb_warming_cct[0] ) ?: 1 );
-        if ( m == 0 ) {
-            p_fsm->awb_warming[2] = awb_warming_D50[2] >> 8;
-        } else {
-            p_fsm->awb_warming[2] = ( m * ( temperature - awb_warming_cct[0] ) + awb_warming_D75[2] ) >> 8;
-        }
-        //        printf( "1 temp %d r %d g %d b %d\n",
-        //                (int)temperature, (int)( p_fsm->awb_warming[0] ),
-        //                (int)( p_fsm->awb_warming[1] ), (int)( p_fsm->awb_warming[2] ) );
-
-    } else if ( temperature <= awb_warming_cct[2] ) {
-        // Low temp
-
-        // RED
-        m = ( awb_warming_A[0] - awb_warming_D50[0] ) / ( ( awb_warming_cct[3] - awb_warming_cct[2] ) ?: 1 );
-        if ( m == 0 ) {
-            p_fsm->awb_warming[0] = awb_warming_D50[0] >> 8;
-        } else {
-            p_fsm->awb_warming[0] = ( m * ( temperature - awb_warming_cct[3] ) + awb_warming_A[0] ) >> 8;
-        }
-        // GREEN
-        m = ( awb_warming_A[1] - awb_warming_D50[1] ) / ( ( awb_warming_cct[3] - awb_warming_cct[2] ) ?: 1 );
-        if ( m == 0 ) {
-            p_fsm->awb_warming[1] = awb_warming_D50[1] >> 8;
-        } else {
-            p_fsm->awb_warming[1] = ( m * ( temperature - awb_warming_cct[3] ) + awb_warming_A[1] ) >> 8;
-        }
-        // BLUE
-        m = ( awb_warming_A[2] - awb_warming_D50[2] ) / ( ( awb_warming_cct[3] - awb_warming_cct[2] ) ?: 1 );
-        if ( m == 0 ) {
-            p_fsm->awb_warming[2] = awb_warming_D50[2] >> 8;
-        } else {
-            p_fsm->awb_warming[2] = ( m * ( temperature - awb_warming_cct[3] ) + awb_warming_A[2] ) >> 8;
-        }
-    } else {
-        // Mid temp
-        p_fsm->awb_warming[0] = awb_warming_D50[0] >> 8;
-        p_fsm->awb_warming[1] = awb_warming_D50[1] >> 8;
-        p_fsm->awb_warming[2] = awb_warming_D50[2] >> 8;
-    }
-}
-
 // Perform normalisation.
 static void awb_normalise( AWB_fsm_t *p_fsm )
 {
     int32_t wb[4];
     acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
 
-    wb[0] = log2_fixed_to_fixed( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_STATIC_WB )[0], 8, LOG2_GAIN_SHIFT );
-    wb[1] = log2_fixed_to_fixed( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_STATIC_WB )[1], 8, LOG2_GAIN_SHIFT );
-    wb[2] = log2_fixed_to_fixed( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_STATIC_WB )[2], 8, LOG2_GAIN_SHIFT );
-    wb[3] = log2_fixed_to_fixed( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_STATIC_WB )[3], 8, LOG2_GAIN_SHIFT );
+    wb[0] = log2_fixed_to_fixed( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_STATIC_WB )[0], 8, LOG2_GAIN_SHIFT );
+    wb[1] = log2_fixed_to_fixed( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_STATIC_WB )[1], 8, LOG2_GAIN_SHIFT );
+    wb[2] = log2_fixed_to_fixed( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_STATIC_WB )[2], 8, LOG2_GAIN_SHIFT );
+    wb[3] = log2_fixed_to_fixed( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_STATIC_WB )[3], 8, LOG2_GAIN_SHIFT );
 
     {
         wb[0] += log2_fixed_to_fixed( p_fsm->rg_coef, 8, LOG2_GAIN_SHIFT );
@@ -323,7 +230,9 @@ static void awb_postprocess( AWB_fsm_t *p_fsm )
     p_fsm->temperature_detected = get_context_param( p_ictx, SYSTEM_AWB_CCT_PARAM );
 
     awb_process_light_source( p_fsm );
-    awb_write_values( p_fsm );
+    /* Warming offset is computed by the IPA and delivered in the params
+     * buffer (isp-v4l2-meta-params.c sets p_fsm->awb_warming); the kernel
+     * only writes it in awb_coeffs_write(). */
     awb_normalise( p_fsm );
 }
 
@@ -357,9 +266,9 @@ void awb_config( AWB_fsm_t *p_fsm )
     }
 
     // awb_warming will not be reloaded on reload_calibration because it takes calibration for D50 as a starting value.
-    p_fsm->awb_warming[0] = (int32_t)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_AWB_WARMING_LS_D50 )[0];
-    p_fsm->awb_warming[1] = (int32_t)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_AWB_WARMING_LS_D50 )[1];
-    p_fsm->awb_warming[2] = (int32_t)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_AWB_WARMING_LS_D50 )[2];
+    p_fsm->awb_warming[0] = (int32_t)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_AWB_WARMING_LS_D50 )[0];
+    p_fsm->awb_warming[1] = (int32_t)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_AWB_WARMING_LS_D50 )[1];
+    p_fsm->awb_warming[2] = (int32_t)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_AWB_WARMING_LS_D50 )[2];
 
     awb_coeffs_write( p_fsm );
 }
@@ -367,13 +276,13 @@ void awb_config( AWB_fsm_t *p_fsm )
 void awb_reload_calibration( AWB_fsm_t *p_fsm )
 {
     // Set the min/max temperatures and their gains:
-    if ( ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_TEMP )[0] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_TEMP )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_TEMP ) - 1] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_RG_POS_CALC )[0] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_BG_POS_CALC )[0] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_RG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_RG_POS_CALC ) - 1] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_BG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_BG_POS_CALC ) - 1] != 0 ) ) {
-        p_fsm->min_temp = 1000000 / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_TEMP )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_TEMP ) - 1];            // division by zero is checked
-        p_fsm->max_temp = 1000000 / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_COLOR_TEMP )[0];                                                                                       // division by zero is checked
-        p_fsm->max_temp_rg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_RG_POS_CALC )[0];                                                                                // division by zero is checked
-        p_fsm->max_temp_bg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_BG_POS_CALC )[0];                                                                                // division by zero is checked
-        p_fsm->min_temp_rg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_RG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_RG_POS_CALC ) - 1]; // division by zero is checked
-        p_fsm->min_temp_bg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_BG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), CALIBRATION_CT_BG_POS_CALC ) - 1]; // division by zero is checked
+    if ( ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_TEMP )[0] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_TEMP )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_TEMP ) - 1] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_RG_POS_CALC )[0] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_BG_POS_CALC )[0] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_RG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_RG_POS_CALC ) - 1] != 0 ) && ( calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_BG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_BG_POS_CALC ) - 1] != 0 ) ) {
+        p_fsm->min_temp = 1000000 / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_TEMP )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_TEMP ) - 1];            // division by zero is checked
+        p_fsm->max_temp = 1000000 / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_COLOR_TEMP )[0];                                                                                       // division by zero is checked
+        p_fsm->max_temp_rg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_RG_POS_CALC )[0];                                                                                // division by zero is checked
+        p_fsm->max_temp_bg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_BG_POS_CALC )[0];                                                                                // division by zero is checked
+        p_fsm->min_temp_rg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_RG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_RG_POS_CALC ) - 1]; // division by zero is checked
+        p_fsm->min_temp_bg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_BG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_BG_POS_CALC ) - 1]; // division by zero is checked
     } else {
         LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
     }
@@ -455,22 +364,7 @@ static int awb_is_crc_valid( const uint32_t base_address )
 static int awb_read_statistics( AWB_fsm_t *p_fsm )
 {
     const uint32_t is_manual = get_context_param( p_fsm->p_fsmgr->p_ictx, SYSTEM_MANUAL_AWB_PARAM );
-    sbuf_awb_t *p_sbuf_awb_stats = NULL;
-    struct sbuf_item sbuf;
-
-    uint32_t fw_id = ACAMERA_FSM_GET_FW_ID( p_fsm );
-
-    system_memset( &sbuf, 0, sizeof( sbuf ) );
-    sbuf.buf_type = SBUF_TYPE_AWB;
-    sbuf.buf_status = SBUF_STATUS_DATA_EMPTY;
-
-    if ( sbuf_get_item( fw_id, &sbuf ) ) {
-        LOG( LOG_ERR, "Error: Failed to get sbuf, return." );
-        return -2;
-    }
-
-    p_sbuf_awb_stats = (sbuf_awb_t *)sbuf.buf_base;
-    LOG( LOG_DEBUG, "Get sbuf ok, idx: %u, status: %u, addr: %p.", sbuf.buf_idx, sbuf.buf_status, sbuf.buf_base );
+    const uint32_t fw_id     = ACAMERA_FSM_GET_FW_ID( p_fsm );
 
     if ( !is_manual ) {
         // Auto white balance statistics starts at address 1856 and contains up to 225 records of 64 bits each followed
@@ -496,22 +390,20 @@ static int awb_read_statistics( AWB_fsm_t *p_fsm )
 #endif /* STATISTICS_BUFFER_DATA_LOCALLY */
 
         if ( !awb_is_crc_valid( isp_base ) ) {
-            /* No further processing. */
-            /* Read done, set the buffer back for future using. */
-            sbuf.buf_status = SBUF_STATUS_DATA_DONE;
-            if ( sbuf_set_item( fw_id, &sbuf ) ) {
-                LOG( LOG_ERR, "Error: Failed to set sbuf, return." );
-                return -2;
-            }
             return -1;
         }
-
 
         // Process the awb hardware values.
         size_t awb_record;
         p_fsm->sum = 0;
         p_fsm->curr_AWB_ZONES = acamera_isp_metering_awb_nodes_used_horiz_read( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base ) * acamera_isp_metering_awb_nodes_used_vert_read( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base );
-        p_sbuf_awb_stats->curr_AWB_ZONES = p_fsm->curr_AWB_ZONES;
+
+        /* The WB-gain unapply below is only meaningful when the AWB tap sees
+         * white-balanced data (awb_switch = 1, inside the output formatter).
+         * Tap 0 (after demosaic) is upstream of any WB on this pipeline, so
+         * the multiply would imprint the gain on a raw measurement instead
+         * of removing it — deliver raw ratios there. */
+        const uint8_t awb_tap = acamera_isp_pipeline_awb_switch_read( isp_base );
 
         for ( awb_record = 0; awb_record < p_fsm->curr_AWB_ZONES; ++awb_record ) {
             const uint32_t data = awb_get_data( isp_base, awb_record << 1 );
@@ -523,28 +415,25 @@ static int awb_read_statistics( AWB_fsm_t *p_fsm )
             uint16_t irg = BF_GET( data, 0, 16 );
             uint16_t ibg = BF_GET( data, 16, 16 );
 
-            irg = ( irg * ( p_fsm->rg_coef ) ) >> 8;
-            ibg = ( ibg * ( p_fsm->bg_coef ) ) >> 8;
+            if ( awb_tap != 0 ) {
+                irg = ( irg * ( p_fsm->rg_coef ) ) >> 8;
+                ibg = ( ibg * ( p_fsm->bg_coef ) ) >> 8;
+            }
 
             irg = ( irg == 0 ) ? 1 : irg;
             ibg = ( ibg == 0 ) ? 1 : ibg;
 
-            p_sbuf_awb_stats->stats_data[awb_record].rg = U16_MAX / irg;
-            p_sbuf_awb_stats->stats_data[awb_record].bg = U16_MAX / ibg;
-            p_sbuf_awb_stats->stats_data[awb_record].sum = awb_get_data( isp_base, ( awb_record << 1 ) + 1 );
-            p_fsm->sum += p_sbuf_awb_stats->stats_data[awb_record].sum;
+            p_fsm->awb_zones[awb_record].rg  = U16_MAX / irg;
+            p_fsm->awb_zones[awb_record].bg  = U16_MAX / ibg;
+            p_fsm->awb_zones[awb_record].sum = awb_get_data( isp_base, ( awb_record << 1 ) + 1 );
+            p_fsm->sum += p_fsm->awb_zones[awb_record].sum;
         }
     }
 
-    /* Read done, set the buffer back for future using. */
-    sbuf.buf_status = SBUF_STATUS_DATA_DONE;
-
-    if ( sbuf_set_item( fw_id, &sbuf ) ) {
-        LOG( LOG_ERR, "Error: Failed to set sbuf, return." );
-        return -2;
-    }
-
-    LOG( LOG_DEBUG, "Set sbuf ok, idx: %u, status: %u, addr: %p.", sbuf.buf_idx, sbuf.buf_status, sbuf.buf_base );
+    /* Publish AWB zones to the V4L2 META_CAPTURE queue. Replaces the
+     * legacy sbuf get_item / set_item dance. */
+    modalix_meta_stats_publish_awb( fw_id, p_fsm->awb_zones,
+                                    p_fsm->curr_AWB_ZONES );
     return 0;
 }
 

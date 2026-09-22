@@ -11,6 +11,8 @@
 #include <linux/mailbox_controller.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/clk.h>
+#include <linux/pm_runtime.h>
 #include <linux/poll.h>
 #include <linux/sched/signal.h>
 #include <linux/types.h>
@@ -48,6 +50,7 @@ struct sima_mbox_client {
 	struct mbox_client client;
 	struct mbox_chan *channel;
 	const char *channel_name;
+	struct clk *mlaclk;
 	/* Tx */
 	struct mutex write_lock;
 	struct simaai_mbmsg *msgs;
@@ -103,14 +106,25 @@ static int mbox_dev_open(struct inode *inode, struct file *filp)
 	filp->private_data = mbox;
 
 	mutex_lock(&mbox->dev_lock);
-	if (!mbox->dev_open_count)
+	if (!mbox->dev_open_count) {
 		ret = init_device(mbox);
+		if (ret)
+			goto out_unlock;
+		/* First opener powers up the device, clock stays on until the last close. */
+		ret = pm_runtime_resume_and_get(mbox->dev);
+		if (ret < 0) {
+			release_dev(mbox);
+			goto out_unlock;
+		}
+	}
 	if (!ret) {
 		if ((mbox->dev_open_count < mbox->max_users) || (mbox->max_users == 0))
 			mbox->dev_open_count++;
 		else
 			ret = -EBUSY;
 	}
+out_unlock:
+
 	mutex_unlock(&mbox->dev_lock);
 
 	return ret;
@@ -122,8 +136,11 @@ static int mbox_dev_release(struct inode *inode, struct file *filp)
 
 	mutex_lock(&mbox->dev_lock);
 	mbox->dev_open_count--;
-	if (!mbox->dev_open_count)
+	if (!mbox->dev_open_count) {
 		release_dev(mbox);
+		/* Last closer drops the runtime-PM reference taken in open. */
+		pm_runtime_put(mbox->dev);
+	}
 	mutex_unlock(&mbox->dev_lock);
 
 	return 0;
@@ -394,6 +411,10 @@ static int sima_mbox_client_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "cannot allocate Rx FIFO\n");
 		return ret;
 	}
+	mbox->mlaclk = devm_clk_get(&pdev->dev, NULL);
+	if (IS_ERR(mbox->mlaclk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(mbox->mlaclk), "no clock\n");
+
 
 	mbox->client.dev = &pdev->dev;
 	mbox->client.rx_callback = message_from_remote;
@@ -412,6 +433,17 @@ static int sima_mbox_client_probe(struct platform_device *pdev)
 	ret = create_char_dev(mbox);
 	if (ret != 0)
 		return ret;
+	/*
+	 * Hold one prepare/enable across the device's life so the clock is up
+	 * before runtime PM is enabled. set_active() tells the PM core the
+	 * device is already powered, keeping its accounting in sync.
+	 */
+	ret = clk_prepare_enable(mbox->mlaclk);
+	if (ret)
+		return ret;
+
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
 
 	platform_set_drvdata(pdev, mbox);
 	dev_info(&pdev->dev, "Successfully registered\n");
@@ -423,9 +455,50 @@ static void sima_mbox_client_remove(struct platform_device *pdev)
 {
 	struct sima_mbox_client *mbox = platform_get_drvdata(pdev);
 
+	pm_runtime_disable(&pdev->dev);
+	/* Balance the clk_prepare_enable() from probe, but only if a
+	 * runtime suspend hasn't already dropped it.
+	 */
+	if (!pm_runtime_status_suspended(&pdev->dev))
+		clk_disable_unprepare(mbox->mlaclk);
+	pm_runtime_set_suspended(&pdev->dev);
+
 	remove_char_dev(mbox);
 	kfifo_free(&mbox->rx_fifo);
 }
+
+/**
+ * sima_mbox_runtime_resume() - runtime-PM resume callback
+ * @dev: the mailbox client device
+ *
+ * Return: 0 on success or a negative errno from clk_prepare_enable().
+ */
+
+static int __maybe_unused sima_mbox_runtime_resume(struct device *dev)
+{
+	struct sima_mbox_client *mbox = dev_get_drvdata(dev);
+
+	return clk_prepare_enable(mbox->mlaclk);
+}
+
+/**
+ * sima_mbox_runtime_suspend() - runtime-PM suspend callback
+ * @dev: the mailbox client device
+ *
+ * Return: 0 always.
+ */
+
+static int __maybe_unused sima_mbox_runtime_suspend(struct device *dev)
+{
+	struct sima_mbox_client *mbox = dev_get_drvdata(dev);
+
+	clk_disable_unprepare(mbox->mlaclk);
+	return 0;
+}
+
+static const struct dev_pm_ops sima_mbox_pm_ops = {
+	SET_RUNTIME_PM_OPS(sima_mbox_runtime_suspend, sima_mbox_runtime_resume, NULL)
+};
 
 static const struct of_device_id sima_mbox_client_match[] = {
 	{ .compatible = "simaai,mailbox-client" },
@@ -440,6 +513,7 @@ static struct platform_driver sima_mbox_client_driver = {
 	.driver	= {
 		.name	= "sima_mailbox_client",
 		.of_match_table	= sima_mbox_client_match,
+		.pm = &sima_mbox_pm_ops,
 	},
 };
 

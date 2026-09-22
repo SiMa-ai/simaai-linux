@@ -22,6 +22,7 @@
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/videodev2.h>
+#include <linux/pm_runtime.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-fh.h>
 #include <media/v4l2-ioctl.h>
@@ -33,6 +34,8 @@
 #include "fw-interface.h"
 #include "isp-v4l2-common.h"
 #include "isp-v4l2-ctrl.h"
+#include "isp-v4l2-meta-stats.h"
+#include "isp-v4l2-meta-params.h"
 #include "isp-v4l2-stream.h"
 #include "isp-v4l2.h"
 #include "isp-vb2.h"
@@ -46,10 +49,13 @@
 /* isp_v4l2_dev_t to destroy video device */
 static isp_v4l2_dev_t *g_isp_v4l2_devs[FIRMWARE_CONTEXT_NUMBER];
 
+/* protects frame-dispatch readers of pstreams[] against stream teardown */
+DEFINE_SRCU( isp_stream_srcu );
+
 extern struct platform_device *g_pdev;
 
 /**
- * @brief Payload data structure for V4L2_EVENT_ACAMERA_FRAME_READY event
+ * @brief Payload data structure for V4L2_EVENT_MODALIX_ISP_FRAME_READY event
  * 
  */
 typedef struct isp_v4l2_event_frame_ready_data_t {
@@ -70,12 +76,6 @@ static int isp_v4l2_cap_fop_open( struct file *file )
     isp_v4l2_stream_t *pstream;
     int stream_type;
 
-    const int stream_opened = atomic_read( &dev->opened );
-    if ( stream_opened >= V4L2_STREAM_TYPE_MAX ) {
-        LOG( LOG_ERR, "Too many open streams, stream_opened: %d, V4L2_STREAM_TYPE_MAX: %d", stream_opened, V4L2_STREAM_TYPE_MAX );
-        return -EBUSY;
-    }
-
     // Find matching video device and derive the stream type
     for ( stream_type = 0; stream_type < V4L2_STREAM_TYPE_MAX; stream_type++ ) {
         if ( video_dev == &dev->video_dev[stream_type] ) {
@@ -88,17 +88,30 @@ static int isp_v4l2_cap_fop_open( struct file *file )
         return -EINVAL;
     }
 
+    // Serialize against other opens and releases on this context
+    mutex_lock( &dev->open_lock );
+
+    const int stream_opened = atomic_read( &dev->opened );
+    if ( stream_opened >= V4L2_STREAM_TYPE_MAX ) {
+        LOG( LOG_ERR, "Too many open streams, stream_opened: %d, V4L2_STREAM_TYPE_MAX: %d", stream_opened, V4L2_STREAM_TYPE_MAX );
+        rc = -EBUSY;
+        goto unlock;
+    }
+
     // Check if stream has been already opened
-    if ( test_bit( stream_type, &dev->stream_open_mask ) != 0 ) {
-        return -EINVAL;
-    } else {
-        set_bit( stream_type, &dev->stream_open_mask );
+    if ( test_and_set_bit( stream_type, &dev->stream_open_mask ) != 0 ) {
+        rc = -EBUSY;
+        goto unlock;
     }
 
     LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, stream_type );
 
     /* init stream */
-    isp_v4l2_stream_init( &dev->pstreams[stream_type], stream_type, dev->ctx_id );
+    rc = isp_v4l2_stream_init( &dev->pstreams[stream_type], stream_type, dev->ctx_id );
+    if ( rc < 0 ) {
+        LOG( LOG_ERR, "Error, isp_v4l2_stream_init call failed, rc: %d", rc );
+        goto clear_open_bit;
+    }
     pstream = dev->pstreams[stream_type];
 
     // Update stream parent device information
@@ -118,14 +131,35 @@ static int isp_v4l2_cap_fop_open( struct file *file )
     v4l2_fh_init( &pstream->fh, video_dev );
     v4l2_fh_add( &pstream->fh, file );
 
-    /* update open counter */
-    atomic_add( 1, &dev->opened );
+    /* First open across all stream types — take PM ref */
+    if ( atomic_inc_return( &dev->opened ) == 1) {
+        rc = pm_runtime_resume_and_get( dev->v4l2_dev->dev );
+        if ( rc < 0 ) {
+	    atomic_dec( &dev->opened );
+            LOG( LOG_ERR, "pm_runtime_resume_and_get failed, rc: %d", rc );
+            goto release_fh;
+        }
+    }
+
+    mutex_unlock( &dev->open_lock );
 
     return rc;
 
+release_fh:
+    v4l2_fh_del( &pstream->fh, file);
+    v4l2_fh_exit( &pstream->fh );
+
 vb2_q_fail:
     isp_v4l2_stream_deinit( pstream, dev->stream_on_mask );
+    dev->pstreams[stream_type] = NULL;
+    synchronize_srcu_expedited( &isp_stream_srcu );
     isp_v4l2_stream_free( pstream );
+
+clear_open_bit:
+    clear_bit( stream_type, &dev->stream_open_mask );
+
+unlock:
+    mutex_unlock( &dev->open_lock );
 
     return rc;
 }
@@ -137,12 +171,6 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
     struct video_device *video_dev = video_devdata( file );
     isp_v4l2_stream_t *pstream;
     int stream_type;
-
-    const int stream_opened = atomic_read( &dev->opened );
-    if ( stream_opened >= V4L2_STREAM_TYPE_MAX ) {
-        LOG( LOG_ERR, "Too many open streams, stream_opened: %d, V4L2_STREAM_TYPE_MAX: %d", stream_opened, V4L2_STREAM_TYPE_MAX );
-        return -EBUSY;
-    }
 
     // Find matching video device and derive the stream type
     for ( stream_type = 0; stream_type < V4L2_STREAM_TYPE_MAX; stream_type++ ) {
@@ -156,17 +184,30 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
         return -EINVAL;
     }
 
+    // Serialize against other opens and releases on this context
+    mutex_lock( &dev->open_lock );
+
+    const int stream_opened = atomic_read( &dev->opened );
+    if ( stream_opened >= V4L2_STREAM_TYPE_MAX ) {
+        LOG( LOG_ERR, "Too many open streams, stream_opened: %d, V4L2_STREAM_TYPE_MAX: %d", stream_opened, V4L2_STREAM_TYPE_MAX );
+        rc = -EBUSY;
+        goto unlock;
+    }
+
     // Check if stream has been already opened
-    if ( test_bit( stream_type, &dev->stream_open_mask ) != 0 ) {
-        return -EINVAL;
-    } else {
-        set_bit( stream_type, &dev->stream_open_mask );
+    if ( test_and_set_bit( stream_type, &dev->stream_open_mask ) != 0 ) {
+        rc = -EBUSY;
+        goto unlock;
     }
 
     LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, stream_type );
 
     /* init stream */
-    isp_v4l2_stream_init( &dev->pstreams[stream_type], stream_type, dev->ctx_id );
+    rc = isp_v4l2_stream_init( &dev->pstreams[stream_type], stream_type, dev->ctx_id );
+    if ( rc < 0 ) {
+        LOG( LOG_ERR, "Error, isp_v4l2_stream_init call failed, rc: %d", rc );
+        goto clear_open_bit;
+    }
     pstream = dev->pstreams[stream_type];
 
     // Update stream parent device information
@@ -188,14 +229,35 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
     v4l2_fh_init( &pstream->fh, video_dev );
     v4l2_fh_add( &pstream->fh, file );
 
-    /* update open counter */
-    atomic_add( 1, &dev->opened );
+    /* First open across all stream types — take PM ref */
+    if ( atomic_inc_return( &dev->opened ) == 1 ) {
+        rc = pm_runtime_resume_and_get( dev->v4l2_dev->dev );
+        if ( rc < 0 ) {
+	    atomic_dec( &dev->opened );
+            LOG( LOG_ERR, "pm_runtime_resume_and_get failed, rc: %d", rc );
+            goto release_fh;
+        }
+    }
+
+    mutex_unlock( &dev->open_lock );
 
     return rc;
 
+release_fh:
+    v4l2_fh_del( &pstream->fh, file);
+    v4l2_fh_exit( &pstream->fh );
+
 vb2_q_fail:
     isp_v4l2_stream_deinit( pstream, dev->stream_on_mask );
+    dev->pstreams[stream_type] = NULL;
+    synchronize_srcu_expedited( &isp_stream_srcu );
     isp_v4l2_stream_free( pstream );
+
+clear_open_bit:
+    clear_bit( stream_type, &dev->stream_open_mask );
+
+unlock:
+    mutex_unlock( &dev->open_lock );
 
     return rc;
 }
@@ -209,12 +271,21 @@ static int isp_v4l2_cap_fop_release( struct file *file )
 
     LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, pstream->stream_type );
 
+    // Serialize against other opens and releases on this context
+    mutex_lock( &dev->open_lock );
+
     clear_bit( pstream->stream_type, &dev->stream_open_mask );
     clear_bit( pstream->stream_type, &dev->stream_on_mask );
     open_counter = atomic_sub_return( 1, &dev->opened );
 
     // Deinitialize stream, stop streams and release all buffers
     isp_v4l2_stream_deinit( pstream, dev->stream_on_mask );
+
+    // Unpublish the stream and quiesce frame dispatch before teardown
+    if ( pstream->stream_type < V4L2_STREAM_TYPE_MAX ) {
+        dev->pstreams[pstream->stream_type] = NULL;
+    }
+    synchronize_srcu_expedited( &isp_stream_srcu );
 
     // Release vb2 queue
     if ( pstream->vb2_q.lock ) {
@@ -227,17 +298,18 @@ static int isp_v4l2_cap_fop_release( struct file *file )
         mutex_unlock( pstream->vb2_q.lock );
     }
 
-    // Update device stream pointers
-    if ( pstream->stream_type < V4L2_STREAM_TYPE_MAX ) {
-        dev->pstreams[pstream->stream_type] = NULL;
-    }
-
     // Release file handle
     v4l2_fh_del( &pstream->fh, file);
     v4l2_fh_exit( &pstream->fh );
 
     // Free stream memory
     isp_v4l2_stream_free( pstream );
+
+    if ( open_counter == 0 ) {
+        pm_runtime_put( dev->v4l2_dev->dev );
+    }
+
+    mutex_unlock( &dev->open_lock );
 
     return 0;
 }
@@ -250,6 +322,9 @@ static int isp_v4l2_m2m_fop_release( struct file *file )
 
     //LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, pstream->stream_type );
 
+    // Serialize against other opens and releases on this context
+    mutex_lock( &dev->open_lock );
+
     clear_bit( pstream->stream_type, &dev->stream_open_mask );
     clear_bit( pstream->stream_type, &dev->stream_on_mask );
     open_counter = atomic_sub_return( 1, &dev->opened );
@@ -257,10 +332,11 @@ static int isp_v4l2_m2m_fop_release( struct file *file )
     // Deinitialize stream, stop streams and release all buffers
     isp_v4l2_stream_deinit( pstream, dev->stream_on_mask );
 
-    // Update device stream pointers
+    // Unpublish the stream and quiesce frame dispatch before teardown
     if ( pstream->stream_type < V4L2_STREAM_TYPE_MAX ) {
         dev->pstreams[pstream->stream_type] = NULL;
     }
+    synchronize_srcu_expedited( &isp_stream_srcu );
 
     // Release vb2 queues
     v4l2_m2m_ctx_release( pstream->fh.m2m_ctx );
@@ -271,6 +347,12 @@ static int isp_v4l2_m2m_fop_release( struct file *file )
 
     // Free stream memory
     isp_v4l2_stream_free( pstream );
+
+    if ( open_counter == 0 ) {
+        pm_runtime_put( dev->v4l2_dev->dev );
+    }
+
+    mutex_unlock( &dev->open_lock );
 
     return 0;
 }
@@ -929,11 +1011,11 @@ static int isp_v4l2_subscribe_event( struct v4l2_fh *fh, const struct v4l2_event
     isp_v4l2_stream_t *pstream = container_of( fh, isp_v4l2_stream_t, fh );
 
     switch ( sub->type ) {
-    case V4L2_EVENT_ACAMERA_FRAME_READY:
+    case V4L2_EVENT_MODALIX_ISP_FRAME_READY:
         return v4l2_event_subscribe( fh, sub, pstream->num_buffers_requested, NULL );
 
     // Only one event is currently supported, fall-through
-    case V4L2_EVENT_ACAMERA_STREAM_OFF:
+    case V4L2_EVENT_MODALIX_ISP_STREAM_OFF:
     default:
         return -EINVAL;
     }
@@ -1091,6 +1173,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
 
     /* initialize locks */
     mutex_init( &dev->mlock );
+    mutex_init( &dev->open_lock );
 
     /* initialize open counter */
     atomic_set( &dev->opened, 0 );
@@ -1155,6 +1238,29 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
              ctx_id, video_device_node_name( vfd ) );
     }
 
+    /* META_CAPTURE stats device — the vb2-based replacement for the
+     * sbuf stats path. Registers its own /dev/videoN under the same
+     * v4l2_device parent. A failure here doesn't tear down the rest
+     * of the context: the existing sbuf path still services stats
+     * during the staged rollout, so the context stays usable. */
+    rc = modalix_meta_stats_init( ctx_id, v4l2_dev, &dev->meta_stats );
+    if ( rc ) {
+        LOG( LOG_WARNING, "ctx %u: meta-stats init failed rc=%d, continuing without it",
+             ctx_id, rc );
+        dev->meta_stats = NULL;
+        rc = 0;
+    }
+
+    /* META_OUTPUT params device — symmetric counterpart receiving the
+     * IPA's 3A decisions. Same fail-soft policy as meta-stats. */
+    rc = modalix_meta_params_init( ctx_id, v4l2_dev, &dev->meta_params );
+    if ( rc ) {
+        LOG( LOG_WARNING, "ctx %u: meta-params init failed rc=%d, continuing without it",
+             ctx_id, rc );
+        dev->meta_params = NULL;
+        rc = 0;
+    }
+
     /* store dev pointer to destroy later and find stream */
     g_isp_v4l2_devs[ctx_id] = dev;
 
@@ -1179,6 +1285,19 @@ static void isp_v4l2_destroy_dev( int ctx_id )
     int i;
 
     if ( g_isp_v4l2_devs[ctx_id] ) {
+        /* Tear down the META_OUTPUT params and META_CAPTURE stats
+         * devices first so any in-flight DQBUF callers get an error
+         * return before the parent v4l2_device drops out from under
+         * them. */
+        if ( g_isp_v4l2_devs[ctx_id]->meta_params ) {
+            modalix_meta_params_exit( g_isp_v4l2_devs[ctx_id]->meta_params );
+            g_isp_v4l2_devs[ctx_id]->meta_params = NULL;
+        }
+        if ( g_isp_v4l2_devs[ctx_id]->meta_stats ) {
+            modalix_meta_stats_exit( g_isp_v4l2_devs[ctx_id]->meta_stats );
+            g_isp_v4l2_devs[ctx_id]->meta_stats = NULL;
+        }
+
         for ( i = 0; i < V4L2_STREAM_TYPE_MAX; ++i ) {
             LOG( LOG_INFO, "Unregistering video device: %s", video_device_node_name( &g_isp_v4l2_devs[ctx_id]->video_dev[i] ) );
 
@@ -1309,11 +1428,10 @@ int isp_v4l2_find_stream( isp_v4l2_stream_t **ppstream,
         }
     }
 
-    if ( g_isp_v4l2_devs[ctx_id]->pstreams[stream_type] == NULL ) {
+    *ppstream = READ_ONCE( g_isp_v4l2_devs[ctx_id]->pstreams[stream_type] );
+    if ( *ppstream == NULL ) {
         return -ENODEV;
     }
-
-    *ppstream = g_isp_v4l2_devs[ctx_id]->pstreams[stream_type];
 
     return 0;
 }
@@ -1329,12 +1447,15 @@ isp_v4l2_dev_t *isp_v4l2_get_dev( uint32_t ctx_number )
 int isp_v4l2_notify_event( int ctx_id, int stream_type, aframe_t *frame, uint32_t event_type, isp_v4l2_stream_direction_t stream_direction )
 {
     struct v4l2_event event;
+    isp_v4l2_stream_t *pstream;
 
     if ( g_isp_v4l2_devs[ctx_id] == NULL ) {
         return -EBUSY;
     }
 
-    if ( g_isp_v4l2_devs[ctx_id]->pstreams[stream_type] == NULL ) {
+    // Caller must hold isp_stream_srcu (frame streamer dispatch path)
+    pstream = READ_ONCE( g_isp_v4l2_devs[ctx_id]->pstreams[stream_type] );
+    if ( pstream == NULL ) {
         LOG( LOG_ERR, "Error, stream does not exist, context id: %d, stream type: %d, event type: %d", ctx_id, stream_type, event_type );
         return -EINVAL;
     }
@@ -1344,7 +1465,7 @@ int isp_v4l2_notify_event( int ctx_id, int stream_type, aframe_t *frame, uint32_
     event.id = stream_direction;
 
     // Event specific payload
-    if ( event_type == V4L2_EVENT_ACAMERA_FRAME_READY ) {
+    if ( event_type == V4L2_EVENT_MODALIX_ISP_FRAME_READY ) {
         // Check if event payload data fits into v4l2_event.u.data element
         if ( sizeof( isp_v4l2_event_frame_ready_data_t ) > sizeof( ( (struct v4l2_event *)0 )->u.data ) ) {
             LOG( LOG_ERR, "Error, isp_v4l2_event_frame_ready_data_t does not fit into v4l2_event.u.data" );
@@ -1363,7 +1484,7 @@ int isp_v4l2_notify_event( int ctx_id, int stream_type, aframe_t *frame, uint32_
         }
     }
 
-    v4l2_event_queue_fh( &g_isp_v4l2_devs[ctx_id]->pstreams[stream_type]->fh, &event );
+    v4l2_event_queue_fh( &pstream->fh, &event );
 
     return 0;
 }

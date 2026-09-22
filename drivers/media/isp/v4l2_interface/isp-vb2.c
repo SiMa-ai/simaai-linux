@@ -35,7 +35,6 @@
  */
 
 #define MIPI_FIR_REGISTER_SIZE (64)
-#define ADDITIONAL_VB2_BUFFER_COUNT (5)
 
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION( 4, 8, 0 ) )
 static int isp_vb2_queue_setup( struct vb2_queue *vq,
@@ -50,8 +49,6 @@ static int isp_vb2_queue_setup( struct vb2_queue *vq, const struct v4l2_format *
     static unsigned long cnt = 0;
     isp_v4l2_stream_t *pstream = vb2_get_drv_priv( vq );
     struct v4l2_format vfmt;
-
-    *nbuffers += ADDITIONAL_VB2_BUFFER_COUNT;
 
     LOG( LOG_DEBUG, "Setting up vb2 queue for stream type: %d, nplanes: %u, nbuffers: %u, fcall#: %lu.",
          pstream->stream_type, *nplanes, *nbuffers, cnt++ );

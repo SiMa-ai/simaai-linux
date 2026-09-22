@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+# Copyright (C) 2024 <vendor>
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/i2c/metoak-xc9080.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: XC9080 MIPI CSI-2 Image Sensor
+
+maintainers:
+  - Sagar Kontam <sagar.kontam@sima.ai>
+
+description: |
+  The XC9080 is a MIPI CSI-2 image sensor connected over I2C for control.
+  It outputs VYUY image data via a MIPI CSI-2 interface with configurable
+  data and clock lanes.
+
+properties:
+  compatible:
+    const: Metoak,xc9080
+
+  reg:
+    maxItems: 1
+    description: I2C device address of the sensor.
+
+  startup-delay-ms:
+    description: |
+      Delay in milliseconds after power-up before the sensor is ready
+      to accept commands.
+    default: 0
+
+  reset-gpios:
+    maxItems: 1
+    description: |
+      Reference to the GPIO connected to the RESET pin. The GPIO is
+      asserted (active-low) to hold the sensor in reset.
+
+  port:
+    $ref: /schemas/graph.yaml#/$defs/port-base
+    description: |
+      Video output port. The sensor has a single output port (port@1)
+      connected to a MIPI CSI-2 receiver.
+
+    properties:
+      reg:
+        const: 1
+
+      endpoint:
+        $ref: /schemas/media/video-interfaces.yaml#
+        unevaluatedProperties: false
+
+        properties:
+          clock-lanes:
+            description: MIPI CSI-2 clock lane index.
+            items:
+              - const: 0
+
+          data-lanes:
+            description: |
+              List of physical MIPI CSI-2 data lanes used. The sensor
+              supports 2-lane operation.
+            minItems: 1
+            maxItems: 2
+
+          link-frequencies:
+            description: |
+              Allowed MIPI CSI-2 link frequencies in Hz. Must be
+              specified as a 64-bit value.
+            maxItems: 1
+
+          clock-continuous:
+            description: |
+              Indicates the sensor outputs a continuous clock on the
+              MIPI CSI-2 clock lane.
+
+          remote-endpoint:
+            description: Reference to the CSI-2 receiver endpoint.
+
+        required:
+          - clock-lanes
+          - data-lanes
+          - link-frequencies
+          - remote-endpoint
+
+    required:
+      - reg
+      - endpoint
+
+    additionalProperties: false
+
+required:
+  - compatible
+  - reg
+  - port
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        xc9080: xc9080@1b {
+            compatible = "Metoak,xc9080";
+            reg = <0x1b>;
+
+            startup-delay-ms = <0>;
+            reset-gpios = <&port5 6 GPIO_ACTIVE_LOW>;
+
+            port@1 {
+                reg = <1>;
+                cam10out: endpoint@0 {
+                    clock-lanes = <0>;
+                    data-lanes = <1 2>;
+                    link-frequencies = /bits/ 64 <480000000>;
+                    remote-endpoint = <&csi10in>;
+                    clock-continuous;
+                };
+            };
+        };
+    };

@@ -385,6 +385,7 @@ config SIMAAI_REMOTEPROC_EV
 
 config SIMAAI_REMOTEPROC_M4
 	tristate "SIMAAI M4 remoteproc support"
+	depends on PM_DEVFREQ
 	help
 	  Support for SiMa M4 remote processor management
 
