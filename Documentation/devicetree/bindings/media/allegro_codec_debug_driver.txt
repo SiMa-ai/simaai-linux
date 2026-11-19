@@ -11,6 +11,11 @@ al,mem_offset_reg: You should only use this property if your IP only supports a 
 Specify the hardware IP range register address. You should ask where this register is in your IP.
 (See Hardware IP documentation)
 
+al,ip-type: enables the multi-process command arbiter and selects the register
+geometry table for the IP. Supported values: "enc-v200" (encoder IP),
+"dec-v300" (decoder IP). When the property is absent the device only offers
+the legacy exclusive-owner register interface.
+
 al5e, al5d:
 
 al,devicename: specifies the /dev/X name the created device should have. default is /dev/allegroIP for al5e and /dev/allegroDecodeIP for al5d

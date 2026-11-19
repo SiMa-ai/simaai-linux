@@ -437,6 +437,11 @@ static int getBytesCountValue(struct pktProbeDesc *probe)
 
 	pktProbe = &nocCtx.pktProbes[probe->id];
 
+	/* Read back global enable and stat alarm status on every read */
+	probe->globalEn = !!(ioread32(pktProbe->reg + PKT_PROBE_CFG_CTL_OFFSET) &
+			     PROBE_CFG_CTL_GLOBAL_EN);
+	probe->statAlarmStatus =
+		ioread32(pktProbe->reg + PKT_PROBE_STAT_ALARM_STATUS_OFFSET) & 0x1;
 
 	// Has user configured statperiod ?
 	if (ioread32(pktProbe->reg + PKT_PROBE_MAIN_CTL_OFFSET) &
@@ -551,7 +556,7 @@ static int parse_packet_probes(struct device *dev, struct device_node *node)
 		of_property_read_u32(probe_node, "num-counters",
 				     &nocCtx.pktProbes[i].nCounters);
 
-		dev_info(dev, "Successfully added packet probe \"%s\"\n",
+		dev_dbg(dev, "Successfully added packet probe \"%s\"\n",
 			 nocCtx.pktProbes[i].label);
 		i++;
 	}
@@ -592,7 +597,7 @@ static int parse_transaction_probes(struct device *dev,
 		of_property_read_u32_array(profiler_node, "reg", reg, 2);
 		nocCtx.txnProbes[probeId].profiler.reg =
 			devm_ioremap(dev, reg[0], reg[1]);
-		dev_info(dev,
+		dev_dbg(dev,
 			 "probe:%d, addr:0x%X, size:0x%X, mapped at:0x%llx\n",
 			 probeId, reg[0], reg[1],
 			 nocCtx.txnProbes[probeId].profiler.reg);
@@ -613,12 +618,12 @@ static int parse_transaction_probes(struct device *dev,
 			of_property_read_string(
 				flts, "label",
 				&nocCtx.txnProbes[probeId].fltDesc[fltId].label);
-			dev_info(
+			dev_dbg(
 				dev,
 				"Successfully added transaction filter \"%s\"\n",
 				nocCtx.txnProbes[probeId].fltDesc[fltId].label);
 		}
-		dev_info(dev, "Successfully added transaction probe \"%s\"\n",
+		dev_dbg(dev, "Successfully added transaction probe \"%s\"\n",
 			 nocCtx.txnProbes[probeId].label);
 	}
 	return 0;
@@ -670,7 +675,7 @@ static int noc_platform_probe(struct platform_device *pdev)
 	struct noc_device *nocdev;
 	struct device_node *probe_node, *txn_probes_node, *pkt_probes_node;
 
-	dev_info(dev, "Probing platform device: %s\n", SIMAAI_NOC_DEV_NAME);
+	dev_dbg(dev, "Probing platform device: %s\n", SIMAAI_NOC_DEV_NAME);
 
 	nocdev = devm_kzalloc(dev, sizeof(struct noc_device), GFP_KERNEL);
 	if (!nocdev)

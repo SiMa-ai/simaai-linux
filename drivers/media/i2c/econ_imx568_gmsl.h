@@ -29,32 +29,28 @@
 #define EXPOSURE_CTRL_ID 0x009A200A
 #define GAIN_CTRL_ID 0x009A2009
 #define FRAMERATE_CTRL_ID 0x009A200B
-#define EXPOSURE_FACTOR 1000000
 #define SENSOR_PIXEL_CLOCK 74250000
 #define GAIN_FACTOR 10
-#define LOG2_GAIN_SHIFT 18
 
 #define IMX568_VBLANK_MIN (48)
-#define SENSOR_MAX_INTEGRATION_TIME (11249) // Number of lines per frame - 1
-#define SENSOR_MIN_INTEGRATION_TIME (3)
 
-/* Exposure control */
-#define IMX568_EXPOSURE_MAX SENSOR_MAX_INTEGRATION_TIME
-#define IMX568_EXPOSURE_MIN SENSOR_MIN_INTEGRATION_TIME
+/* Exposure control, us */
+#define IMX568_EXPOSURE_MIN (39)
+#define IMX568_EXPOSURE_MAX (146197)
 #define IMX568_EXPOSURE_STEP (1)
-#define IMX568_EXPOSURE_DEFAULT (770)
+#define IMX568_EXPOSURE_DEFAULT (10007)
 
-/* Analog gain control */
-#define IMX568_ANA_GAIN_MAX_DB (4) // log2 from ISP
-#define IMX568_ANA_GAIN_MIN (0 << LOG2_GAIN_SHIFT)
-#define IMX568_ANA_GAIN_MAX (IMX568_ANA_GAIN_MAX_DB << LOG2_GAIN_SHIFT)
+/* Analog gain control, dB * GAIN_FACTOR */
+#define IMX568_ANA_GAIN_MAX_DB (24)
+#define IMX568_ANA_GAIN_MIN (0)
+#define IMX568_ANA_GAIN_MAX (IMX568_ANA_GAIN_MAX_DB * GAIN_FACTOR)
 #define IMX568_ANA_GAIN_STEP (1)
 #define IMX568_ANA_GAIN_DEFAULT IMX568_ANA_GAIN_MIN
 
-/* Digital gain control */
-#define IMX568_DGTL_GAIN_MAX_DB (4) // log2 from ISP
-#define IMX568_DGTL_GAIN_MIN (0 << LOG2_GAIN_SHIFT)
-#define IMX568_DGTL_GAIN_MAX (IMX568_DGTL_GAIN_MAX_DB << LOG2_GAIN_SHIFT)
+/* Digital gain control, dB * GAIN_FACTOR */
+#define IMX568_DGTL_GAIN_MAX_DB (24)
+#define IMX568_DGTL_GAIN_MIN (0)
+#define IMX568_DGTL_GAIN_MAX (IMX568_DGTL_GAIN_MAX_DB * GAIN_FACTOR)
 #define IMX568_DGTL_GAIN_STEP (1)
 #define IMX568_DGTL_GAIN_DEFAULT IMX568_DGTL_GAIN_MIN
 
@@ -115,7 +111,9 @@ unsigned char g_bload_buf[MAX_BUF_LEN] = { 0 };
 #endif //_CAM_FIRMWARE_H
 
 #define IMX568_XCLK_FREQ 37125000
-#define IMX568_DEFAULT_LINK_FREQ 594000000
+/* D-PHY v1.2 spans 80-2500 Mbps/lane; the overlay picks a rate in that range. */
+#define IMX568_MIN_LANE_RATE_MBPS	80
+#define IMX568_MAX_LANE_RATE_MBPS	2500
 
 /* Embedded metadata stream structure - Not Implemented */
 #define IMX568_EMBEDDED_LINE_WIDTH 16384
@@ -162,18 +160,12 @@ enum pad_types { IMAGE_PAD, NUM_PADS };
 #define DEFAULT_EXPOSURE 5000 // MicroSeconds
 #define IMX568_SENSOR_ID 568
 
-static const s64 imx568_link_freq_menu[] = {
-	IMX568_DEFAULT_LINK_FREQ,
-};
-
 struct camera_common_frmfmt {
 	struct v4l2_frmsize_discrete size;
 	const int *framerates;
 	int num_framerates;
 	bool hdr_en;
 	int mode;
-	int hmax;
-	int vmax;
 	uint32_t fourcc;
 };
 
@@ -382,6 +374,29 @@ struct imx568 {
 	int frate_index;
 	uint32_t mipi_lane_config;
 	uint32_t mipi_clock_config;
+	/*
+	 * CSI-2 virtual channel this camera's packets are tagged with, as
+	 * reported to the CSI-2 host via .get_frame_desc. Taken from the
+	 * endpoint's "sima,virtual-channel" DT property; absent means VC0,
+	 * matching the host driver's own default so existing single-VC
+	 * overlays keep working unchanged.
+	 *
+	 * Purely descriptive, and currently inert: the only consumer is
+	 * .get_frame_desc, which nothing downstream calls. The VC that
+	 * actually reaches the host is decided by the deserializer's
+	 * MAP_DST_* bytes plus the sink port the overlay links to; this
+	 * field neither programs nor validates either of them.
+	 */
+	uint32_t vc;
+	/*
+	 * I2C address of THIS camera's own serializer. Both serializers are
+	 * reachable at once when both links are up, so every per-camera
+	 * serializer access - MIPI lane count, MCU reset GPIOs - must target
+	 * the right one. Set in cam_core_initialize() from the camera's own
+	 * i2c address. Camera A (CAM_A_ALIAS) is behind serializer A at
+	 * SER_A_ADDR; camera B behind serializer B at SER_B_ADDR.
+	 */
+	u16 ser_addr;
 	bool use_dol_wdr_mode;
 	struct gpio_desc *reset_gpio;
 	struct gpio_desc *boot_gpio;

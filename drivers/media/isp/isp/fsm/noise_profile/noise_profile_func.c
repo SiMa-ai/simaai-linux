@@ -38,9 +38,25 @@ static void noise_profile_lut_reload( noise_profile_fsm_ptr_t p_fsm )
     }
 #endif
 
+    /* Both the noise-profile and the WDR linear LUT are indexed by this one
+     * length, so bound it by the hardware array and by the shorter of the
+     * two tables. */
+    const uint32_t np_hw = ACAMERA_ISP_NOISE_PROFILE_RAW_FRONTEND_LUT_WEIGHT_LUT_ARRAY_DIM_0_SIZE;
+    uint32_t np_n = calib_mgr_lut_len( cm_ptr, MODALIX_ISP_CALIB_NOISE_PROFILE );
     int32_t i;
 
-    for ( i = 0; i < calib_mgr_lut_len( cm_ptr, MODALIX_ISP_CALIB_NOISE_PROFILE ); i++ ) {
+    if ( np_n > np_hw ) {
+        np_n = np_hw;
+    }
+    if ( np_lin != NULL ) {
+        const uint32_t lin_n = calib_mgr_lut_len( cm_ptr, MODALIX_ISP_CALIB_WDR_NP_LUT );
+
+        if ( np_n > lin_n ) {
+            np_n = lin_n;
+        }
+    }
+
+    for ( i = 0; i < np_n; i++ ) {
 
 #ifdef ACAMERA_ISP_NOISE_PROFILE_LUT_WEIGHT_LUT_DEFAULT
         acamera_isp_noise_profile_lut_weight_lut_write( isp_base, i, np_lut[i] );

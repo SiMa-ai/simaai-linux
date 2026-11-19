@@ -26,7 +26,7 @@
 
 void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
 {
-    LOG( LOG_INFO, "%s E", __FUNCTION__ );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "%s E", __FUNCTION__ );
     p_fsmgr->sensor_fsm.p_fsmgr = p_fsmgr;
     p_fsmgr->sensor_fsm.state = sensor_state_invalid;
     sensor_fsm_clear( &( p_fsmgr->sensor_fsm ) );
@@ -480,7 +480,7 @@ void acamera_fsmgr_init( acamera_fsmgr_t *p_fsmgr )
 #if ACAMERA_ISP_PROFILING
     acamera_profiler_stop( RAW_FE_PERF_SECTION, 1 );
 #endif /* ACAMERA_ISP_PROFILING */
-    LOG( LOG_INFO, "%s X", __FUNCTION__ );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "%s X", __FUNCTION__ );
 }
 void acamera_fsmgr_process_interrupt( acamera_fsmgr_t *p_fsmgr, uint8_t irq_event )
 {
@@ -854,7 +854,8 @@ int acamera_fsmgr_process_event( acamera_fsmgr_t *p_fsmgr )
             /* All FSMs declining a state event means they already reached the
              * target state; still return it so the context state follows,
              * else the context wedges (e.g. START it can never leave). */
-            LOG( LOG_WARNING, "state event %d unclaimed by all FSMs; completing transition", event_id );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING,
+                     "state event %d unclaimed by all FSMs; completing transition", event_id );
             return event_id;
         default:
             return -1;

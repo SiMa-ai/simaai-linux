@@ -23,6 +23,7 @@
 #include "acamera_isp_ctx.h"
 #include "acamera_logger.h"
 #include "ae_update_histogram.h"
+#include "ae_util_crc.h"
 #include "bitop.h"
 #include "util_crc16.h" //fast ccitt
 #if defined( ISP_HAS_SBUF_FSM )
@@ -83,7 +84,7 @@ static uint8_t histogram_is_crc_valid( histogram_fsm_const_ptr_t p_fsm, const ui
     const uint32_t crc_hw = histogram_read( p_fsm, HISTOGRAM_BUFFER_SIZE - 1, histmem_offset );
 
     if ( crc16 != crc_hw ) {
-        LOG( LOG_DEBUG, "CTX[%d] histogram CRC mismatch 0x%x expected, 0x%x calculated",
+        LOG_CAT( ALOG_CAT_AE, LOG_DEBUG, "CTX[%d] histogram CRC mismatch 0x%x expected, 0x%x calculated",
              (int)ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id,
              crc_hw,
              crc16 );
@@ -100,11 +101,12 @@ static uint32_t histogram_decode_bin( const uint16_t bin )
     return shift ? ( data | 0x1000 ) << ( shift - 1 ) : data;
 }
 
-static void ae_read_full_histogram_data( histogram_fsm_ptr_t p_fsm, const uint16_t histmem_offset )
+static void ae_read_full_histogram_data( histogram_fsm_ptr_t p_fsm, const uint16_t histmem_offset,
+                                         const int want_aexp_zones )
 {
     size_t i;
     uint32_t sum = 0;
-    LOG( LOG_DEBUG, "Read ae stat ctx %d from [ base 0x%x / histmem_offset 0x%x ]",
+    LOG_CAT( ALOG_CAT_AE, LOG_DEBUG, "Read ae stat ctx %d from [ base 0x%x / histmem_offset 0x%x ]",
          (int)ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id, (int)ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, histmem_offset );
 
 #if STATISTICS_BUFFER_DATA_LOCALLY
@@ -141,16 +143,26 @@ static void ae_read_full_histogram_data( histogram_fsm_ptr_t p_fsm, const uint16
         /* Publish AE histogram + sum to the V4L2 META_CAPTURE queue.
          * Replaces the legacy sbuf get_item / set_item dance: with
          * the user-space chardev gone, there's no consumer of the
-         * sbuf ring slot, so the indirection drops out. */
+         * sbuf ring slot, so the indirection drops out. The aexp
+         * per-zone bins ride in the same buffer (AE_ZONES section),
+         * read only on the AE stats event: ANTIFOG_HIST is a second
+         * trigger for the SAME frame boundary, so decoding there
+         * would only duplicate the read (and only the AE_STATS
+         * publish, dispatched first, carries the section). A zone
+         * CRC miss drops only that section, not the frame. */
+        const uint32_t aexp_zones = want_aexp_zones ? ae_read_aexp_zone_bins( p_fsm ) : 0;
         modalix_meta_stats_publish_ae( ACAMERA_FSM_GET_FW_ID( p_fsm ),
-                                       p_fsm->fullhist, sum );
+                                       p_fsm->fullhist, sum,
+                                       aexp_zones ? p_fsm->aexp_zone_bins : NULL,
+                                       p_fsm->aexp_nodes_h,
+                                       p_fsm->aexp_nodes_v );
     }
 }
 
 
 void histogram_init( histogram_fsm_ptr_t p_fsm )
 {
-    LOG( LOG_INFO, "Ctx %d E", ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id );
+    LOG_CAT( ALOG_CAT_AE, LOG_INFO, "Ctx %d E", ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id );
     p_fsm->repeat_irq_mask = BIT( ACAMERA_IRQ_AE_STATS );
     p_fsm->hist_is_on_sqrt = ISP_HISTOGRAM_POSITION_IS_BE && AE_HISTOGRAM_TAP_AFTER_DECOMPANDER;
     histogram_request_interrupt( p_fsm, p_fsm->repeat_irq_mask );
@@ -172,7 +184,7 @@ void histogram_init( histogram_fsm_ptr_t p_fsm )
 
 void histogram_config( histogram_fsm_ptr_t p_fsm )
 {
-    LOG( LOG_INFO, "Ctx %d E", ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id );
+    LOG_CAT( ALOG_CAT_AE, LOG_INFO, "Ctx %d E", ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id );
     histogram_configure_position( p_fsm );
 
     ae_update_histogram_geometry( p_fsm, get_mem_hist_id( p_fsm ) );
@@ -196,7 +208,7 @@ void histogram_reload_calibration( histogram_fsm_ptr_t p_fsm )
             acamera_isp_metering_cb_ref_max_awb_write( isp_base, config[5] );
         }
     } else {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_STATISTICS_CONFIG is missing, module will not be configured correctly!" );
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "MODALIX_ISP_CALIB_STATISTICS_CONFIG is missing, module will not be configured correctly!" );
     }
 
     configure_histogram_neq_lut( p_fsm, get_mem_hist_id( p_fsm ) );
@@ -219,7 +231,8 @@ void histogram_fsm_process_interrupt( histogram_fsm_const_ptr_t p_fsm, uint8_t i
     case ACAMERA_IRQ_AE_STATS: {
         int mem_hist_id = get_mem_hist_id( p_fsm );
         if ( mem_hist_id >= 0 )
-            ae_read_full_histogram_data( (histogram_fsm_ptr_t)p_fsm, mem_hist_id * ISP_METERING_HISTOGRAM_STRIDE_BYTES );
+            ae_read_full_histogram_data( (histogram_fsm_ptr_t)p_fsm, mem_hist_id * ISP_METERING_HISTOGRAM_STRIDE_BYTES,
+                                         irq_event == ACAMERA_IRQ_AE_STATS );
         if ( p_fsm->hist_ready_mask ) {
             // TODO do we need to have separate events for ae stats and hist stats?
             fsm_raise_event( p_fsm, event_id_isphw_stats_ready_ae );

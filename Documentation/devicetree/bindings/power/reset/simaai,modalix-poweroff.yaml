@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/power/reset/simaai,modalix-poweroff.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SiMa.ai Modalix power-off
+
+maintainers:
+  - Bharanidharan Ramalingam <bharanidharan.ramalingam@sima.ai>
+
+description: |
+  Power-off support for the SiMa.ai Modalix SoC. On shutdown the driver
+  attempts, in order, whatever the board provides:
+
+    1. a shutdown GPIO,
+    2. a PMIC rail soft-off over PMBus/i2c,
+    3. an HPI request to the secure processor.
+
+  The HPI method needs no DT description and is registered unconditionally
+  (it also keeps kernel_can_power_off() true). The GPIO and PMIC methods are
+  optional and enabled by the properties below; they run in the sleepable
+  POWER_OFF_PREPARE phase.
+
+properties:
+  compatible:
+    const: simaai,modalix-poweroff
+
+  poweroff-gpios:
+    maxItems: 1
+    description:
+      GPIO asserted at power-off. The polarity flag selects the asserted
+      level (e.g. GPIO_ACTIVE_HIGH drives the pin high on power-off).
+
+  simaai,poweroff-i2c-bus:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the i2c controller the board PMIC sits on. Referencing the
+      controller (not the PMIC node) keeps power-off independent of the PMIC's
+      own driver.
+
+  simaai,poweroff-i2c-addr:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 0
+    maximum: 0x7f
+    description: i2c address of the PMIC.
+
+  simaai,poweroff-i2c-page:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 0
+    maximum: 0xff
+    default: 0
+    description:
+      PMBus PAGE selecting the rail to soft-off (e.g. the buck index).
+
+required:
+  - compatible
+
+dependencies:
+  simaai,poweroff-i2c-bus: [ 'simaai,poweroff-i2c-addr' ]
+  simaai,poweroff-i2c-addr: [ 'simaai,poweroff-i2c-bus' ]
+  simaai,poweroff-i2c-page: [ 'simaai,poweroff-i2c-bus' ]
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    poweroff {
+        compatible = "simaai,modalix-poweroff";
+        poweroff-gpios = <&port5 0 GPIO_ACTIVE_HIGH>;
+        simaai,poweroff-i2c-bus = <&i2c23>;
+        simaai,poweroff-i2c-addr = <0x4f>;
+        simaai,poweroff-i2c-page = <0>;
+    };
+
+  - |
+    /* non-SoM board: HPI only, no optional properties */
+    poweroff {
+        compatible = "simaai,modalix-poweroff";
+    };
+

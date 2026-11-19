@@ -17,12 +17,16 @@
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/io.h>
+#include <linux/math.h>
 #include <linux/module.h>
 #include <linux/of_graph.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/videodev2.h>
+#include <media/v4l2-common.h>
+#include <media/v4l2-cci.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-event.h>
@@ -30,18 +34,11 @@
 #include <media/v4l2-image-sizes.h>
 #include <media/v4l2-mediabus.h>
 #include <media/mipi-csi2.h>
+#include "imx568-timing.h"
 
-// Unsigned integer types (no negative values)
-typedef uint8_t  u8;   // 8-bit unsigned  (0 to 255)
-typedef uint16_t u16;  // 16-bit unsigned (0 to 65,535)
-typedef uint32_t u32;  // 32-bit unsigned (0 to 4,294,967,295)
-typedef uint64_t u64;  // 64-bit unsigned (0 to 18,446,744,073,709,551,615)
-
-// Signed integer types (can represent negative values)
-typedef int8_t  s8;    // 8-bit signed  (-128 to 127)
-typedef int16_t s16;   // 16-bit signed (-32,768 to 32,767)
-typedef int32_t s32;   // 32-bit signed (-2,147,483,648 to 2,147,483,647)
-typedef int64_t s64;   // 64-bit signed (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807)
+/* Default when the endpoint gives no data-lanes. */
+#define IMX568_DEFAULT_LANES 2
+#define IMX568_INCK_FREQ_HZ	37125000
 
 /*
  * From the datasheet, "20ms after PWDN goes low or 20ms after RESETB goes
@@ -50,23 +47,66 @@ typedef int64_t s64;   // 64-bit signed (-9,223,372,036,854,775,808 to 9,223,372
  */
 #define PWDN_ACTIVE_DELAY_MS	20
 
-#define IMX568_REG_WAIT			0x0000
+/* Streaming / master control */
+#define IMX568_SW_STANDBY		CCI_REG8(0x3000)	/* 0=operating, 1=standby */
+#define IMX568_XMSTA			CCI_REG8(0x3010)	/* master: 0=start, 1=stop */
 
-#define IMX568_SW_STANDBY		0x3000
+/* Exposure (SHS) and analog gain */
+#define IMX568_SHS			CCI_REG24_LE(0x3240)	/* shutter, 20-bit */
+#define IMX568_GAIN			CCI_REG16_LE(0x3514)	/* analog gain, 10-bit */
 
-#define IMX568_REG_EXP_HI		0x3242
-#define IMX568_REG_EXP_MID		0x3241
-#define IMX568_REG_EXP_LO		0x3240
+/* Frame timing */
+#define IMX568_HMAX			CCI_REG16_LE(0x30d8)
+#define IMX568_VMAX			CCI_REG24_LE(0x30d4)	/* 24-bit */
 
-#define IMX568_REG_GAIN_HI		0x3515
-#define IMX568_REG_GAIN_LO		0x3514
-#define IMX568_REG_HTS_HI		0x30d9
-#define IMX568_REG_HTS_LO		0x30d8
-#define IMX568_REG_VTS_HI		0x30d5
-#define IMX568_REG_VTS_LO		0x30d4
+/* Per-mode geometry / bit-depth registers */
+#define IMX568_HWIDTH			CCI_REG16_LE(0x30d0)	/* VOPB_VBLK output width */
+#define IMX568_FINFO_HWIDTH		CCI_REG16_LE(0x30d2)	/* FINFO output width */
+#define IMX568_GMRWT			CCI_REG8(0x30e2)	/* AD readout timing */
+#define IMX568_GMTWT			CCI_REG8(0x30e3)
+#define IMX568_ROI_PH1			CCI_REG16_LE(0x3120)	/* FID0 ROI H position */
+#define IMX568_ROI_PV1			CCI_REG16_LE(0x3122)	/* FID0 ROI V position */
+#define IMX568_ROI_WH1			CCI_REG16_LE(0x3124)	/* FID0 ROI H width */
+#define IMX568_ROI_WV1			CCI_REG16_LE(0x3126)	/* FID0 ROI V width */
+#define IMX568_ADBIT			CCI_REG8(0x3200)	/* AD bit depth: [5:4] 0=10b,1=12b */
+#define IMX568_ODBIT			CCI_REG8(0x3430)	/* output bit depth: [1:0] 0=10b,1=12b */
 
-#define IMX568_REG_CHIPID_H		IMX568_REG_GAIN_HI
-#define IMX568_REG_CHIPID_L		IMX568_REG_GAIN_LO
+/* Named registers programmed by the common base table */
+#define IMX568_INCKSEL_ST0		CCI_REG8(0x3014)
+#define IMX568_INCKSEL_ST1		CCI_REG8(0x3015)
+#define IMX568_INCKSEL_ST2		CCI_REG8(0x3016)
+#define IMX568_INCKSEL_ST3		CCI_REG8(0x3018)
+#define IMX568_INCKSEL_ST4		CCI_REG8(0x3019)
+#define IMX568_INCKSEL_ST5		CCI_REG8(0x301b)
+#define IMX568_GSDLY			CCI_REG8(0x30e6)
+#define IMX568_ROI_MODE			CCI_REG8(0x3100)
+#define IMX568_FID0_ROION		CCI_REG8(0x3104)
+#define IMX568_INCKSEL_N0		CCI_REG8(0x321c)
+#define IMX568_INCKSEL_N1		CCI_REG8(0x321d)
+#define IMX568_INCKSEL_N2		CCI_REG8(0x321e)
+#define IMX568_INCKSEL_N3		CCI_REG8(0x321f)
+#define IMX568_INCKSEL_D0		CCI_REG8(0x3224)
+#define IMX568_INCKSEL_D1		CCI_REG8(0x3225)
+#define IMX568_INCKSEL_D2		CCI_REG8(0x3226)
+#define IMX568_INCKSEL_D3		CCI_REG8(0x3227)
+#define IMX568_VINT_EN			CCI_REG8(0x323e)
+#define IMX568_PULSE2_EN		CCI_REG8(0x3480)
+#define IMX568_GAIN_RTS			CCI_REG8(0x3502)
+#define IMX568_BLKLEVEL			CCI_REG8(0x35b4)
+#define IMX568_LANESEL			CCI_REG8(0x3904)
+#define IMX568_EAV_SEL_MIPI		CCI_REG8(0x3942)
+#define IMX568_MIPI_CLK_CONT		CCI_REG8(0x3c30)	/* continuous clock */
+#define IMX568_TXCLKESC_FREQ		CCI_REG16_LE(0x3ca4)
+#define IMX568_THS_PREPARE		CCI_REG16_LE(0x3cb4)
+#define IMX568_TCLK_POST		CCI_REG16_LE(0x3cb6)
+#define IMX568_THS_TRAIL		CCI_REG16_LE(0x3cb8)
+#define IMX568_THS_ZERO			CCI_REG16_LE(0x3cba)
+#define IMX568_TCLK_PREPARE		CCI_REG16_LE(0x3cbc)
+#define IMX568_TCLK_TRAIL		CCI_REG16_LE(0x3cbe)
+#define IMX568_TLPX			CCI_REG16_LE(0x3cc0)
+#define IMX568_TCLK_ZERO		CCI_REG16_LE(0x3cc2)
+#define IMX568_TCLK_PRE			CCI_REG16_LE(0x3cc4)
+#define IMX568_THS_EXIT			CCI_REG16_LE(0x3cc6)
 
 /* IMX568 native and active pixel array size */
 #define IMX568_NATIVE_WIDTH		2464U
@@ -77,11 +117,75 @@ typedef int64_t s64;   // 64-bit signed (-9,223,372,036,854,775,808 to 9,223,372
 #define IMX568_PIXEL_ARRAY_WIDTH	1920U
 #define IMX568_PIXEL_ARRAY_HEIGHT	1080U
 
-#define IMX568_VBLANK_MIN		24
+/* 2432x2048 all-pixel mode: 32-byte-stride-aligned crop of the 2448 area. */
+/* Centered 1920x1080 window: 16+(2432-1920)/2, 8+(2048-1080)/2. */
+#define IMX568_FHD_LEFT			272U
+#define IMX568_FHD_TOP			492U
+
+#define IMX568_FULL_WIDTH		2432U
+#define IMX568_FULL_HEIGHT		2048U
+#define IMX568_FULL_LEFT		16U
+#define IMX568_FULL_TOP			8U
+#define IMX568_FULL_HTS			IMX568_HMAX_1188_2LANE_FULL
+#define IMX568_FULL_HTS_4LANE		IMX568_HMAX_1188_4LANE_FULL
+#define IMX568_FULL_VTS			2250	/* VMAX (legal again under the SHS clamp) */
+
+/* Cropped sub-modes (ROI crop of the native 2464x2064 array). All 32-byte
+ * stride-aligned (width % 64 == 0 for RAW12). Their default frame period is
+ * about 30 fps; the selected profile's minimum VBLANK bounds the maximum.
+ */
+#define IMX568_HD_WIDTH			1280U
+#define IMX568_HD_HEIGHT		720U
+#define IMX568_HD_LEFT			592U
+#define IMX568_HD_TOP			672U
+#define IMX568_QVGA_WIDTH		640U
+#define IMX568_QVGA_HEIGHT		360U
+#define IMX568_QVGA_LEFT		912U
+#define IMX568_QVGA_TOP			852U
+#define IMX568_W169_WIDTH		2432U
+#define IMX568_W169_HEIGHT		1368U
+#define IMX568_W169_LEFT		16U
+#define IMX568_W169_TOP			348U
+#define IMX568_W169_594_FRAME_CLOCKS \
+	(IMX568_HMAX_594_2LANE_RAW12 * 1553)
+#define IMX568_XGA_WIDTH		1024U
+#define IMX568_XGA_HEIGHT		768U
+#define IMX568_XGA_LEFT			720U
+#define IMX568_XGA_TOP			648U
+#define IMX568_SVGA_WIDTH		800U
+#define IMX568_SVGA_HEIGHT		600U
+#define IMX568_SVGA_LEFT		832U
+#define IMX568_SVGA_TOP			732U
+#define IMX568_VGA_WIDTH		640U
+#define IMX568_VGA_HEIGHT		480U
+#define IMX568_VGA_LEFT			912U
+#define IMX568_VGA_TOP			792U
+#define IMX568_SXGA_WIDTH		1280U
+#define IMX568_SXGA_HEIGHT		960U
+#define IMX568_SXGA_LEFT		592U
+#define IMX568_SXGA_TOP			552U
+#define IMX568_UXGA_WIDTH		1600U
+#define IMX568_UXGA_HEIGHT		1200U
+#define IMX568_UXGA_LEFT		432U
+#define IMX568_UXGA_TOP			432U
+#define IMX568_QXGA_WIDTH		2048U
+#define IMX568_QXGA_HEIGHT		1536U
+#define IMX568_QXGA_LEFT		208U
+#define IMX568_QXGA_TOP			264U
+#define IMX568_CROP_HTS			IMX568_HMAX_1188_2LANE_RAW12
+#define IMX568_CROP_HTS_4LANE		IMX568_HMAX_1188_4LANE_RAW12
+#define IMX568_CROP_VTS			2565	/* VMAX: 74.25MHz/(965*2565)=30fps */
+
+/* Sony ROI floor VMAX >= height + GMRWT + GMTWT + GSDLY + 86, plus a 16-line guard band. */
+#define IMX568_SHS_READOUT_LINES	86
+#define IMX568_VBLANK_GUARD_LINES	16
+#define IMX568_ROI_VBLANK_LINES		(IMX568_SHS_READOUT_LINES + \
+					 IMX568_VBLANK_GUARD_LINES)
 #define IMX568_VTS_MAX			32767
 #define IMX568_VTS			(0xA02)
 
-#define IMX568_HTS			0x3C5
+#define IMX568_HTS			IMX568_HMAX_1188_2LANE_RAW12
+#define IMX568_HTS_4LANE		IMX568_HMAX_1188_4LANE_RAW12
 #define IMX568_HTS_MAX			0x7fff
 
 #define IMX568_GAIN_MIN			0
@@ -92,7 +196,7 @@ typedef int64_t s64;   // 64-bit signed (-9,223,372,036,854,775,808 to 9,223,372
 #define IMX568_EXPOSURE_MIN		(0x10+4)
 #define IMX568_EXPOSURE_STEP		1
 #define IMX568_EXPOSURE_DEFAULT		(0x70)
-#define IMX568_EXPOSURE_MAX		(IMX568_VTS-1)
+/* SHS >= height + reserve: exposure <= VBLANK - (reserve + 1 - EXPOSURE_MIN). */
 
 /* regulator supplies */
 static const char * const imx568_supply_names[] = {
@@ -103,26 +207,104 @@ static const char * const imx568_supply_names[] = {
 
 #define IMX568_NUM_SUPPLIES ARRAY_SIZE(imx568_supply_names)
 
-#define FREQ_INDEX_FULL		0
-#define FREQ_INDEX_VGA		1
-static const s64 imx568_link_freqs[] = {//link data rate div with 2
-	[FREQ_INDEX_FULL]	= 1188000000,
+#define IMX568_RATE_594		0
+#define IMX568_RATE_891		1
+#define IMX568_RATE_1188		2
+
+static const s64 imx568_link_freqs[] = {
+	[IMX568_RATE_594]	= 297000000,
+	[IMX568_RATE_891]	= 445500000,
+	[IMX568_RATE_1188]	= 594000000,
 };
 
-struct regval_list {
-	u16 addr;
-	u8 data;
+struct imx568_link_profile {
+	u32 lane_rate;
+	const struct cci_reg_sequence *reg_list;
+	unsigned int num_regs;
+};
+
+/* IMX568-AAQJ-C sections 18 and 19.8, with a 37.125 MHz INCK. */
+static const struct cci_reg_sequence imx568_594mbps_regs[] = {
+	{ IMX568_INCKSEL_D2, 0x80 },
+	{ IMX568_INCKSEL_D3, 0x90 },
+	{ IMX568_THS_PREPARE, 0x002f },
+	{ IMX568_TCLK_POST, 0x0067 },
+	{ IMX568_THS_TRAIL, 0x002f },
+	{ IMX568_THS_ZERO, 0x004f },
+	{ IMX568_TCLK_PREPARE, 0x0027 },
+	{ IMX568_TCLK_TRAIL, 0x0027 },
+	{ IMX568_TLPX, 0x0027 },
+	{ IMX568_TCLK_ZERO, 0x00b7 },
+	{ IMX568_TCLK_PRE, 0x000f },
+	{ IMX568_THS_EXIT, 0x0047 },
+};
+
+static const struct cci_reg_sequence imx568_891mbps_regs[] = {
+	{ IMX568_INCKSEL_D2, 0xc0 },
+	{ IMX568_INCKSEL_D3, 0xd0 },
+	{ IMX568_THS_PREPARE, 0x003f },
+	{ IMX568_TCLK_POST, 0x007f },
+	{ IMX568_THS_TRAIL, 0x003f },
+	{ IMX568_THS_ZERO, 0x006f },
+	{ IMX568_TCLK_PREPARE, 0x0037 },
+	{ IMX568_TCLK_TRAIL, 0x0037 },
+	{ IMX568_TLPX, 0x002f },
+	{ IMX568_TCLK_ZERO, 0x00f7 },
+	{ IMX568_TCLK_PRE, 0x000f },
+	{ IMX568_THS_EXIT, 0x005f },
+};
+
+static const struct cci_reg_sequence imx568_1188mbps_regs[] = {
+	{ IMX568_INCKSEL_D2, 0x80 },
+	{ IMX568_INCKSEL_D3, 0x80 },
+	{ IMX568_THS_PREPARE, 0x004f },
+	{ IMX568_TCLK_POST, 0x008f },
+	{ IMX568_THS_TRAIL, 0x004f },
+	{ IMX568_THS_ZERO, 0x0087 },
+	{ IMX568_TCLK_PREPARE, 0x004f },
+	{ IMX568_TCLK_TRAIL, 0x0047 },
+	{ IMX568_TLPX, 0x003f },
+	{ IMX568_TCLK_ZERO, 0x0137 },
+	{ IMX568_TCLK_PRE, 0x000f },
+	{ IMX568_THS_EXIT, 0x007f },
+};
+
+static const struct imx568_link_profile imx568_link_profiles[] = {
+	[IMX568_RATE_594] = {
+		.lane_rate = IMX568_LANE_RATE_594,
+		.reg_list = imx568_594mbps_regs,
+		.num_regs = ARRAY_SIZE(imx568_594mbps_regs),
+	},
+	[IMX568_RATE_891] = {
+		.lane_rate = IMX568_LANE_RATE_891,
+		.reg_list = imx568_891mbps_regs,
+		.num_regs = ARRAY_SIZE(imx568_891mbps_regs),
+	},
+	[IMX568_RATE_1188] = {
+		.lane_rate = IMX568_LANE_RATE_1188,
+		.reg_list = imx568_1188mbps_regs,
+		.num_regs = ARRAY_SIZE(imx568_1188mbps_regs),
+	},
 };
 
 struct imx568_mode {
 	struct v4l2_mbus_framefmt	format;
 	struct v4l2_rect		crop;
-	u64				pixel_rate;
-	unsigned int			link_freq_index;
-	int				hts;
-	int				vts;
-	const struct regval_list	*reg_list;
+	u32				frame_clocks_594;
+	u16				fixed_hmax_2lane;
+	u16				fixed_hmax_4lane;
+	u16				fixed_vmax;
+	const struct cci_reg_sequence	*reg_list;
 	unsigned int			num_regs;
+};
+
+struct imx568_selected_timing {
+	const struct imx568_link_profile *profile;
+	const struct imx568_timing	*rate_timing;
+	u32				hts;
+	u32				vts;
+	u32				vblank_min;
+	u32				link_freq_index;
 };
 
 struct imx568 {
@@ -130,9 +312,9 @@ struct imx568 {
 	struct media_pad		pad;
 	struct mutex			lock;
 	struct clk			*xclk;
+	struct regmap			*regmap;
 	struct gpio_desc		*pwdn;
 	struct regulator_bulk_data supplies[IMX568_NUM_SUPPLIES];
-	bool				clock_ncont;
 	struct v4l2_ctrl_handler	ctrls;
 	const struct imx568_mode	*mode;
 	struct v4l2_ctrl		*pixel_rate;
@@ -142,7 +324,39 @@ struct imx568 {
 	struct v4l2_ctrl		*hflip;
 	struct v4l2_ctrl		*vflip;
 	struct v4l2_ctrl		*link_freq;
+	const struct imx568_link_profile *link_profile;
+	const struct imx568_timing	*rate_timing;
+	u32				hts;
+	u32				vts;
+	u32				vblank_min;
+	u32				link_freq_index;
+	unsigned int			link_rate_mask;
+	u8				lanes;	/* CSI-2 data lanes: 2 (LI SoM) or 4 (DVT) */
+	/* Closes the gap before the V4L2 core updates s_stream_enabled. */
+	bool				streaming;
 };
+
+/* AD readout rows of the 1188 Mbit/s, 2-lane, RAW12 row the 86-line reserve belongs to. */
+#define IMX568_REF_AD_LINES		(IMX568_GMRWT_1188_2LANE_RAW12 + \
+					 IMX568_GMTWT_1188_2LANE_RAW12 + \
+					 IMX568_GSDLY_1188_2LANE_RAW12)
+
+/* Readout reserve: 86 lines at 2 lanes, plus the extra AD readout rows a 4-lane row carries. */
+static u32 imx568_readout_lines(const struct imx568_timing *timing, u8 lanes)
+{
+	u32 ad_lines = timing->gmrwt + timing->gmtwt + timing->gsdly;
+
+	if (lanes != 4 || ad_lines <= IMX568_REF_AD_LINES)
+		return IMX568_SHS_READOUT_LINES;
+	return IMX568_SHS_READOUT_LINES + ad_lines - IMX568_REF_AD_LINES;
+}
+
+/* Vertical blank reserved for the readout, in exposure control units. */
+static int imx568_exp_readout_overhead(const struct imx568 *sensor)
+{
+	return imx568_readout_lines(sensor->rate_timing, sensor->lanes) + 1 -
+	       IMX568_EXPOSURE_MIN;
+}
 
 static inline struct imx568 *to_sensor(struct v4l2_subdev *sd)
 {
@@ -156,123 +370,296 @@ static const char * const imx568_test_pattern_menu[] = {
 	"Random Data",
 };
 
-static const u8 imx568_test_pattern_val[] = {
-	0x00,	/* Disabled */
+/* Common analog/PLL/MIPI base written before every mode. */
+static const struct cci_reg_sequence imx568_common_regs[] = {
+	{ IMX568_INCKSEL_ST0, 0x05 },
+	{ IMX568_INCKSEL_ST1, 0x91 },
+	{ IMX568_INCKSEL_ST2, 0x50 },
+	{ IMX568_INCKSEL_ST3, 0x20 },
+	{ IMX568_INCKSEL_ST4, 0x02 },
+	{ IMX568_INCKSEL_ST5, 0x1d },
+	{ CCI_REG8(0x30d6), 0x00 },	/* VMAX[23:16] */
+	{ IMX568_GSDLY, 0x08 },
+	{ IMX568_ROI_MODE, 0x00 },
+	{ IMX568_FID0_ROION, 0x03 },
+	/* 37.125 MHz INCK-only dividers; D2/D3 are selected per lane rate. */
+	{ IMX568_INCKSEL_N0, 0x40 },
+	{ IMX568_INCKSEL_N1, 0x05 },
+	{ IMX568_INCKSEL_N2, 0xe0 },
+	{ IMX568_INCKSEL_N3, 0x00 },
+	{ IMX568_INCKSEL_D0, 0x40 },
+	{ IMX568_INCKSEL_D1, 0x14 },
+	{ IMX568_VINT_EN, 0x30 },
+	{ CCI_REG8(0x3240), 0x14 },	/* SHS[7:0] preset */
+	{ IMX568_PULSE2_EN, 0x20 },
+	{ IMX568_GAIN_RTS, 0x08 },
+	{ CCI_REG8(0x3542), 0x27 },
+	{ CCI_REG8(0x354a), 0x20 },
+	{ CCI_REG8(0x359c), 0x0f },
+	{ CCI_REG8(0x35a4), 0x30 },
+	{ CCI_REG8(0x35a5), 0x12 },
+	{ CCI_REG8(0x35a8), 0x30 },
+	{ CCI_REG8(0x35a9), 0x42 },
+	{ CCI_REG8(0x35ac), 0x62 },
+	{ IMX568_BLKLEVEL, 0xf0 },
+	{ CCI_REG8(0x35b6), 0x02 },
+	{ CCI_REG8(0x35ec), 0x30 },
+	{ CCI_REG8(0x35ed), 0x12 },
+	{ CCI_REG8(0x35f0), 0xfb },
+	{ CCI_REG8(0x35f1), 0x0b },
+	{ CCI_REG8(0x35f2), 0xfb },
+	{ CCI_REG8(0x35f3), 0x0b },
+	{ CCI_REG8(0x3797), 0x20 },
+	{ IMX568_LANESEL, 0x03 },
+	{ IMX568_EAV_SEL_MIPI, 0x03 },
+	{ IMX568_MIPI_CLK_CONT, 0x00 },
+	{ IMX568_TXCLKESC_FREQ, 0x0980 },
+	{ CCI_REG8(0x3e30), 0x4e },
+	{ CCI_REG8(0x3e96), 0x01 },
+	{ CCI_REG8(0x3ea0), 0x4c },
+	{ CCI_REG8(0x3f3a), 0x04 },
+	{ CCI_REG8(0x4056), 0x23 },
+	{ CCI_REG8(0x4096), 0x23 },
+	{ CCI_REG8(0x4182), 0x00 },
+	{ CCI_REG8(0x41a2), 0x03 },
+	{ CCI_REG8(0x4232), 0x3c },
+	{ CCI_REG8(0x4306), 0x00 },
+	{ CCI_REG8(0x4307), 0x00 },
+	{ CCI_REG8(0x4308), 0x00 },
+	{ CCI_REG8(0x4309), 0x00 },
+	{ CCI_REG8(0x4310), 0x04 },
+	{ CCI_REG8(0x4311), 0x04 },
+	{ CCI_REG8(0x4312), 0x04 },
+	{ CCI_REG8(0x4313), 0x04 },
+	{ CCI_REG8(0x4467), 0x83 },
+	{ CCI_REG8(0x4749), 0x9f },
+	{ CCI_REG8(0x474a), 0x99 },
+	{ CCI_REG8(0x474b), 0x09 },
+	{ CCI_REG8(0x4788), 0x04 },
+	{ CCI_REG8(0x479c), 0x40 },
+	{ CCI_REG8(0x4864), 0xdc },
+	{ CCI_REG8(0x4868), 0xdc },
+	{ CCI_REG8(0x486c), 0xdc },
+	{ CCI_REG8(0x48a4), 0xf4 },
+	{ CCI_REG8(0x48a8), 0xf4 },
+	{ CCI_REG8(0x48ac), 0xf4 },
 };
 
-static struct regval_list imx568_start_stream[] = {
-	{0x3000, 0x00 },
-	{IMX568_REG_WAIT, 250},
-	{0x3010, 0x00},
-	{IMX568_REG_WAIT, 50},
-};
-
-static struct regval_list imx568_stop_stream[] = {
-	{0x3000, 0x01 },
-	{IMX568_REG_WAIT, 200},
-	{0x3010, 0x01},
-	{IMX568_REG_WAIT, 50},
-};
-
-static struct regval_list imx568_1920x1080_12bpp[] = {
 /*
-IMX568-AAQJ
-Interface: CSI-2_2Lane 1188Mbps/Lane / AD: 12bit Output: 12bit / INCK: 37.125MHz ROI mode / Master Mode / Frame rate: 30.03fps / Integration Time: 33.308ms / HMAX: 965 / VMAX: 2562
-Tool ver: Ver4.3
-*/
-	{0x3014, 0x05},  // INCKSEL_ST0
-	{0x3015, 0x91},  // INCKSEL_ST1
-	{0x3016, 0x50},  // INCKSEL_ST2
-	{0x3018, 0x20},  // INCKSEL_ST3
-	{0x3019, 0x02},  // INCKSEL_ST4
-	{0x301B, 0x1D},  // INCKSEL_ST5
-	{0x30D0, 0x80},  // VOPB_VBLK_HWIDTH LSB
-	{0x30D1, 0x07},  // VOPB_VBLK_HWIDTH MSB
-	{0x30D2, 0x80},  // FINFO_HWIDTH LSB
-	{0x30D3, 0x07},  // FINFO_HWIDTH MSB
-	{0x30D4, 0x02},  // VMAX
-	{0x30D5, 0x0A},  // VMAX
-	{0x30D6, 0x00},  // VMAX
-	{0x30D8, 0xC5},  // HMAX LSB
-	{0x30D9, 0x03},  // HMAX MSB
-	{0x30E2, 0x02},  // GMRWT
-	{0x30E3, 0x10},  // GMTWT
-	{0x30E6, 0x08},  // GSDLY
-	{0x3100, 0x00},  // ROI_MODE
-	{0x3104, 0x03},  // FID0_ROIH1ON  FID0_ROIV1ON  FID0_ROIH2ON  FID0_ROIV2ON  FID0_ROIH3ON  FID0_ROIV3ON  FID0_ROIH4ON  FID0_ROIV4ON
-	{0x3120, 0x08},  // FID0_ROIPH1 LSB
-	{0x3121, 0x00},  // FID0_ROIPH1 MSB
-	{0x3122, 0x08},  // FID0_ROIPV1 LSB
-	{0x3123, 0x00},  // FID0_ROIPV1 MSB
-	{0x3124, 0x80},  // FID0_ROIWH1 LSB
-	{0x3125, 0x07},  // FID0_ROIWH1 MSB
-	{0x3126, 0x38},  // FID0_ROIWV1 LSB
-	{0x3127, 0x04},  // FID0_ROIWV1 MSB
-	{0x3200, 0x15},  // ADBIT
-	{0x321C, 0x40},  // INCKSEL_N0
-	{0x3224, 0x40},  // INCKSEL_D0
-	{0x3226, 0x80},  // INCKSEL_D2
-	{0x3227, 0x80},  // INCKSEL_D3
-	{0x323E, 0x30},  // VINT_EN  VINT_EN_NOR
-	{0x3240, 0x14},  // SHS
-	{0x3430, 0x01},  // ODBIT
-	{0x3480, 0x20},  // PULSE2_EN_NOR  PULSE2_EN_TRIG  PULSE2_POL
-	{0x3502, 0x08},  // GAIN_RTS
-	{0x3542, 0x27},  //
-	{0x354A, 0x20},  //
-	{0x359C, 0x0F},  //
-	{0x35A4, 0x30},  //
-	{0x35A5, 0x12},  //
-	{0x35A8, 0x30},  //
-	{0x35A9, 0x42},  //
-	{0x35AC, 0x62},  //
-	{0x35B4, 0xF0},  // BLKLEVEL
-	{0x35B6, 0x02},  //
-	{0x35EC, 0x30},  //
-	{0x35ED, 0x12},  //
-	{0x35F0, 0xFB},  //
-	{0x35F1, 0x0B},  //
-	{0x35F2, 0xFB},  //
-	{0x35F3, 0x0B},  //
-	{0x3797, 0x20},  //
-	{0x3904, 0x03},  // LANESEL
-	{0x3942, 0x03},  // EAV_SEL_MIPI
-	{0x3C30, 0x00},  // Continous CLK
-	{0x3CA4, 0x80},  // TXCLKESC_FREQ
-	{0x3CA5, 0x09},  //
-	{0x3E30, 0x4E},  //
-	{0x3E96, 0x01},  //
-	{0x3EA0, 0x4C},  //
-	{0x3F3A, 0x04},  //
-	{0x4056, 0x23},  //
-	{0x4096, 0x23},  //
-	{0x4182, 0x00},  //
-	{0x41A2, 0x03},  //
-	{0x4232, 0x3C},  //
-	{0x4306, 0x00},  //
-	{0x4307, 0x00},  //
-	{0x4308, 0x00},  //
-	{0x4309, 0x00},  //
-	{0x4310, 0x04},  //
-	{0x4311, 0x04},  //
-	{0x4312, 0x04},  //
-	{0x4313, 0x04},  //
-	{0x4467, 0x83},  //
-	{0x4749, 0x9F},  //
-	{0x474A, 0x99},  //
-	{0x474B, 0x09},  //
-	{0x4788, 0x04},  //
-	{0x479C, 0x40},  //
-	{0x4864, 0xDC},  //
-	{0x4868, 0xDC},  //
-	{0x486C, 0xDC},  //
-	{0x48A4, 0xF4},  //
-	{0x48A8, 0xF4},  //
-	{0x48AC, 0xF4},  //
-	{IMX568_REG_WAIT, 1},
+ * Per-mode deltas over imx568_common_regs. The trailing 1 ms settle delay
+ * (formerly a WAIT pseudo-register) is applied in imx568_set_mode().
+ * VMAX[15:0] is written here as CCI_REG16_LE(0x30d4); VMAX[23:16] comes from
+ * imx568_common_regs and the full 24-bit VMAX is driven at runtime via VBLANK.
+ */
 
+/* 1920x1080 12-bit ROI (SRGGB12). */
+static const struct cci_reg_sequence imx568_1920x1080_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0780 },		/* VOPB_VBLK_HWIDTH (=1920) */
+	{ IMX568_FINFO_HWIDTH, 0x0780 },	/* FINFO_HWIDTH (=1920) */
+	{ CCI_REG16_LE(0x30d4), 0x0a02 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x0110 },		/* ROIPH1 (=272, centered) */
+	{ IMX568_ROI_PV1, 0x01ec },		/* ROIPV1 (=492, centered) */
+	{ IMX568_ROI_WH1, 0x0780 },
+	{ IMX568_ROI_WV1, 0x0438 },
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
 };
 
+/* 2432x2048 all-pixel 12-bit ROI (30 fps, lower-rate readout may derate). */
+static const struct cci_reg_sequence imx568_2432x2048_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0980 },		/* VOPB_VBLK_HWIDTH (=2432) */
+	{ IMX568_FINFO_HWIDTH, 0x0980 },	/* FINFO_HWIDTH (=2432) */
+	{ CCI_REG16_LE(0x30d4), 0x08ca },	/* VMAX[15:0] (=2250) */
+	{ IMX568_HMAX, IMX568_FULL_HTS },
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x0010 },		/* ROIPH1 (=16, centre-crop of 2448) */
+	{ IMX568_ROI_PV1, 0x0008 },		/* ROIPV1 (=8) */
+	{ IMX568_ROI_WH1, 0x0980 },		/* ROIWH1 (=2432) */
+	{ IMX568_ROI_WV1, 0x0800 },		/* ROIWV1 (=2048) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 1280x720 12-bit ROI crop (~30 fps default). */
+static const struct cci_reg_sequence imx568_1280x720_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0500 },		/* VOPB_VBLK_HWIDTH (=1280) */
+	{ IMX568_FINFO_HWIDTH, 0x0500 },	/* FINFO_HWIDTH (=1280) */
+	{ CCI_REG16_LE(0x30d4), 0x0a05 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x0250 },		/* ROIPH1 (=592) */
+	{ IMX568_ROI_PV1, 0x02a0 },		/* ROIPV1 (=672) */
+	{ IMX568_ROI_WH1, 0x0500 },		/* ROIWH1 (=1280) */
+	{ IMX568_ROI_WV1, 0x02d0 },		/* ROIWV1 (=720) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 640x360 12-bit ROI crop (~30 fps default). */
+static const struct cci_reg_sequence imx568_640x360_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0280 },		/* VOPB_VBLK_HWIDTH (=640) */
+	{ IMX568_FINFO_HWIDTH, 0x0280 },	/* FINFO_HWIDTH (=640) */
+	{ CCI_REG16_LE(0x30d4), 0x0a05 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x0390 },		/* ROIPH1 (=912) */
+	{ IMX568_ROI_PV1, 0x0354 },		/* ROIPV1 (=852) */
+	{ IMX568_ROI_WH1, 0x0280 },		/* ROIWH1 (=640) */
+	{ IMX568_ROI_WV1, 0x0168 },		/* ROIWV1 (=360) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 2432x1368 12-bit ROI crop: full-width 16:9, top/bottom cropped (~30 fps). */
+static const struct cci_reg_sequence imx568_2432x1368_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0980 },		/* VOPB_VBLK_HWIDTH (=2432) */
+	{ IMX568_FINFO_HWIDTH, 0x0980 },	/* FINFO_HWIDTH (=2432) */
+	{ CCI_REG16_LE(0x30d4), 0x08ca },	/* VMAX[15:0] (=2250) */
+	{ IMX568_HMAX, 0x044c },		/* HMAX (=1100) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x0010 },		/* ROIPH1 (=16, full width) */
+	{ IMX568_ROI_PV1, 0x015c },		/* ROIPV1 (=348, centered) */
+	{ IMX568_ROI_WH1, 0x0980 },		/* ROIWH1 (=2432) */
+	{ IMX568_ROI_WV1, 0x0558 },		/* ROIWV1 (=1368) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 1024x768 12-bit centered ROI crop (~30 fps default). */
+static const struct cci_reg_sequence imx568_1024x768_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0400 },		/* VOPB_VBLK_HWIDTH (=1024) */
+	{ IMX568_FINFO_HWIDTH, 0x0400 },	/* FINFO_HWIDTH (=1024) */
+	{ CCI_REG16_LE(0x30d4), 0x0a05 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x02d0 },		/* ROIPH1 (=720, centered) */
+	{ IMX568_ROI_PV1, 0x0288 },		/* ROIPV1 (=648, centered) */
+	{ IMX568_ROI_WH1, 0x0400 },		/* ROIWH1 (=1024) */
+	{ IMX568_ROI_WV1, 0x0300 },		/* ROIWV1 (=768) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 800x600 12-bit centered ROI crop (~30 fps default). */
+static const struct cci_reg_sequence imx568_800x600_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0320 },		/* VOPB_VBLK_HWIDTH (=800) */
+	{ IMX568_FINFO_HWIDTH, 0x0320 },	/* FINFO_HWIDTH (=800) */
+	{ CCI_REG16_LE(0x30d4), 0x0a05 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x0340 },		/* ROIPH1 (=832, centered) */
+	{ IMX568_ROI_PV1, 0x02dc },		/* ROIPV1 (=732, centered) */
+	{ IMX568_ROI_WH1, 0x0320 },		/* ROIWH1 (=800) */
+	{ IMX568_ROI_WV1, 0x0258 },		/* ROIWV1 (=600) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 640x480 12-bit centered ROI crop (~30 fps default). */
+static const struct cci_reg_sequence imx568_640x480_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0280 },		/* VOPB_VBLK_HWIDTH (=640) */
+	{ IMX568_FINFO_HWIDTH, 0x0280 },	/* FINFO_HWIDTH (=640) */
+	{ CCI_REG16_LE(0x30d4), 0x0a05 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x0390 },		/* ROIPH1 (=912, centered) */
+	{ IMX568_ROI_PV1, 0x0318 },		/* ROIPV1 (=792, centered) */
+	{ IMX568_ROI_WH1, 0x0280 },		/* ROIWH1 (=640) */
+	{ IMX568_ROI_WV1, 0x01e0 },		/* ROIWV1 (=480) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 1280x960 12-bit centered ROI crop (~30 fps default). */
+static const struct cci_reg_sequence imx568_1280x960_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0500 },		/* VOPB_VBLK_HWIDTH (=1280) */
+	{ IMX568_FINFO_HWIDTH, 0x0500 },	/* FINFO_HWIDTH (=1280) */
+	{ CCI_REG16_LE(0x30d4), 0x0a05 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x0250 },		/* ROIPH1 (=592, centered) */
+	{ IMX568_ROI_PV1, 0x0228 },		/* ROIPV1 (=552, centered) */
+	{ IMX568_ROI_WH1, 0x0500 },		/* ROIWH1 (=1280) */
+	{ IMX568_ROI_WV1, 0x03c0 },		/* ROIWV1 (=960) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 1600x1200 12-bit centered ROI crop (~30 fps default). */
+static const struct cci_reg_sequence imx568_1600x1200_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0640 },		/* VOPB_VBLK_HWIDTH (=1600) */
+	{ IMX568_FINFO_HWIDTH, 0x0640 },	/* FINFO_HWIDTH (=1600) */
+	{ CCI_REG16_LE(0x30d4), 0x0a05 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x01b0 },		/* ROIPH1 (=432, centered) */
+	{ IMX568_ROI_PV1, 0x01b0 },		/* ROIPV1 (=432, centered) */
+	{ IMX568_ROI_WH1, 0x0640 },		/* ROIWH1 (=1600) */
+	{ IMX568_ROI_WV1, 0x04b0 },		/* ROIWV1 (=1200) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 2048x1536 12-bit centered ROI crop (~30 fps default). */
+static const struct cci_reg_sequence imx568_2048x1536_12bpp[] = {
+	{ IMX568_HWIDTH, 0x0800 },		/* VOPB_VBLK_HWIDTH (=2048) */
+	{ IMX568_FINFO_HWIDTH, 0x0800 },	/* FINFO_HWIDTH (=2048) */
+	{ CCI_REG16_LE(0x30d4), 0x0a05 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x02 },
+	{ IMX568_GMTWT, 0x10 },
+	{ IMX568_ROI_PH1, 0x00d0 },		/* ROIPH1 (=208, centered) */
+	{ IMX568_ROI_PV1, 0x0108 },		/* ROIPV1 (=264, centered) */
+	{ IMX568_ROI_WH1, 0x0800 },		/* ROIWH1 (=2048) */
+	{ IMX568_ROI_WV1, 0x0600 },		/* ROIWV1 (=1536) */
+	{ IMX568_ADBIT, 0x15 },
+	{ IMX568_ODBIT, 0x01 },
+};
+
+/* 1920x1080 10-bit ROI (SRGGB10). */
+static const struct cci_reg_sequence imx568_1920x1080_10bpp[] = {
+	{ IMX568_HWIDTH, 0x0780 },		/* VOPB_VBLK_HWIDTH (=1920) */
+	{ IMX568_FINFO_HWIDTH, 0x0780 },	/* FINFO_HWIDTH (=1920) */
+	{ CCI_REG16_LE(0x30d4), 0x0a02 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x04 },
+	{ IMX568_GMTWT, 0x12 },
+	{ IMX568_ROI_PH1, 0x0110 },		/* ROIPH1 (=272, centered) */
+	{ IMX568_ROI_PV1, 0x01ec },		/* ROIPV1 (=492, centered) */
+	{ IMX568_ROI_WH1, 0x0780 },		/* ROIWH1 (=1920) */
+	{ IMX568_ROI_WV1, 0x0438 },		/* ROIWV1 (=1080) */
+	{ IMX568_ADBIT, 0x05 },			/* ADBIT[5:4]=0 -> 10-bit */
+	{ IMX568_ODBIT, 0x00 },			/* ODBIT[1:0]=0 -> 10-bit */
+};
+
+/* 1920x1080 8-bit ROI (SRGGB8). */
+static const struct cci_reg_sequence imx568_1920x1080_8bpp[] = {
+	{ IMX568_HWIDTH, 0x0780 },		/* VOPB_VBLK_HWIDTH (=1920) */
+	{ IMX568_FINFO_HWIDTH, 0x0780 },	/* FINFO_HWIDTH (=1920) */
+	{ CCI_REG16_LE(0x30d4), 0x0a02 },	/* VMAX[15:0] */
+	{ IMX568_HMAX, 0x03c5 },		/* HMAX (=965) */
+	{ IMX568_GMRWT, 0x04 },			/* 8-bit/2-lane/1188Mbps */
+	{ IMX568_GMTWT, 0x16 },			/* 8-bit/2-lane/1188Mbps */
+	{ IMX568_GSDLY, 0x0a },			/* 8-bit/2-lane/1188Mbps */
+	{ IMX568_ROI_PH1, 0x0110 },		/* ROIPH1 (=272, centered) */
+	{ IMX568_ROI_PV1, 0x01ec },		/* ROIPV1 (=492, centered) */
+	{ IMX568_ROI_WH1, 0x0780 },		/* ROIWH1 (=1920) */
+	{ IMX568_ROI_WV1, 0x0438 },		/* ROIWV1 (=1080) */
+	{ IMX568_ADBIT, 0x25 },			/* ADBIT[5:4]=2 -> 8-bit */
+	{ IMX568_ODBIT, 0x02 },			/* ODBIT[1:0]=2 -> 8-bit */
+};
 
 static const struct imx568_mode imx568_modes[] = {
 	/* 1920x1080 12-bit ROI mode. */
@@ -290,101 +677,473 @@ static const struct imx568_mode imx568_modes[] = {
 			.width		= IMX568_PIXEL_ARRAY_WIDTH,
 			.height		= IMX568_PIXEL_ARRAY_HEIGHT
 		},
-		.pixel_rate	= 198000000,
-		.link_freq_index = FREQ_INDEX_FULL,
-		.hts		= IMX568_HTS,
-		.vts		= IMX568_VTS,
+		.fixed_hmax_2lane = IMX568_HTS,
+		.fixed_hmax_4lane = IMX568_HTS_4LANE,
+		.fixed_vmax	= IMX568_VTS,
 		.reg_list	= imx568_1920x1080_12bpp,
 		.num_regs	= ARRAY_SIZE(imx568_1920x1080_12bpp)
 	},
+	/* 2432x2048 RAW12: 30 fps at the 594 Mbit/s period. */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_FULL_WIDTH,
+			.height		= IMX568_FULL_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_FULL_LEFT,
+			.top		= IMX568_FULL_TOP,
+			.width		= IMX568_FULL_WIDTH,
+			.height		= IMX568_FULL_HEIGHT
+		},
+		.frame_clocks_594 =
+			IMX568_HMAX_594_2LANE_RAW12 * IMX568_FULL_VTS,
+		.fixed_hmax_2lane = IMX568_FULL_HTS,
+		.fixed_hmax_4lane = IMX568_FULL_HTS_4LANE,
+		.fixed_vmax	= IMX568_FULL_VTS,
+		.reg_list	= imx568_2432x2048_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_2432x2048_12bpp)
+	},
+	/* 1280x720 12-bit ROI crop (~30 fps default). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_HD_WIDTH,
+			.height		= IMX568_HD_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_HD_LEFT,
+			.top		= IMX568_HD_TOP,
+			.width		= IMX568_HD_WIDTH,
+			.height		= IMX568_HD_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_CROP_HTS,
+		.fixed_hmax_4lane = IMX568_CROP_HTS_4LANE,
+		.fixed_vmax	= IMX568_CROP_VTS,
+		.reg_list	= imx568_1280x720_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_1280x720_12bpp)
+	},
+	/* 640x360 12-bit ROI crop (~30 fps default). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_QVGA_WIDTH,
+			.height		= IMX568_QVGA_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_QVGA_LEFT,
+			.top		= IMX568_QVGA_TOP,
+			.width		= IMX568_QVGA_WIDTH,
+			.height		= IMX568_QVGA_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_CROP_HTS,
+		.fixed_hmax_4lane = IMX568_CROP_HTS_4LANE,
+		.fixed_vmax	= IMX568_CROP_VTS,
+		.reg_list	= imx568_640x360_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_640x360_12bpp)
+	},
+	/* 2432x1368 RAW12: 30 fps native, ~25 fps at 594 Mbit/s. */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_W169_WIDTH,
+			.height		= IMX568_W169_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_W169_LEFT,
+			.top		= IMX568_W169_TOP,
+			.width		= IMX568_W169_WIDTH,
+			.height		= IMX568_W169_HEIGHT
+		},
+		.frame_clocks_594 =
+			IMX568_W169_594_FRAME_CLOCKS,
+		.fixed_hmax_2lane = IMX568_FULL_HTS,
+		.fixed_hmax_4lane = IMX568_FULL_HTS_4LANE,
+		.fixed_vmax	= IMX568_FULL_VTS,
+		.reg_list	= imx568_2432x1368_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_2432x1368_12bpp)
+	},
+	/* 1024x768 12-bit centered ROI (~30 fps default). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_XGA_WIDTH,
+			.height		= IMX568_XGA_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_XGA_LEFT,
+			.top		= IMX568_XGA_TOP,
+			.width		= IMX568_XGA_WIDTH,
+			.height		= IMX568_XGA_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_CROP_HTS,
+		.fixed_hmax_4lane = IMX568_CROP_HTS_4LANE,
+		.fixed_vmax	= IMX568_CROP_VTS,
+		.reg_list	= imx568_1024x768_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_1024x768_12bpp)
+	},
+	/* 800x600 12-bit centered ROI (~30 fps default). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_SVGA_WIDTH,
+			.height		= IMX568_SVGA_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_SVGA_LEFT,
+			.top		= IMX568_SVGA_TOP,
+			.width		= IMX568_SVGA_WIDTH,
+			.height		= IMX568_SVGA_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_CROP_HTS,
+		.fixed_hmax_4lane = IMX568_CROP_HTS_4LANE,
+		.fixed_vmax	= IMX568_CROP_VTS,
+		.reg_list	= imx568_800x600_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_800x600_12bpp)
+	},
+	/* 640x480 12-bit centered ROI (~30 fps default). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_VGA_WIDTH,
+			.height		= IMX568_VGA_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_VGA_LEFT,
+			.top		= IMX568_VGA_TOP,
+			.width		= IMX568_VGA_WIDTH,
+			.height		= IMX568_VGA_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_CROP_HTS,
+		.fixed_hmax_4lane = IMX568_CROP_HTS_4LANE,
+		.fixed_vmax	= IMX568_CROP_VTS,
+		.reg_list	= imx568_640x480_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_640x480_12bpp)
+	},
+	/* 1280x960 12-bit centered ROI (~30 fps default). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_SXGA_WIDTH,
+			.height		= IMX568_SXGA_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_SXGA_LEFT,
+			.top		= IMX568_SXGA_TOP,
+			.width		= IMX568_SXGA_WIDTH,
+			.height		= IMX568_SXGA_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_CROP_HTS,
+		.fixed_hmax_4lane = IMX568_CROP_HTS_4LANE,
+		.fixed_vmax	= IMX568_CROP_VTS,
+		.reg_list	= imx568_1280x960_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_1280x960_12bpp)
+	},
+	/* 1600x1200 12-bit centered ROI (~30 fps default). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_UXGA_WIDTH,
+			.height		= IMX568_UXGA_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_UXGA_LEFT,
+			.top		= IMX568_UXGA_TOP,
+			.width		= IMX568_UXGA_WIDTH,
+			.height		= IMX568_UXGA_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_CROP_HTS,
+		.fixed_hmax_4lane = IMX568_CROP_HTS_4LANE,
+		.fixed_vmax	= IMX568_CROP_VTS,
+		.reg_list	= imx568_1600x1200_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_1600x1200_12bpp)
+	},
+	/* 2048x1536 12-bit centered ROI (~30 fps default). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_QXGA_WIDTH,
+			.height		= IMX568_QXGA_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_QXGA_LEFT,
+			.top		= IMX568_QXGA_TOP,
+			.width		= IMX568_QXGA_WIDTH,
+			.height		= IMX568_QXGA_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_CROP_HTS,
+		.fixed_hmax_4lane = IMX568_CROP_HTS_4LANE,
+		.fixed_vmax	= IMX568_CROP_VTS,
+		.reg_list	= imx568_2048x1536_12bpp,
+		.num_regs	= ARRAY_SIZE(imx568_2048x1536_12bpp)
+	},
+	/* 1920x1080 10-bit ROI mode (SRGGB10). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB10_1X10,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_PIXEL_ARRAY_WIDTH,
+			.height		= IMX568_PIXEL_ARRAY_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_PIXEL_ARRAY_LEFT,
+			.top		= IMX568_PIXEL_ARRAY_TOP,
+			.width		= IMX568_PIXEL_ARRAY_WIDTH,
+			.height		= IMX568_PIXEL_ARRAY_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_HTS,
+		.fixed_hmax_4lane = IMX568_HTS_4LANE,
+		.fixed_vmax	= IMX568_VTS,
+		.reg_list	= imx568_1920x1080_10bpp,
+		.num_regs	= ARRAY_SIZE(imx568_1920x1080_10bpp)
+	},
+	/* 1920x1080 8-bit ROI mode (SRGGB8). */
+	{
+		.format = {
+			.code		= MEDIA_BUS_FMT_SRGGB8_1X8,
+			.colorspace	= V4L2_COLORSPACE_RAW,
+			.field		= V4L2_FIELD_NONE,
+			.width		= IMX568_PIXEL_ARRAY_WIDTH,
+			.height		= IMX568_PIXEL_ARRAY_HEIGHT
+		},
+		.crop = {
+			.left		= IMX568_PIXEL_ARRAY_LEFT,
+			.top		= IMX568_PIXEL_ARRAY_TOP,
+			.width		= IMX568_PIXEL_ARRAY_WIDTH,
+			.height		= IMX568_PIXEL_ARRAY_HEIGHT
+		},
+		.fixed_hmax_2lane = IMX568_HTS,
+		.fixed_hmax_4lane = IMX568_HTS_4LANE,
+		.fixed_vmax	= IMX568_VTS,
+		.reg_list	= imx568_1920x1080_8bpp,
+		.num_regs	= ARRAY_SIZE(imx568_1920x1080_8bpp)
+	},
 };
 
-/* Default sensor mode is 2x2 binned 640x480 SBGGR10_1X10. */
-#define IMX568_DEFAULT_MODE	(&imx568_modes[0])
-#define IMX568_DEFAULT_FORMAT	(imx568_modes[0].format)
+/* Default sensor mode: 1920x1080 10-bit centered ROI; [0] is its 12-bit twin. */
+#define IMX568_DEFAULT_MODE_IDX	11
+#define IMX568_DEFAULT_MODE	(&imx568_modes[IMX568_DEFAULT_MODE_IDX])
+#define IMX568_DEFAULT_FORMAT	(imx568_modes[IMX568_DEFAULT_MODE_IDX].format)
 
-static int imx568_write(struct v4l2_subdev *sd, u16 reg, u8 val)
+static unsigned int imx568_mode_bpp(const struct imx568_mode *mode)
 {
-	unsigned char data[3] = { reg >> 8, reg & 0xff, val};
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	int ret;
-
-	ret = i2c_master_send(client, data, 3);
-	/*
-	 * Writing the wrong number of bytes also needs to be flagged as an
-	 * error. Success needs to produce a 0 return code.
-	 */
-	if (ret == 3) {
-		ret = 0;
-	} else {
-		dev_dbg(&client->dev, "%s: i2c write error, reg: %x\n",
-				__func__, reg);
-		if (ret >= 0)
-			ret = -EINVAL;
+	switch (mode->format.code) {
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+		return 8;
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+		return 10;
+	default:
+		return 12;
 	}
-
-	return 0;
 }
 
-static int imx568_read(struct v4l2_subdev *sd, u16 reg, u8 *val)
+static const struct imx568_timing *
+imx568_profile_timing(const struct imx568_link_profile *profile,
+		      const struct imx568_mode *mode, u8 lanes)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	u8 buf[2] = { reg >> 8, reg & 0xff };
-	struct i2c_msg msg[2];
-	int ret;
-
-	msg[0].addr = client->addr;
-	msg[0].flags = client->flags;
-	msg[0].buf = buf;
-	msg[0].len = sizeof(buf);
-
-	msg[1].addr = client->addr;
-	msg[1].flags = client->flags | I2C_M_RD;
-	msg[1].buf = buf;
-	msg[1].len = 1;
-
-	ret = i2c_transfer(client->adapter, msg, 2);
-	if (ret != 2) {
-		dev_err(&client->dev, "%s: i2c read error, reg: %x = %d\n",
-			__func__, reg, ret);
-		return ret >= 0 ? -EINVAL : ret;
-	}
-
-	*val = buf[0];
-
-	return 0;
+	return imx568_timing_find(profile->lane_rate, imx568_mode_bpp(mode),
+				  lanes);
 }
 
-static int imx568_write_array(struct v4l2_subdev *sd,
-			      const struct regval_list *regs, int array_size)
+static u64 imx568_mode_pixel_rate(const struct imx568 *sensor,
+				  const struct imx568_mode *mode)
 {
-	int i, ret;
+	return imx568_pixel_rate(sensor->link_profile->lane_rate, sensor->lanes,
+				 imx568_mode_bpp(mode));
+}
 
-	for (i = 0; i < array_size; i++) {
-		if(IMX568_REG_WAIT == regs[i].addr){
-			msleep(regs[i].data);
+static u32 imx568_mode_line_length(const struct imx568 *sensor,
+				   const struct imx568_mode *mode)
+{
+	return imx568_hmax_to_line_length(sensor->hts,
+					  sensor->link_profile->lane_rate,
+					  sensor->lanes,
+					  imx568_mode_bpp(mode));
+}
+
+/* Fastest endpoint-supported profile that carries the active line. */
+static int imx568_find_timing(const struct imx568 *sensor,
+			      const struct imx568_mode *mode,
+			      struct imx568_selected_timing *selected)
+{
+	int i;
+
+	for (i = ARRAY_SIZE(imx568_link_profiles) - 1; i >= 0; i--) {
+		const struct imx568_link_profile *candidate =
+			&imx568_link_profiles[i];
+		const struct imx568_timing *candidate_timing;
+		u64 minimum_frame_clocks;
+		u64 requested_frame_clocks;
+		u64 target_frame_clocks;
+		u64 payload_capacity;
+		u64 payload_clocks;
+		u64 candidate_vts;
+		u32 candidate_vblank;
+		u32 candidate_hmax;
+
+		if (!(sensor->link_rate_mask & BIT(i)))
 			continue;
-		}
-		ret = imx568_write(sd, regs[i].addr, regs[i].data);
-		if (ret < 0)
-			return ret;
+		candidate_timing = imx568_profile_timing(candidate, mode,
+							 sensor->lanes);
+		if (!candidate_timing)
+			continue;
+		candidate_vblank = IMX568_ROI_VBLANK_LINES +
+			candidate_timing->gmrwt + candidate_timing->gmtwt +
+			candidate_timing->gsdly;
+		/* 1188 Mbit/s modes keep their per-lane HMAX; other rates use the row. */
+		if (candidate->lane_rate == IMX568_LANE_RATE_1188)
+			candidate_hmax = sensor->lanes == 4 ?
+				mode->fixed_hmax_4lane : mode->fixed_hmax_2lane;
+		else
+			candidate_hmax = candidate_timing->hmax;
+
+		/* Validate peak active-line payload, not frame-averaged payload. */
+		payload_clocks = ((u64)mode->format.width *
+			imx568_mode_bpp(mode) + 64) * IMX568_HMAX_CLK_HZ;
+		payload_capacity = (u64)candidate_hmax * sensor->lanes *
+			candidate->lane_rate;
+		if (payload_clocks > payload_capacity ||
+		    candidate_hmax < candidate_timing->hmax)
+			continue;
+
+		minimum_frame_clocks = (u64)candidate_hmax *
+			(mode->format.height + candidate_vblank);
+		/* One native period per mode; 2432-wide modes keep the 594 Mbit/s period. */
+		requested_frame_clocks =
+			(u64)mode->fixed_hmax_2lane * mode->fixed_vmax;
+		if (candidate->lane_rate == IMX568_LANE_RATE_594)
+			requested_frame_clocks =
+				max(requested_frame_clocks,
+				    (u64)mode->frame_clocks_594);
+		target_frame_clocks = max(requested_frame_clocks,
+					  minimum_frame_clocks);
+		candidate_vts = DIV_ROUND_UP_ULL(target_frame_clocks,
+						 candidate_hmax);
+		if (candidate_vts > IMX568_VTS_MAX)
+			continue;
+
+		selected->profile = candidate;
+		selected->rate_timing = candidate_timing;
+		selected->hts = candidate_hmax;
+		selected->vts = candidate_vts;
+		selected->vblank_min = candidate_vblank;
+		selected->link_freq_index = i;
+		return 0;
 	}
 
-	return 0;
+	return -EINVAL;
+}
+
+static void imx568_apply_timing(struct imx568 *sensor,
+				const struct imx568_selected_timing *selected)
+{
+	sensor->link_profile = selected->profile;
+	sensor->rate_timing = selected->rate_timing;
+	sensor->hts = selected->hts;
+	sensor->vts = selected->vts;
+	sensor->vblank_min = selected->vblank_min;
+	sensor->link_freq_index = selected->link_freq_index;
+}
+
+static const struct imx568_mode *
+imx568_find_mode(const struct imx568 *sensor,
+		 const struct v4l2_mbus_framefmt *format,
+		 struct imx568_selected_timing *selected)
+{
+	struct imx568_selected_timing candidate;
+	const struct imx568_mode *best_mode;
+	unsigned int pass;
+	unsigned int i;
+
+	/* Prefer the requested media-bus code, then adjust across all modes. */
+	for (pass = 0; pass < 2; pass++) {
+		u64 best = 0;
+
+		best_mode = NULL;
+		for (i = 0; i < ARRAY_SIZE(imx568_modes); i++) {
+			u64 distance;
+
+			if (!pass && imx568_modes[i].format.code != format->code)
+				continue;
+			if (imx568_find_timing(sensor, &imx568_modes[i],
+					       &candidate))
+				continue;
+
+			distance =
+				(u64)abs_diff(imx568_modes[i].format.width,
+					      format->width) +
+				abs_diff(imx568_modes[i].format.height,
+					 format->height);
+			if (best_mode && distance >= best)
+				continue;
+
+			best = distance;
+			best_mode = &imx568_modes[i];
+			*selected = candidate;
+		}
+		if (best_mode)
+			return best_mode;
+	}
+
+	return NULL;
 }
 
 static int imx568_set_mode(struct v4l2_subdev *sd)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct imx568 *sensor = to_sensor(sd);
-	int ret;
+	int ret = 0;
 
-	ret = imx568_write_array(sd, sensor->mode->reg_list,
-				 sensor->mode->num_regs);
-	if (ret < 0) {
-		dev_err(&client->dev, "write sensor default regs error\n");
+	cci_multi_reg_write(sensor->regmap, imx568_common_regs,
+			    ARRAY_SIZE(imx568_common_regs), &ret);
+	if (ret) {
+		dev_err(&client->dev, "write sensor common regs error\n");
 		return ret;
 	}
+
+	cci_multi_reg_write(sensor->regmap, sensor->mode->reg_list,
+			    sensor->mode->num_regs, &ret);
+	if (ret) {
+		dev_err(&client->dev, "write sensor mode regs error\n");
+		return ret;
+	}
+
+	cci_multi_reg_write(sensor->regmap, sensor->link_profile->reg_list,
+			    sensor->link_profile->num_regs, &ret);
+	cci_write(sensor->regmap, IMX568_LANESEL,
+		  sensor->lanes == 4 ? 0x02 : 0x03, &ret);
+	cci_write(sensor->regmap, IMX568_HMAX, sensor->hts, &ret);
+	cci_write(sensor->regmap, IMX568_GMRWT, sensor->rate_timing->gmrwt, &ret);
+	cci_write(sensor->regmap, IMX568_GMTWT, sensor->rate_timing->gmtwt, &ret);
+	cci_write(sensor->regmap, IMX568_GSDLY, sensor->rate_timing->gsdly, &ret);
+	if (ret) {
+		dev_err(&client->dev, "write sensor link timing error\n");
+		return ret;
+	}
+
+	/* Per-mode settle delay (formerly the trailing WAIT in each table). */
+	msleep(1);
 
 	return 0;
 }
@@ -392,7 +1151,7 @@ static int imx568_set_mode(struct v4l2_subdev *sd)
 static int imx568_stream_on(struct v4l2_subdev *sd)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	//struct imx568 *sensor = to_sensor(sd);
+	struct imx568 *sensor = to_sensor(sd);
 	int ret;
 
 	ret = imx568_set_mode(sd);
@@ -402,21 +1161,40 @@ static int imx568_stream_on(struct v4l2_subdev *sd)
 	}
 
 	/* Apply customized values from user when stream starts. */
-	ret =  __v4l2_ctrl_handler_setup(sd->ctrl_handler);
+	ret = __v4l2_ctrl_handler_setup(sd->ctrl_handler);
 	if (ret)
 		return ret;
 
-	return imx568_write_array(sd, imx568_start_stream,ARRAY_SIZE(imx568_start_stream));
+	/* Leave standby, then start master mode. */
+	ret = cci_write(sensor->regmap, IMX568_SW_STANDBY, 0x00, NULL);
+	if (ret)
+		return ret;
+	msleep(250);
+	ret = cci_write(sensor->regmap, IMX568_XMSTA, 0x00, NULL);
+	if (ret)
+		return ret;
+	msleep(50);
+
+	return 0;
 }
 
 static int imx568_stream_off(struct v4l2_subdev *sd)
 {
-	return imx568_write_array(sd, imx568_stop_stream,ARRAY_SIZE(imx568_stop_stream));
+	struct imx568 *sensor = to_sensor(sd);
+	int ret = 0;
+
+	/* Enter standby, then stop master mode. */
+	cci_write(sensor->regmap, IMX568_SW_STANDBY, 0x01, &ret);
+	msleep(200);
+	cci_write(sensor->regmap, IMX568_XMSTA, 0x01, &ret);
+	msleep(50);
+
+	return ret;
 }
 
 static int imx568_power_on(struct device *dev)
 {
-	struct imx568 *sensor = dev_get_drvdata(dev);
+	struct imx568 *sensor = to_sensor(dev_get_drvdata(dev));
 	int ret;
 
 	dev_dbg(dev, "IMX568 power on\n");
@@ -458,7 +1236,7 @@ error_pwdn:
 
 static int imx568_power_off(struct device *dev)
 {
-	struct imx568 *sensor = dev_get_drvdata(dev);
+	struct imx568 *sensor = to_sensor(dev_get_drvdata(dev));
 	int ret;
 
 	dev_dbg(dev, "IMX568 power off\n");
@@ -479,10 +1257,11 @@ static int imx568_power_off(struct device *dev)
 static int imx568_sensor_get_register(struct v4l2_subdev *sd,
 				      struct v4l2_dbg_register *reg)
 {
+	struct imx568 *sensor = to_sensor(sd);
+	u64 val;
 	int ret;
-	u8 val;
 
-	ret = imx568_read(sd, reg->reg & 0xff, &val);
+	ret = cci_read(sensor->regmap, CCI_REG8(reg->reg), &val, NULL);
 	if (ret < 0)
 		return ret;
 
@@ -495,7 +1274,9 @@ static int imx568_sensor_get_register(struct v4l2_subdev *sd,
 static int imx568_sensor_set_register(struct v4l2_subdev *sd,
 				      const struct v4l2_dbg_register *reg)
 {
-	return imx568_write(sd, reg->reg & 0xff, reg->val & 0xff);
+	struct imx568 *sensor = to_sensor(sd);
+
+	return cci_write(sensor->regmap, CCI_REG8(reg->reg), reg->val, NULL);
 }
 #endif
 
@@ -507,24 +1288,7 @@ static const struct v4l2_subdev_core_ops imx568_subdev_core_ops = {
 	.g_register		= imx568_sensor_get_register,
 	.s_register		= imx568_sensor_set_register,
 #endif
-	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
-	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
 };
-
-static const struct v4l2_rect *
-__imx568_get_pad_crop(struct imx568 *imx568,
-		      struct v4l2_subdev_state *sd_state,
-		      unsigned int pad, enum v4l2_subdev_format_whence which)
-{
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_state_get_crop(sd_state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &imx568->mode->crop;
-	}
-
-	return NULL;
-}
 
 static int imx568_s_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -533,7 +1297,6 @@ static int imx568_s_stream(struct v4l2_subdev *sd, int enable)
 	int ret;
 
 	mutex_lock(&sensor->lock);
-
 	if (enable) {
 		ret = pm_runtime_resume_and_get(&client->dev);
 		if (ret < 0)
@@ -544,18 +1307,18 @@ static int imx568_s_stream(struct v4l2_subdev *sd, int enable)
 			dev_err(&client->dev, "stream start failed: %d\n", ret);
 			goto error_pm;
 		}
+		sensor->streaming = true;
 	} else {
 		ret = imx568_stream_off(sd);
-		if (ret < 0) {
+		if (ret < 0)
 			dev_err(&client->dev, "stream stop failed: %d\n", ret);
-			goto error_pm;
-		}
+		sensor->streaming = false;
 		pm_runtime_put(&client->dev);
 	}
 
 	mutex_unlock(&sensor->lock);
 
-	return 0;
+	return ret;
 
 error_pm:
 	pm_runtime_put(&client->dev);
@@ -569,72 +1332,66 @@ static const struct v4l2_subdev_video_ops imx568_subdev_video_ops = {
 	.s_stream =		imx568_s_stream,
 };
 
-/* This function returns the mbus code for the current settings of the
-   HFLIP and VFLIP controls. */
+/* Unique mbus codes advertised across the mode table (highest depth first). */
+static const u32 imx568_mbus_codes[] = {
+	MEDIA_BUS_FMT_SRGGB12_1X12,
+	MEDIA_BUS_FMT_SRGGB10_1X10,
+	MEDIA_BUS_FMT_SRGGB8_1X8,
+};
 
-static u32 imx568_get_mbus_code(struct v4l2_subdev *sd)
+static bool imx568_mode_supported(const struct imx568 *sensor,
+				  const struct imx568_mode *mode)
 {
-	struct imx568 *sensor = to_sensor(sd);
+	struct imx568_selected_timing selected;
 
-	return sensor->mode->format.code;
+	return !imx568_find_timing(sensor, mode, &selected);
 }
 
 static int imx568_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
-	if (code->index > 0)
-		return -EINVAL;
+	struct imx568 *sensor = to_sensor(sd);
+	unsigned int i, j, count = 0;
 
-	code->code = imx568_get_mbus_code(sd);
+	for (i = 0; i < ARRAY_SIZE(imx568_mbus_codes); i++) {
+		for (j = 0; j < ARRAY_SIZE(imx568_modes); j++) {
+			if (imx568_modes[j].format.code != imx568_mbus_codes[i] ||
+			    !imx568_mode_supported(sensor, &imx568_modes[j]))
+				continue;
+			if (count++ == code->index) {
+				code->code = imx568_mbus_codes[i];
+				return 0;
+			}
+			break;
+		}
+	}
 
-	return 0;
+	return -EINVAL;
 }
 
 static int imx568_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
-	const struct v4l2_mbus_framefmt *fmt;
-
-	if (fse->code != imx568_get_mbus_code(sd) ||
-	    fse->index >= ARRAY_SIZE(imx568_modes))
-		return -EINVAL;
-
-	fmt = &imx568_modes[fse->index].format;
-	fse->min_width = fmt->width;
-	fse->max_width = fmt->width;
-	fse->min_height = fmt->height;
-	fse->max_height = fmt->height;
-
-	return 0;
-}
-
-static int imx568_get_pad_fmt(struct v4l2_subdev *sd,
-			      struct v4l2_subdev_state *sd_state,
-			      struct v4l2_subdev_format *format)
-{
-	struct v4l2_mbus_framefmt *fmt = &format->format;
-	const struct v4l2_mbus_framefmt *sensor_format;
 	struct imx568 *sensor = to_sensor(sd);
+	unsigned int i, count = 0;
 
-	mutex_lock(&sensor->lock);
-	switch (format->which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		sensor_format = v4l2_subdev_state_get_format(sd_state,
-							     format->pad);
-		break;
-	default:
-		sensor_format = &sensor->mode->format;
-		break;
+	/* List the fse->index-th mode that matches the requested code. */
+	for (i = 0; i < ARRAY_SIZE(imx568_modes); i++) {
+		if (imx568_modes[i].format.code != fse->code ||
+		    !imx568_mode_supported(sensor, &imx568_modes[i]))
+			continue;
+		if (count++ != fse->index)
+			continue;
+		fse->min_width = imx568_modes[i].format.width;
+		fse->max_width = imx568_modes[i].format.width;
+		fse->min_height = imx568_modes[i].format.height;
+		fse->max_height = imx568_modes[i].format.height;
+		return 0;
 	}
 
-	*fmt = *sensor_format;
-	/* The code we pass back must reflect the current h/vflips. */
-	fmt->code = imx568_get_mbus_code(sd);
-	mutex_unlock(&sensor->lock);
-
-	return 0;
+	return -EINVAL;
 }
 
 static int imx568_set_pad_fmt(struct v4l2_subdev *sd,
@@ -642,48 +1399,82 @@ static int imx568_set_pad_fmt(struct v4l2_subdev *sd,
 			      struct v4l2_subdev_format *format)
 {
 	struct v4l2_mbus_framefmt *fmt = &format->format;
+	struct v4l2_mbus_framefmt *state_fmt;
+	struct v4l2_rect *state_crop;
 	struct imx568 *sensor = to_sensor(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct imx568_selected_timing selected = {};
 	const struct imx568_mode *mode;
 
-	mode = v4l2_find_nearest_size(imx568_modes, ARRAY_SIZE(imx568_modes),
-				      format.width, format.height,
-				      fmt->width, fmt->height);
-
-	/* Update the sensor mode and apply at it at streamon time. */
+	/* Adjust TRY and ACTIVE through the same endpoint-capability filter. */
 	mutex_lock(&sensor->lock);
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-		*v4l2_subdev_state_get_format(sd_state, format->pad) = mode->format;
-	} else {
+	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE && sensor->streaming) {
+		mutex_unlock(&sensor->lock);
+		return -EBUSY;
+	}
+
+	mode = imx568_find_mode(sensor, fmt, &selected);
+	if (!mode) {
+		dev_err(&client->dev,
+			"no link profile for requested %ux%u code 0x%04x\n",
+			fmt->width, fmt->height, fmt->code);
+		mutex_unlock(&sensor->lock);
+		return -EINVAL;
+	}
+
+	state_fmt = v4l2_subdev_state_get_format(sd_state, format->pad);
+	state_crop = v4l2_subdev_state_get_crop(sd_state, format->pad);
+	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
 		int exposure_max, exposure_def;
 		int hblank, vblank;
+		u32 fps_milli;
+		u32 line_length;
+		u64 rate;
 
+		/* Publish LINK_FREQ before the receiver's stream-on D-PHY setup. */
+		imx568_apply_timing(sensor, &selected);
 		sensor->mode = mode;
-		__v4l2_ctrl_modify_range(sensor->pixel_rate, mode->pixel_rate,
-					 mode->pixel_rate, 1, mode->pixel_rate);
+		rate = imx568_mode_pixel_rate(sensor, mode);
+		line_length = imx568_mode_line_length(sensor, mode);
+		fps_milli = DIV_ROUND_CLOSEST_ULL(IMX568_HMAX_CLK_HZ * 1000,
+						  sensor->hts * sensor->vts);
 
-		hblank = mode->hts - mode->format.width;
-		__v4l2_ctrl_modify_range(sensor->hblank, hblank,
-					 IMX568_HTS_MAX - mode->format.width, 1,
+		dev_dbg(&client->dev,
+			"mode %ux%u %u-bit %u.%03u fps: %u Mbps/lane, HMAX %u, VMAX %u\n",
+			mode->format.width, mode->format.height,
+			imx568_mode_bpp(mode), fps_milli / 1000, fps_milli % 1000,
+			sensor->link_profile->lane_rate / 1000000,
+			sensor->hts, sensor->vts);
+
+		__v4l2_ctrl_modify_range(sensor->pixel_rate, rate, rate, 1, rate);
+
+		/* HBLANK is reported in the PIXEL_RATE pixel domain. */
+		hblank = line_length - mode->format.width;
+		/* min=max pins the value; modify_range alone won't move it */
+		__v4l2_ctrl_modify_range(sensor->hblank, hblank, hblank, 1,
 					 hblank);
 
-		vblank = mode->vts - mode->format.height;
-		__v4l2_ctrl_modify_range(sensor->vblank, IMX568_VBLANK_MIN,
+		vblank = sensor->vts - mode->format.height;
+		__v4l2_ctrl_modify_range(sensor->vblank, sensor->vblank_min,
 					 IMX568_VTS_MAX - mode->format.height,
 					 1, vblank);
 		__v4l2_ctrl_s_ctrl(sensor->vblank, vblank);
 
-		exposure_max = mode->vts - 4;
-		exposure_def = min(exposure_max, IMX568_EXPOSURE_DEFAULT);
+		/* Same readout-reserve law the VBLANK handler enforces. */
+		exposure_max = vblank -
+			       imx568_exp_readout_overhead(sensor);
+		exposure_def = clamp_t(int, IMX568_EXPOSURE_DEFAULT,
+				       IMX568_EXPOSURE_MIN, exposure_max);
 		__v4l2_ctrl_modify_range(sensor->exposure,
 					 sensor->exposure->minimum,
 					 exposure_max, sensor->exposure->step,
 					 exposure_def);
 
-		__v4l2_ctrl_s_ctrl(sensor->link_freq, mode->link_freq_index);
+		__v4l2_ctrl_s_ctrl(sensor->link_freq, sensor->link_freq_index);
 	}
-	*fmt = mode->format;
-	/* The code we pass back must reflect the current h/vflips. */
-	fmt->code = imx568_get_mbus_code(sd);
+	*state_fmt = mode->format;
+	*state_crop = mode->crop;
+	*fmt = *state_fmt;
 	mutex_unlock(&sensor->lock);
 
 	return 0;
@@ -694,16 +1485,9 @@ static int imx568_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_selection *sel)
 {
 	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP: {
-		struct imx568 *sensor = to_sensor(sd);
-
-		mutex_lock(&sensor->lock);
-		sel->r = *__imx568_get_pad_crop(sensor, sd_state, sel->pad,
-						sel->which);
-		mutex_unlock(&sensor->lock);
-
+	case V4L2_SEL_TGT_CROP:
+		sel->r = *v4l2_subdev_state_get_crop(sd_state, sel->pad);
 		return 0;
-	}
 
 	case V4L2_SEL_TGT_NATIVE_SIZE:
 		sel->r.top = 0;
@@ -727,28 +1511,40 @@ static int imx568_get_selection(struct v4l2_subdev *sd,
 }
 
 static int imx568_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
-		struct v4l2_mbus_frame_desc *fd)
+				 struct v4l2_mbus_frame_desc *fd)
 {
 	struct v4l2_subdev_state *state;
+	int data_type;
 	u32 code;
 
 	if (pad != 0)
 		return -EINVAL;
 
 	state = v4l2_subdev_lock_and_get_active_state(sd);
-
-	//Get the format code of stream 0 of image_pad
 	code = v4l2_subdev_state_get_format(state, 0, 0)->code;
-
 	v4l2_subdev_unlock_state(state);
 
-	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
-	fd->num_entries = 1; //One one stream supported per image_pad
+	switch (code) {
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+		data_type = MIPI_CSI2_DT_RAW8;
+		break;
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+		data_type = MIPI_CSI2_DT_RAW10;
+		break;
+	case MEDIA_BUS_FMT_SRGGB12_1X12:
+	case MEDIA_BUS_FMT_SGBRG12_1X12:
+		data_type = MIPI_CSI2_DT_RAW12;
+		break;
+	default:
+		return -EINVAL;
+	}
 
-	fd->entry->pixelcode = code;
-	fd->entry->stream = 0; //Set stream id
-	fd->entry->bus.csi2.vc = 0; //Read from device tree
-	fd->entry->bus.csi2.dt = MIPI_CSI2_DT_RAW12;
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+	fd->num_entries = 1;
+	fd->entry[0].pixelcode = code;
+	fd->entry[0].stream = 0;
+	fd->entry[0].bus.csi2.vc = 0;
+	fd->entry[0].bus.csi2.dt = data_type;
 
 	return 0;
 }
@@ -758,7 +1554,7 @@ static const struct v4l2_subdev_pad_ops imx568_subdev_pad_ops = {
 	.enum_mbus_code		= imx568_enum_mbus_code,
 	.enum_frame_size	= imx568_enum_frame_size,
 	.set_fmt		= imx568_set_pad_fmt,
-	.get_fmt		= imx568_get_pad_fmt,
+	.get_fmt		= v4l2_subdev_get_fmt,
 	.get_selection		= imx568_get_selection,
 };
 
@@ -771,120 +1567,66 @@ static const struct v4l2_subdev_ops imx568_subdev_ops = {
 static int imx568_detect(struct v4l2_subdev *sd)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	u8 read;
+	struct imx568 *sensor = to_sensor(sd);
+	u64 val;
 	int ret;
 
-	ret = imx568_read(sd, IMX568_REG_CHIPID_H, &read);
+	ret = cci_read(sensor->regmap, IMX568_GAIN, &val, NULL);
 	if (ret < 0)
 		return ret;
-	dev_dbg(&client->dev,
-			 "read register 0x%04x : 0x%02x\n",
-			 IMX568_REG_CHIPID_H, read);
 
-	ret = imx568_read(sd, IMX568_REG_CHIPID_L, &read);
-	if (ret < 0)
-		return ret;
-	dev_dbg(&client->dev,
-			 "read register 0x%04x : 0x%02x\n",
-			 IMX568_REG_CHIPID_L, read);
+	dev_dbg(&client->dev, "read register 0x%04lx : 0x%04llx\n",
+		CCI_REG_ADDR(IMX568_GAIN), val);
 
 	return 0;
-}
-
-static int imx568_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
-{
-	struct v4l2_mbus_framefmt *format =
-				v4l2_subdev_state_get_format(fh->state, 0);
-	struct v4l2_rect *crop = v4l2_subdev_state_get_crop(fh->state, 0);
-
-	crop->left = IMX568_PIXEL_ARRAY_LEFT;
-	crop->top = IMX568_PIXEL_ARRAY_TOP;
-	crop->width = IMX568_PIXEL_ARRAY_WIDTH;
-	crop->height = IMX568_PIXEL_ARRAY_HEIGHT;
-
-	*format = IMX568_DEFAULT_FORMAT;
-
-	return 0;
-}
-
-static int imx568_set_format(struct v4l2_subdev *sd,
-                             struct v4l2_subdev_state *state,
-                             struct v4l2_subdev_format *fmt)
-{
-        struct v4l2_mbus_framefmt *format;
-
-        format = v4l2_subdev_state_get_format(state, fmt->pad);
-
-        format->width = fmt->format.width;
-        format->height = fmt->format.height;
-        format->code = MEDIA_BUS_FMT_SRGGB12_1X12;
-        format->field = V4L2_FIELD_NONE;
-        format->colorspace = V4L2_COLORSPACE_RAW;
-        format->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
-        format->quantization = V4L2_QUANTIZATION_DEFAULT;
-        format->xfer_func = V4L2_XFER_FUNC_NONE;
-
-        fmt->format = *format;
-        return 0;
 }
 
 static int imx568_init_state(struct v4l2_subdev *sd,
-                             struct v4l2_subdev_state *state)
+			     struct v4l2_subdev_state *state)
 {
-        struct v4l2_subdev_format format = {
-                .format = {
-                        .width = IMX568_PIXEL_ARRAY_WIDTH,
-                        .height = IMX568_PIXEL_ARRAY_HEIGHT,
-                },
-        };
+	struct v4l2_subdev_format format = {};
 
-        imx568_set_format(sd, state, &format);
+	format.format = IMX568_DEFAULT_FORMAT;
 
-        return 0;
+	return imx568_set_pad_fmt(sd, state, &format);
 }
 
 static const struct v4l2_subdev_internal_ops imx568_subdev_internal_ops = {
-	.open = imx568_open,
 	.init_state = imx568_init_state,
 };
 
 static int imx568_s_analogue_gain(struct v4l2_subdev *sd, u32 val)
 {
-	int ret;
+	struct imx568 *sensor = to_sensor(sd);
 
-	/* 10 bits of gain, 2 in the high register. */
-	ret = imx568_write(sd, IMX568_REG_GAIN_HI, (val >> 8) & 3);
-	if (ret)
-		return ret;
-
-	return imx568_write(sd, IMX568_REG_GAIN_LO, val & 0xff);
+	/* 10-bit analog gain. */
+	return cci_write(sensor->regmap, IMX568_GAIN, val & 0x3ff, NULL);
 }
 
 static int imx568_s_exposure(struct v4l2_subdev *sd, u32 val)
 {
-	int ret;
+	struct imx568 *sensor = to_sensor(sd);
+	/* SHS bounds track the CURRENT frame period: VMAX = height + VBLANK.
+	 * Min from GMRWT+GMTWT (gwtr) readout floor, max from VMAX. */
+	u32 vmax = sensor->mode->format.height + sensor->vblank->val;
+	u32 exp_min = IMX568_EXPOSURE_MIN;
+	int overhead = imx568_exp_readout_overhead(sensor);
+	u32 exp_max = sensor->vblank->val > overhead + IMX568_EXPOSURE_MIN ?
+		      sensor->vblank->val - overhead : IMX568_EXPOSURE_MIN;
 
-	if(val <= IMX568_EXPOSURE_MIN){
-		val = IMX568_EXPOSURE_MIN;
-	}else if(val >= IMX568_EXPOSURE_MAX){
-		val = IMX568_EXPOSURE_MAX;
-	}
+	if (val <= exp_min)
+		val = exp_min;
+	else if (val >= exp_max)
+		val = exp_max;
 
-	val = IMX568_EXPOSURE_MAX + IMX568_EXPOSURE_MIN - val;
+	/* Global shutter: SHS = (VMAX-1) + gwtr_floor - exposure_lines. */
+	val = (vmax - 1) + exp_min - val;
 
 	/*
 	 * Sensor has 20 bits, but the bottom 4 bits are fractions of a line
 	 * which we leave as zero (and don't receive in "val").
 	 */
-	ret = imx568_write(sd, IMX568_REG_EXP_HI, (val >> 16) & 0xf);
-	if (ret)
-		return ret;
-
-	ret = imx568_write(sd, IMX568_REG_EXP_MID, (val >> 8) & 0xff);
-	if (ret)
-		return ret;
-
-	return imx568_write(sd, IMX568_REG_EXP_LO, val & 0xff);
+	return cci_write(sensor->regmap, IMX568_SHS, val & 0xfffff, NULL);
 }
 
 static int imx568_s_ctrl(struct v4l2_ctrl *ctrl)
@@ -893,17 +1635,19 @@ static int imx568_s_ctrl(struct v4l2_ctrl *ctrl)
 					    struct imx568, ctrls);
 	struct v4l2_subdev *sd = &sensor->sd;
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	int pm_ret;
 	int ret = 0;
 
-
-	/* v4l2_ctrl_lock() locks our own mutex */
+	/* The control handler and sensor state share sensor->lock. */
 
 	if (ctrl->id == V4L2_CID_VBLANK) {
 		int exposure_max, exposure_def;
 
 		/* Update max exposure while meeting expected vblanking */
-		exposure_max = sensor->mode->format.height + ctrl->val - 4;
-		exposure_def = min(exposure_max, IMX568_EXPOSURE_DEFAULT);
+		exposure_max = ctrl->val -
+			       imx568_exp_readout_overhead(sensor);
+		exposure_def = clamp_t(int, IMX568_EXPOSURE_DEFAULT,
+				       IMX568_EXPOSURE_MIN, exposure_max);
 		__v4l2_ctrl_modify_range(sensor->exposure,
 					 sensor->exposure->minimum,
 					 exposure_max, sensor->exposure->step,
@@ -915,8 +1659,16 @@ static int imx568_s_ctrl(struct v4l2_ctrl *ctrl)
 	 * to H/W at this time. Instead the controls will be restored
 	 * at s_stream(1) time.
 	 */
-	if (pm_runtime_get_if_in_use(&client->dev) == 0)
+	pm_ret = pm_runtime_get_if_in_use(&client->dev);
+	if (!pm_ret)
 		return 0;
+	if (pm_ret < 0) {
+		if (pm_ret != -EINVAL)
+			return pm_ret;
+		/* CONFIG_PM=n is active; a disabled suspended device is not. */
+		if (pm_runtime_status_suspended(&client->dev))
+			return 0;
+	}
 
 	switch (ctrl->id) {
 	case V4L2_CID_AUTO_WHITE_BALANCE:
@@ -934,11 +1686,22 @@ static int imx568_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_EXPOSURE:
 		ret = imx568_s_exposure(sd, ctrl->val);
 		break;
-	case V4L2_CID_VBLANK:
+	case V4L2_CID_VBLANK: {
+		/* Frame rate = INCK2/(HMAX*VMAX); VMAX = height + VBLANK. */
+		u32 vmax = sensor->mode->format.height + ctrl->val;
 
+		ret = cci_write(sensor->regmap, IMX568_VMAX, vmax, NULL);
+		/*
+		 * SHS encodes VMAX - exposure, so a VMAX change invalidates the
+		 * programmed SHS; re-derive it or the sensor is left with
+		 * SHS > VMAX (garbled frames) when only VBLANK moved.
+		 */
+		if (!ret)
+			ret = imx568_s_exposure(sd, sensor->exposure->val);
 		break;
+	}
 	case V4L2_CID_HBLANK:
-
+		/* HMAX is fixed per mode; frame rate is set via VBLANK/VMAX. */
 		break;
 	case V4L2_CID_TEST_PATTERN:
 		break;
@@ -946,6 +1709,9 @@ static int imx568_s_ctrl(struct v4l2_ctrl *ctrl)
 	/* Read-only, but we adjust it based on mode. */
 	case V4L2_CID_PIXEL_RATE:
 		/* Read-only, but we adjust it based on mode. */
+		break;
+	case V4L2_CID_LINK_FREQ:
+		/* Read-only, selected from the mode's bandwidth requirement. */
 		break;
 
 	case V4L2_CID_HFLIP:
@@ -960,10 +1726,12 @@ static int imx568_s_ctrl(struct v4l2_ctrl *ctrl)
 		dev_info(&client->dev,
 			 "Control (id:0x%x, val:0x%x) not supported\n",
 			 ctrl->id, ctrl->val);
-		return -EINVAL;
+		ret = -EINVAL;
+		break;
 	}
 
-	pm_runtime_put(&client->dev);
+	if (pm_ret > 0)
+		pm_runtime_put(&client->dev);
 
 	return ret;
 }
@@ -986,11 +1754,22 @@ static int imx568_configure_regulators(struct device *dev,
 
 static int imx568_init_controls(struct imx568 *sensor, struct device *dev)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int hblank, exposure_max, exposure_def;
 	struct v4l2_fwnode_device_properties props;
+	struct v4l2_ctrl_config link_freq_cfg = {
+		.ops = &imx568_ctrl_ops,
+		.id = V4L2_CID_LINK_FREQ,
+		.type = V4L2_CTRL_TYPE_INTEGER_MENU,
+		.max = ARRAY_SIZE(imx568_link_freqs) - 1,
+		.def = sensor->link_freq_index,
+		.menu_skip_mask = GENMASK(ARRAY_SIZE(imx568_link_freqs) - 1, 0) &
+				  ~sensor->link_rate_mask,
+		.qmenu_int = imx568_link_freqs,
+	};
+	s64 pixel_rate = imx568_mode_pixel_rate(sensor, sensor->mode);
 
 	v4l2_ctrl_handler_init(&sensor->ctrls, 10);
+	sensor->ctrls.lock = &sensor->lock;
 
 	v4l2_ctrl_new_std(&sensor->ctrls, &imx568_ctrl_ops,
 			  V4L2_CID_AUTOGAIN, 0, 1, 1, 0);
@@ -1002,8 +1781,10 @@ static int imx568_init_controls(struct imx568 *sensor, struct device *dev)
 			       V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_MANUAL,
 			       0, V4L2_EXPOSURE_MANUAL);
 
-	exposure_max = IMX568_EXPOSURE_MAX;
-	exposure_def = min(exposure_max, IMX568_EXPOSURE_DEFAULT);
+	exposure_max = (sensor->vts - sensor->mode->format.height) -
+		       imx568_exp_readout_overhead(sensor);
+	exposure_def = clamp_t(int, IMX568_EXPOSURE_DEFAULT,
+			       IMX568_EXPOSURE_MIN, exposure_max);
 	sensor->exposure = v4l2_ctrl_new_std(&sensor->ctrls, &imx568_ctrl_ops,
 					     V4L2_CID_EXPOSURE,
 					     IMX568_EXPOSURE_MIN,
@@ -1014,25 +1795,26 @@ static int imx568_init_controls(struct imx568 *sensor, struct device *dev)
 	v4l2_ctrl_new_std(&sensor->ctrls, &imx568_ctrl_ops,
 			  V4L2_CID_ANALOGUE_GAIN, IMX568_GAIN_MIN, IMX568_GAIN_MAX, IMX568_GAIN_STEP, IMX568_GAIN_DEFAULT);
 
-	/* By default, PIXEL_RATE is read only, but it does change per mode */
+	/* Pixel-array rate derived from the selected CSI transport profile. */
 	sensor->pixel_rate = v4l2_ctrl_new_std(&sensor->ctrls, &imx568_ctrl_ops,
 					       V4L2_CID_PIXEL_RATE,
-					       sensor->mode->pixel_rate,
-					       sensor->mode->pixel_rate, 1,
-					       sensor->mode->pixel_rate);
+					       pixel_rate, pixel_rate, 1,
+					       pixel_rate);
 
-	hblank = sensor->mode->hts - sensor->mode->format.width;
+	/* HBLANK uses the same V4L2 pixel domain as PIXEL_RATE. */
+	hblank = imx568_mode_line_length(sensor, sensor->mode) -
+		 sensor->mode->format.width;
 	sensor->hblank = v4l2_ctrl_new_std(&sensor->ctrls, &imx568_ctrl_ops,
-					   V4L2_CID_HBLANK, hblank,
-					   IMX568_HTS_MAX -
-					   sensor->mode->format.width, 1,
+					   V4L2_CID_HBLANK, hblank, hblank, 1,
 					   hblank);
+	if (sensor->hblank)
+		sensor->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	sensor->vblank = v4l2_ctrl_new_std(&sensor->ctrls, &imx568_ctrl_ops,
-					   V4L2_CID_VBLANK, IMX568_VBLANK_MIN,
+					   V4L2_CID_VBLANK, sensor->vblank_min,
 					   IMX568_VTS_MAX -
 					   sensor->mode->format.height, 1,
-					   sensor->mode->vts -
+					   sensor->vts -
 					   sensor->mode->format.height);
 
 	v4l2_ctrl_new_std_menu_items(&sensor->ctrls, &imx568_ctrl_ops,
@@ -1050,11 +1832,8 @@ static int imx568_init_controls(struct imx568 *sensor, struct device *dev)
 	if (sensor->vflip)
 		sensor->vflip->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
 
-	sensor->link_freq =
-		v4l2_ctrl_new_int_menu(&sensor->ctrls, &imx568_ctrl_ops,
-				       V4L2_CID_LINK_FREQ,
-				       ARRAY_SIZE(imx568_link_freqs) - 1, 0,
-				       imx568_link_freqs);
+	sensor->link_freq = v4l2_ctrl_new_custom(&sensor->ctrls,
+						 &link_freq_cfg, NULL);
 	if (sensor->link_freq)
 		sensor->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
@@ -1072,31 +1851,77 @@ static int imx568_init_controls(struct imx568 *sensor, struct device *dev)
 	return 0;
 
 handler_free:
-	dev_err(&client->dev, "%s Controls initialization failed (%d)\n",
-		__func__, sensor->ctrls.error);
+	dev_err(dev, "%s Controls initialization failed (%d)\n", __func__,
+		sensor->ctrls.error);
 	v4l2_ctrl_handler_free(&sensor->ctrls);
 
 	return sensor->ctrls.error;
 }
 
-static int imx568_parse_dt(struct imx568 *sensor, struct device_node *np)
+static int imx568_parse_dt(struct imx568 *sensor, struct device *dev,
+			   struct device_node *np)
 {
 	struct v4l2_fwnode_endpoint bus_cfg = {
 		.bus_type = V4L2_MBUS_CSI2_DPHY,
 	};
 	struct device_node *ep __free(device_node) =
 		of_graph_get_endpoint_by_regs(np, 0, -1);
+	unsigned int i, j;
 	int ret;
 
 	if (!ep)
 		return -EINVAL;
 
-	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(ep), &bus_cfg);
+	ret = v4l2_fwnode_endpoint_alloc_parse(of_fwnode_handle(ep), &bus_cfg);
 	if (ret)
 		return ret;
 
-	sensor->clock_ncont = bus_cfg.bus.mipi_csi2.flags &
-			      V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK;
+	sensor->lanes = bus_cfg.bus.mipi_csi2.num_data_lanes;
+	if (!sensor->lanes) {
+		dev_warn(dev,
+			 "endpoint is missing data-lanes, assuming %u lanes\n",
+			 IMX568_DEFAULT_LANES);
+		sensor->lanes = IMX568_DEFAULT_LANES;
+	}
+	if (sensor->lanes != 2 && sensor->lanes != 4) {
+		dev_err(dev, "unsupported number of CSI-2 data lanes %u\n",
+			sensor->lanes);
+		v4l2_fwnode_endpoint_free(&bus_cfg);
+		return -EINVAL;
+	}
+	if (bus_cfg.bus.mipi_csi2.flags &
+	    V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK) {
+		dev_err(dev, "non-continuous CSI-2 clock is unsupported\n");
+		v4l2_fwnode_endpoint_free(&bus_cfg);
+		return -EINVAL;
+	}
+	if (!bus_cfg.nr_of_link_frequencies) {
+		dev_warn(dev,
+			 "endpoint is missing link-frequencies, allowing all supported rates\n");
+		v4l2_fwnode_endpoint_free(&bus_cfg);
+		return 0;
+	}
+
+	/* Keep the advertised rates the driver supports. */
+	for (i = 0; i < bus_cfg.nr_of_link_frequencies; i++) {
+		for (j = 0; j < ARRAY_SIZE(imx568_link_freqs); j++)
+			if (bus_cfg.link_frequencies[i] == imx568_link_freqs[j])
+				break;
+		if (j == ARRAY_SIZE(imx568_link_freqs)) {
+			dev_warn(dev,
+				 "ignoring unsupported endpoint link-frequency %llu\n",
+				 bus_cfg.link_frequencies[i]);
+			continue;
+		}
+		sensor->link_rate_mask |= BIT(j);
+	}
+	if (!sensor->link_rate_mask) {
+		dev_err(dev, "endpoint has no supported link-frequency\n");
+		v4l2_fwnode_endpoint_free(&bus_cfg);
+		return -EINVAL;
+	}
+
+	v4l2_fwnode_endpoint_free(&bus_cfg);
 
 	return 0;
 }
@@ -1105,9 +1930,10 @@ static int imx568_probe(struct i2c_client *client)
 {
 	struct device_node *np = client->dev.of_node;
 	struct device *dev = &client->dev;
+	struct imx568_selected_timing selected;
 	struct imx568 *sensor;
 	struct v4l2_subdev *sd;
-	u32 xclk_freq;
+	unsigned long xclk_freq;
 	int ret;
 
 	dev_dbg(dev, "enter SONY IMX568 camera driver probe\n");
@@ -1115,24 +1941,31 @@ static int imx568_probe(struct i2c_client *client)
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
 	if (!sensor)
 		return -ENOMEM;
+	sensor->lanes = IMX568_DEFAULT_LANES;
+
+	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
+	if (IS_ERR(sensor->regmap))
+		return dev_err_probe(dev, PTR_ERR(sensor->regmap),
+				     "failed to initialise CCI regmap\n");
 
 	if (IS_ENABLED(CONFIG_OF) && np) {
-		ret = imx568_parse_dt(sensor, np);
+		ret = imx568_parse_dt(sensor, dev, np);
 		if (ret) {
 			dev_err(dev, "DT parsing error: %d\n", ret);
 			return ret;
 		}
 	}
+	if (!sensor->link_rate_mask)
+		sensor->link_rate_mask = GENMASK(ARRAY_SIZE(imx568_link_freqs) - 1, 0);
 
-	sensor->xclk = devm_clk_get(dev, NULL);
-	if (IS_ERR(sensor->xclk)) {
-		dev_err(dev, "could not get xclk");
-		return PTR_ERR(sensor->xclk);
-	}
+	sensor->xclk = devm_v4l2_sensor_clk_get(dev, "inck");
+	if (IS_ERR(sensor->xclk))
+		return dev_err_probe(dev, PTR_ERR(sensor->xclk),
+				     "failed to get INCK\n");
 
 	xclk_freq = clk_get_rate(sensor->xclk);
-	if (xclk_freq != 25000000) {
-		dev_err(dev, "Unsupported clock frequency: %u\n", xclk_freq);
+	if (xclk_freq != IMX568_INCK_FREQ_HZ) {
+		dev_err(dev, "unsupported INCK frequency: %lu Hz\n", xclk_freq);
 		return -EINVAL;
 	}
 
@@ -1151,15 +1984,22 @@ static int imx568_probe(struct i2c_client *client)
 
 	mutex_init(&sensor->lock);
 
+	sd = &sensor->sd;
+	v4l2_i2c_subdev_init(sd, client, &imx568_subdev_ops);
+	sd->internal_ops = &imx568_subdev_internal_ops;
+
 	sensor->mode = IMX568_DEFAULT_MODE;
+	ret = imx568_find_timing(sensor, sensor->mode, &selected);
+	if (ret) {
+		dev_err(dev, "default mode has no valid link profile\n");
+		goto mutex_destroy;
+	}
+	imx568_apply_timing(sensor, &selected);
 
 	ret = imx568_init_controls(sensor, dev);
 	if (ret)
 		goto mutex_destroy;
 
-	sd = &sensor->sd;
-	v4l2_i2c_subdev_init(sd, client, &imx568_subdev_ops);
-	sd->internal_ops = &imx568_subdev_internal_ops;
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
 
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
@@ -1176,21 +2016,32 @@ static int imx568_probe(struct i2c_client *client)
 	if (ret < 0)
 		goto power_off;
 
-	v4l2_subdev_init_finalize(sd);
+	ret = v4l2_subdev_init_finalize(sd);
+	if (ret < 0) {
+		dev_err(dev, "subdev state initialization failed: %d\n", ret);
+		goto power_off;
+	}
+
+	/* The registered subdevice may be used immediately, so enable PM first. */
+	pm_runtime_set_active(dev);
+	pm_runtime_enable(dev);
 
 	ret = v4l2_async_register_subdev_sensor(sd);
 	if (ret < 0)
-		goto power_off;
+		goto pm_disable;
 
-	/* Enable runtime PM and turn off the device */
-	pm_runtime_set_active(dev);
-	pm_runtime_enable(dev);
 	pm_runtime_idle(dev);
 
 	dev_info(dev, "SONY IMX568 camera driver probed\n");
 
 	return 0;
 
+pm_disable:
+	pm_runtime_disable(dev);
+	v4l2_subdev_cleanup(sd);
+	imx568_power_off(dev);
+	pm_runtime_set_suspended(dev);
+	goto entity_cleanup;
 power_off:
 	imx568_power_off(dev);
 entity_cleanup:
@@ -1209,10 +2060,15 @@ static void imx568_remove(struct i2c_client *client)
 	struct imx568 *sensor = to_sensor(sd);
 
 	v4l2_async_unregister_subdev(&sensor->sd);
+	v4l2_subdev_cleanup(sd);
 	media_entity_cleanup(&sensor->sd.entity);
 	v4l2_ctrl_handler_free(&sensor->ctrls);
 	v4l2_device_unregister_subdev(sd);
 	pm_runtime_disable(&client->dev);
+	if (!pm_runtime_status_suspended(&client->dev)) {
+		imx568_power_off(&client->dev);
+		pm_runtime_set_suspended(&client->dev);
+	}
 	mutex_destroy(&sensor->lock);
 }
 

@@ -26,6 +26,7 @@
 #include "fw-interface.h"
 #include "isp-v4l2-common.h"
 #include "isp-v4l2-ctrl.h"
+#include "isp-sensor-subdev.h"
 
 static int isp_v4l2_ctrl_check_valid( struct v4l2_ctrl *ctrl )
 {
@@ -41,7 +42,7 @@ static int isp_v4l2_ctrl_s_ctrl_standard( struct v4l2_ctrl *ctrl )
 {
     int ret = 0;
 
-    LOG( LOG_INFO, "Control - id: 0x%x, value: %d, is_int: %d, min: %lld, max: %lld",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "Control - id: 0x%x, value: %d, is_int: %d, min: %lld, max: %lld",
          ctrl->id, ctrl->val, ctrl->is_int, ctrl->minimum, ctrl->maximum );
 
     if ( isp_v4l2_ctrl_check_valid( ctrl ) < 0 ) {
@@ -64,11 +65,11 @@ static int isp_v4l2_ctrl_g_ctrl_custom( struct v4l2_ctrl *ctrl )
     isp_v4l2_ctrl_t *isp_ctrl = cst_hdl_to_isp_ctrl( hdl );
     int ctx_id = isp_ctrl->ctx_id;
 
-    LOG( LOG_INFO, "Control - id:0x%x, val:%d, is_int:%d, min:%lld, max:%lld.\n",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "Control - id:0x%x, val:%d, is_int:%d, min:%lld, max:%lld.\n",
          ctrl->id, ctrl->val, ctrl->is_int, ctrl->minimum, ctrl->maximum );
 
     if ( isp_v4l2_ctrl_check_valid( ctrl ) < 0 ) {
-        LOG( LOG_ERR, "Invalid param: id:0x%x, val:0x%x, is_int:%d, min:0x%llx, max:0x%llx.\n",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid param: id:0x%x, val:0x%x, is_int:%d, min:0x%llx, max:0x%llx.\n",
              ctrl->id, ctrl->val, ctrl->is_int, ctrl->minimum, ctrl->maximum );
 
         return -EINVAL;
@@ -77,443 +78,443 @@ static int isp_v4l2_ctrl_g_ctrl_custom( struct v4l2_ctrl *ctrl )
     switch ( ctrl->id ) {
     case MODALIX_ISP_V4L2_CID_TEST_PATTERN:
         ret = fw_intf_get_test_pattern( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get test_pattern: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get test_pattern: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_TEST_PATTERN_TYPE:
         ret = fw_intf_get_test_pattern_type( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get test_pattern_type: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get test_pattern_type: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_SUPPORTED_PRESETS:
         ret = fw_intf_get_sensor_supported_presets( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor supported presets: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor supported presets: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_PRESET:
         ret = fw_intf_get_sensor_preset( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor preset: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor preset: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_WDR_MODE:
         ret = fw_intf_get_sensor_wdr_mode( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_wdr_mode: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_wdr_mode: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_STREAMING:
         ret = fw_intf_get_sensor_streaming( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_streaming: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_streaming: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_EXPOSURES:
         ret = fw_intf_get_sensor_exposures( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_exposures: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_exposures: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_FPS:
         ret = fw_intf_get_sensor_fps( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_fps: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_fps: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_WIDTH:
         ret = fw_intf_get_sensor_width( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_width: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_width: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_HEIGHT:
         ret = fw_intf_get_sensor_height( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_height: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_height: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_PRESET:
         ret = fw_intf_get_sensor_info_preset( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_info_preset: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_info_preset: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_WDR_MODE:
         ret = fw_intf_get_sensor_info_wdr_mode( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_info_wdr_mode: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_info_wdr_mode: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_FPS:
         ret = fw_intf_get_sensor_info_fps( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_info_fps: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_info_fps: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_WIDTH:
         ret = fw_intf_get_sensor_info_width( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_info_width: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_info_width: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_HEIGHT:
         ret = fw_intf_get_sensor_info_height( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_info_height: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_info_height: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_EXPOSURES:
         ret = fw_intf_get_sensor_info_exposures( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_info_exposures: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_info_exposures: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_CHANNELS:
         ret = fw_intf_get_sensor_info_channels( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_info_channels: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_info_channels: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_DATA_WIDTH:
         ret = fw_intf_get_sensor_info_data_width( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_info_data_width: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_info_data_width: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INTEGRATION_TIME_LIMIT:
         ret = fw_intf_get_sensor_integration_time_limit( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_integration_time_limit: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_integration_time_limit: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INTEGRATION_TIME_MIN:
         ret = fw_intf_get_sensor_integration_time_min( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get sensor_integration_time_min: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get sensor_integration_time_min: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_FREEZE_FIRMWARE:
         ret = fw_intf_get_system_freeze_firmware( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_freeze_firmware: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_freeze_firmware: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_EXPOSURE:
         ret = fw_intf_get_system_manual_exposure( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_exposure: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_exposure: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_INTEGRATION_TIME:
         ret = fw_intf_get_system_manual_integration_time( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_integration_time: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_integration_time: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_MAX_INTEGRATION_TIME:
         ret = fw_intf_get_system_manual_max_integration_time( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_max_integration_time: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_max_integration_time: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_SENSOR_ANALOG_GAIN:
         ret = fw_intf_get_system_manual_sensor_analog_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_sensor_analog_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_sensor_analog_gain: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_SENSOR_DIGITAL_GAIN:
         ret = fw_intf_get_system_manual_sensor_digital_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_sensor_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_sensor_digital_gain: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_ISP_DIGITAL_GAIN:
         ret = fw_intf_get_system_manual_isp_digital_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_isp_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_isp_digital_gain: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_DIRECTIONAL_SHARPENING:
         ret = fw_intf_get_system_manual_directional_sharpening( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_directional_sharpening: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_directional_sharpening: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_UN_DIRECTIONAL_SHARPENING:
         ret = fw_intf_get_system_manual_un_directional_sharpening( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_un_directional_sharpening: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_un_directional_sharpening: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_EXPOSURE_RATIO:
         ret = fw_intf_get_system_manual_exposure_ratio( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_exposure_ratio: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_exposure_ratio: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_AWB:
         ret = fw_intf_get_system_manual_awb( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_awb: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_awb: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_ANTIFLICKER_ENABLE:
         ret = fw_intf_get_system_antiflicker_enable( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_antiflicker_enable: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_antiflicker_enable: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_SATURATION:
         ret = fw_intf_get_system_manual_saturation( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_manual_saturation: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_manual_saturation: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_EXPOSURE_RATIO:
         ret = fw_intf_get_system_max_exposure_ratio( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_max_exposure_ratio: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_max_exposure_ratio: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_EXPOSURE:
         ret = fw_intf_get_system_exposure( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_exposure: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_exposure: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_INTEGRATION_TIME:
         ret = fw_intf_get_system_integration_time( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_integration_time: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_integration_time: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_INTEGRATION_TIME:
         ret = fw_intf_get_system_max_integration_time( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_max_integration_time: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_max_integration_time: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_EXPOSURE_RATIO:
         ret = fw_intf_get_system_exposure_ratio( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_exposure_ratio: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_exposure_ratio: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SENSOR_ANALOG_GAIN:
         ret = fw_intf_get_system_sensor_analog_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_sensor_analog_gain: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_sensor_analog_gain: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_SENSOR_ANALOG_GAIN:
         ret = fw_intf_get_system_max_sensor_analog_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_max_sensor_analog_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_max_sensor_analog_gain: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SENSOR_DIGITAL_GAIN:
         ret = fw_intf_get_system_sensor_digital_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_sensor_digital_gain: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_sensor_digital_gain: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_SENSOR_DIGITAL_GAIN:
         ret = fw_intf_get_system_max_sensor_digital_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_max_sensor_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_max_sensor_digital_gain: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_ISP_DIGITAL_GAIN:
         ret = fw_intf_get_system_isp_digital_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_isp_digital_gain: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_isp_digital_gain: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_ISP_DIGITAL_GAIN:
         ret = fw_intf_get_system_max_isp_digital_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_max_isp_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_max_isp_digital_gain: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_DIRECTIONAL_SHARPENING_TARGET:
         ret = fw_intf_get_system_directional_sharpening_target( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_directional_sharpening_target: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_directional_sharpening_target: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_UN_DIRECTIONAL_SHARPENING_TARGET:
         ret = fw_intf_get_system_un_directional_sharpening_target( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_un_directional_sharpening_target: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_un_directional_sharpening_target: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_AWB_RED_GAIN:
         ret = fw_intf_get_system_awb_red_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_awb_red_gain: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_awb_red_gain: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_AWB_BLUE_GAIN:
         ret = fw_intf_get_system_awb_blue_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_awb_blue_gain: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_awb_blue_gain: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_AWB_CCT:
         ret = fw_intf_get_system_awb_cct( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_awb_cct: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_awb_cct: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SATURATION_TARGET:
         ret = fw_intf_get_system_saturation_target( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_saturation_target: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_saturation_target: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_ANTI_FLICKER_FREQUENCY:
         ret = fw_intf_get_system_anti_flicker_frequency( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_anti_flicker_frequency: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_anti_flicker_frequency: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SHORT_INTEGRATION_TIME:
         ret = fw_intf_get_system_short_integration_time( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_short_integration_time: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_short_integration_time: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MIDDLE_INTEGRATION_TIME:
         ret = fw_intf_get_system_middle_integration_time( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get ystem_middle_integration_time: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get ystem_middle_integration_time: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MIDDLE2_INTEGRATION_TIME:
         ret = fw_intf_get_system_middle2_integration_time( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_middle_integration_time: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_middle_integration_time: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_LONG_INTEGRATION_TIME:
         ret = fw_intf_get_system_long_integration_time( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_long_integration_time: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_long_integration_time: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_INTEGRATION_TIME_PRECISION:
         ret = fw_intf_get_system_integration_time_precision( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_integration_time_precision: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_integration_time_precision: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_IRIDIX_DIGITAL_GAIN:
         ret = fw_intf_get_system_iridix_digital_gain( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_iridix_digital_gain: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_iridix_digital_gain: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SINTER_THRESHOLD_TARGET:
         ret = fw_intf_get_system_sinter_threshold_target( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_sinter_threshold_target: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_sinter_threshold_target: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MINIMUM_IRIDIX_STRENGTH:
         ret = fw_intf_get_system_minimum_iridix_strength( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_minimum_iridix_strength: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_minimum_iridix_strength: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAXIMUM_IRIDIX_STRENGTH:
         ret = fw_intf_get_system_maximum_iridix_strength( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_maximum_iridix_strength: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_maximum_iridix_strength: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_IRIDIX_STRENGTH_TARGET:
         ret = fw_intf_get_system_iridix_strength_target( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_iridix_strength_target: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_iridix_strength_target: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_BUFFER_DATA_TYPE_ID:
         ret = fw_intf_get_system_buffer_data_type( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_system_buffer_data_type: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_system_buffer_data_type: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_CMD_INTERFACE_MODE_ID:
         ret = fw_intf_get_system_cmd_interface_mode( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_system_cmd_interface_mode: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_system_cmd_interface_mode: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_LOGGER_LEVEL_ID:
         ret = fw_intf_get_system_logger_level( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_system_logger_level: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_system_logger_level: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_LOGGER_MASK_ID:
         ret = fw_intf_get_system_logger_mask( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_system_logger_mask: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_system_logger_mask: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_CONTEXT_STATE_ID:
         ret = fw_intf_get_system_context_state( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_system_context_state: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_system_context_state: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MCFE_USECASE_ID:
         ret = fw_intf_get_system_mcfe_usecase( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_system_context_state: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_system_context_state: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_IRIDIX:
         ret = fw_intf_get_isp_modules_manual_iridix( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get isp_modules_manual_iridix: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get isp_modules_manual_iridix: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_SINTER:
         ret = fw_intf_get_isp_modules_manual_sinter( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get isp_modules_manual_sinter: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get isp_modules_manual_sinter: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_FRAME_STITCH:
         ret = fw_intf_get_isp_modules_manual_frame_stitch( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get isp_modules_manual_frame_stitch: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get isp_modules_manual_frame_stitch: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_RAW_FRONTEND:
         ret = fw_intf_get_isp_modules_manual_raw_frontend( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get isp_modules_manual_raw_frontend: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get isp_modules_manual_raw_frontend: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_BLACK_LEVEL:
         ret = fw_intf_get_isp_modules_manual_black_level( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get isp_modules_manual_black_level: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get isp_modules_manual_black_level: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_SHADING:
         ret = fw_intf_get_isp_modules_manual_shading( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get isp_modules_manual_shading: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get isp_modules_manual_shading: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_FORCE_BIST_MISMATCH:
         ret = fw_intf_get_isp_modules_force_bist_mismatch( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_isp_modules_force_bist_mismatch: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_isp_modules_force_bist_mismatch: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_DEMOSAIC:
         ret = fw_intf_get_isp_modules_manual_demosaic( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get isp_modules_manual_demosaic: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get isp_modules_manual_demosaic: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_M2M_PROCESS_REQUEST:
         ret = fw_intf_get_system_m2m_process_request( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_m2m_process_request: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_m2m_process_request: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_V4L2_INTERFACE_MODE:
         ret = fw_intf_get_system_v4l2_interface_mode( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get system_v4l2_interface_mode: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get system_v4l2_interface_mode: %d.\n", ctrl->val );
         break;
 #if ( ISP_RTL_VERSION_R == 2 )
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_CNR:
         ret = fw_intf_get_isp_modules_manual_cnr( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get isp_modules_manual_cnr: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get isp_modules_manual_cnr: %d.\n", ctrl->val );
         break;
 #endif
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_XOFFSET_ID:
         ret = fw_intf_get_image_crop_xoffset( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get image_crop_xoffset: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get image_crop_xoffset: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_YOFFSET_ID:
         ret = fw_intf_get_image_crop_yoffset( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get image_crop_yoffset: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get image_crop_yoffset: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_FORMAT_ID:
         ret = fw_intf_get_output_format_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get image_output_format_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get image_output_format_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_FORMAT_MANUAL_CFG_APPLY_ID:
         ret = fw_intf_get_output_format_manual_cfg_apply_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_output_format_manual_cfg_apply_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_output_format_manual_cfg_apply_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_AXI1_FORMAT_ID:
         ret = fw_intf_get_output_axi1_format_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_output_axi1_format_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_output_axi1_format_id: %d.\n", ctrl->val );
         break;
 #if ( ISP_RTL_VERSION_R == 2 )
     case MODALIX_ISP_V4L2_CID_IMAGE_RAW_SCALER_ENABLE_ID:
         ret = fw_intf_get_raw_scaler_enable_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_raw_scaler_enable_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_raw_scaler_enable_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RAW_SCALER_WIDTH_ID:
         ret = fw_intf_get_raw_scaler_width_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_raw_scaler_width_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_raw_scaler_width_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RAW_SCALER_HEIGHT_ID:
         ret = fw_intf_get_raw_scaler_height_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_raw_scaler_height_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_raw_scaler_height_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RGB_SCALER_ENABLE_ID:
         ret = fw_intf_get_rgb_scaler_enable_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_rgb_scaler_enable_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_rgb_scaler_enable_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RGB_SCALER_WIDTH_ID:
         ret = fw_intf_get_rgb_scaler_width_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_rgb_scaler_width_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_rgb_scaler_width_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RGB_SCALER_HEIGHT_ID:
         ret = fw_intf_get_rgb_scaler_height_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_rgb_scaler_height_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_rgb_scaler_height_id: %d.\n", ctrl->val );
         break;
 #endif //ISP_RTL_VERSION_R == 2
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_AXI2_FORMAT_ID:
         ret = fw_intf_get_output_axi2_format_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_output_axi2_format_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_output_axi2_format_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_AXI3_FORMAT_ID:
         ret = fw_intf_get_output_axi3_format_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_output_axi3_format_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_output_axi3_format_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_HEIGHT_ID:
         ret = fw_intf_get_image_crop_height( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get image_crop_height: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get image_crop_height: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_WIDTH_ID:
         ret = fw_intf_get_image_crop_width( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get image_crop_width: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get image_crop_width: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_ENABLE_ID:
         ret = fw_intf_get_image_crop_enable( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get image_crop_enable: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get image_crop_enable: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_STATUS_INFO_EXPOSURE_LOG2:
         ret = fw_intf_get_status_info_exposure_log2( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get status_info_exposure_log2: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get status_info_exposure_log2: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_STATUS_INFO_GAIN_LOG2:
         ret = fw_intf_get_status_info_gain_log2( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get status_info_gain_log2: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get status_info_gain_log2: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_STATUS_INFO_GAIN_ONES:
         ret = fw_intf_get_status_info_gain_ones( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get status_info_gain_ones: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get status_info_gain_ones: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_STATUS_INFO_EXPOSURE_RESIDUAL_LOG2_ID:
         ret = fw_intf_get_status_info_exposure_residual_log2_id( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_status_info_exposure_residual_log2_id: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_status_info_exposure_residual_log2_id: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_STATUS_INFO_IRIDIX_CONTRAST:
         ret = fw_intf_get_status_info_iridix_contrast( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_status_info_iridix_contrast: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_status_info_iridix_contrast: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_STATUS_INFO_AE_HIST_MEAN:
         ret = fw_intf_get_status_info_ae_hist_mean( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get fw_intf_get_status_info_ae_hist_mean: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get fw_intf_get_status_info_ae_hist_mean: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_STATUS_INFO_AWB_MIX_LIGHT_CONTRAST:
         ret = fw_intf_get_status_info_awb_mix_light_contrast( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "get status_info_awb_mix_light_contrast: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "get status_info_awb_mix_light_contrast: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_INFO_FW_REVISION:
         ret = fw_intf_get_info_fw_revision( ctx_id, ctrl->p_new.p_u32 );
-        LOG( LOG_INFO, "fw_intf_get_info_fw_revision: 0x%x, rc: %d.\n", ctrl->p_new.p_u32[0], ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_info_fw_revision: 0x%x, rc: %d.\n", ctrl->p_new.p_u32[0], ret );
         break;
     case MODALIX_ISP_V4L2_CID_CONTEXT_NUMBER:
         ret = fw_intf_get_context_number( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_context_number: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_context_number: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_ACTIVE_CONTEXT:
         ret = fw_intf_get_active_context( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_active_context: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_active_context: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_REGISTERS_VALUE_ID:
         ret = fw_intf_get_register_value( ctx_id, ctrl->p_new.p_u32 );
-        LOG( LOG_INFO, "fw_intf_get_register_value: %d, rc: %d.\n", ctrl->p_new.p_u32[0], ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_register_value: %d, rc: %d.\n", ctrl->p_new.p_u32[0], ret );
         break;
     case MODALIX_ISP_V4L2_CID_REGISTERS_SOURCE_ID:
         ret = fw_intf_get_register_source( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_register_source: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_register_source: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_REGISTERS_SIZE_ID:
         ret = fw_intf_get_register_size( ctx_id, &ctrl->val );
-        LOG( LOG_INFO, "fw_intf_get_register_size: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_register_size: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_REGISTERS_ADDRESS_ID:
         ret = fw_intf_get_register_address( ctx_id, ctrl->p_new.p_u32 );
-        LOG( LOG_INFO, "fw_intf_get_register_address: 0x%x, rc: %d.\n", ctrl->p_new.p_u32[0], ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_get_register_address: 0x%x, rc: %d.\n", ctrl->p_new.p_u32[0], ret );
         break;
 
     default:
-        LOG( LOG_INFO, "Unknown control ID: %d.\n", ctrl->id );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "Unknown control ID: %d.\n", ctrl->id );
         break;
     }
 
@@ -529,11 +530,11 @@ static int isp_v4l2_ctrl_s_ctrl_custom( struct v4l2_ctrl *ctrl )
     isp_v4l2_ctrl_t *isp_ctrl = cst_hdl_to_isp_ctrl( hdl );
     int ctx_id = isp_ctrl->ctx_id;
 
-    LOG( LOG_INFO, "Control - id:0x%x, val:%d, is_int:%d, min:%lld, max:%lld.\n",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "Control - id:0x%x, val:%d, is_int:%d, min:%lld, max:%lld.\n",
          ctrl->id, ctrl->val, ctrl->is_int, ctrl->minimum, ctrl->maximum );
 
     if ( isp_v4l2_ctrl_check_valid( ctrl ) < 0 ) {
-        LOG( LOG_ERR, "Invalid param: id:0x%x, val:0x%x, is_int:%d, min:0x%llx, max:0x%llx.\n",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid param: id:0x%x, val:0x%x, is_int:%d, min:0x%llx, max:0x%llx.\n",
              ctrl->id, ctrl->val, ctrl->is_int, ctrl->minimum, ctrl->maximum );
 
         return -EINVAL;
@@ -541,307 +542,311 @@ static int isp_v4l2_ctrl_s_ctrl_custom( struct v4l2_ctrl *ctrl )
 
     switch ( ctrl->id ) {
     case MODALIX_ISP_V4L2_CID_TEST_PATTERN:
-        LOG( LOG_INFO, "new test_pattern: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new test_pattern: %d.\n", ctrl->val );
         ret = fw_intf_set_test_pattern( ctx_id, ctrl->val );
         break;
+    case MODALIX_ISP_V4L2_CID_SENSOR_SOURCE_BUS:
+        isp_sensor_subdev_set_source( ctx_id, ctrl->val );
+        ret = 0;
+        break;
     case MODALIX_ISP_V4L2_CID_TEST_PATTERN_TYPE:
-        LOG( LOG_INFO, "new test_pattern_type: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new test_pattern_type: %d.\n", ctrl->val );
         ret = fw_intf_set_test_pattern_type( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_PRESET:
-        LOG( LOG_INFO, "new sensor preset: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new sensor preset: %d.\n", ctrl->val );
         ret = fw_intf_set_sensor_preset( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SENSOR_INFO_PRESET:
-        LOG( LOG_INFO, "new sensor info preset: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new sensor info preset: %d.\n", ctrl->val );
         ret = fw_intf_set_sensor_info_preset( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_FREEZE_FIRMWARE:
-        LOG( LOG_INFO, "new system_freeze_firmware: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_freeze_firmware: %d.\n", ctrl->val );
         ret = fw_intf_set_system_freeze_firmware( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_EXPOSURE:
-        LOG( LOG_INFO, "new system_manual_exposure: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_exposure: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_exposure( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_INTEGRATION_TIME:
-        LOG( LOG_INFO, "new system_manual_integration_time: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_integration_time: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_integration_time( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_MAX_INTEGRATION_TIME:
-        LOG( LOG_INFO, "new system_manual_max_integration_time: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_max_integration_time: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_max_integration_time( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_SENSOR_ANALOG_GAIN:
-        LOG( LOG_INFO, "new system_manual_sensor_analog_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_sensor_analog_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_sensor_analog_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_SENSOR_DIGITAL_GAIN:
-        LOG( LOG_INFO, "new system_manual_sensor_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_sensor_digital_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_sensor_digital_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_ISP_DIGITAL_GAIN:
-        LOG( LOG_INFO, "new system_manual_isp_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_isp_digital_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_isp_digital_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_DIRECTIONAL_SHARPENING:
-        LOG( LOG_INFO, "new system_manual_directional_sharpening: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_directional_sharpening: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_directional_sharpening( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_UN_DIRECTIONAL_SHARPENING:
-        LOG( LOG_INFO, "new system_manual_un_directional_sharpening: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_un_directional_sharpening: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_un_directional_sharpening( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_EXPOSURE_RATIO:
-        LOG( LOG_INFO, "new system_manual_exposure_ratio: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_exposure_ratio: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_exposure_ratio( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_AWB:
-        LOG( LOG_INFO, "new system_manual_awb: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_awb: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_awb( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_ANTIFLICKER_ENABLE:
-        LOG( LOG_INFO, "new system_antiflicker_enable: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_antiflicker_enable: %d.\n", ctrl->val );
         ret = fw_intf_set_system_antiflicker_enable( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MANUAL_SATURATION:
-        LOG( LOG_INFO, "new system_manual_saturation: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_manual_saturation: %d.\n", ctrl->val );
         ret = fw_intf_set_system_manual_saturation( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_EXPOSURE_RATIO:
-        LOG( LOG_INFO, "new system_max_exposure_ratio: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_max_exposure_ratio: %d.\n", ctrl->val );
         ret = fw_intf_set_system_max_exposure_ratio( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_EXPOSURE:
-        LOG( LOG_INFO, "new system_exposure: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_exposure: %d.\n", ctrl->val );
         ret = fw_intf_set_system_exposure( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_INTEGRATION_TIME:
-        LOG( LOG_INFO, "new system_integration_time: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_integration_time: %d.\n", ctrl->val );
         ret = fw_intf_set_system_integration_time( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_EXPOSURE_RATIO:
-        LOG( LOG_INFO, "new system_exposure_ratio: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_exposure_ratio: %d.\n", ctrl->val );
         ret = fw_intf_set_system_exposure_ratio( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_INTEGRATION_TIME:
-        LOG( LOG_INFO, "new system_max_integration_time: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_max_integration_time: %d.\n", ctrl->val );
         ret = fw_intf_set_system_max_integration_time( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SENSOR_ANALOG_GAIN:
-        LOG( LOG_INFO, "new system_sensor_analog_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_sensor_analog_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_sensor_analog_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_SENSOR_ANALOG_GAIN:
-        LOG( LOG_INFO, "new system_max_sensor_analog_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_max_sensor_analog_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_max_sensor_analog_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SENSOR_DIGITAL_GAIN:
-        LOG( LOG_INFO, "new system_sensor_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_sensor_digital_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_sensor_digital_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_SENSOR_DIGITAL_GAIN:
-        LOG( LOG_INFO, "new system_max_sensor_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_max_sensor_digital_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_max_sensor_digital_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_ISP_DIGITAL_GAIN:
-        LOG( LOG_INFO, "new system_isp_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_isp_digital_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_isp_digital_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAX_ISP_DIGITAL_GAIN:
-        LOG( LOG_INFO, "new system_max_isp_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_max_isp_digital_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_max_isp_digital_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_DIRECTIONAL_SHARPENING_TARGET:
-        LOG( LOG_INFO, "new system_directional_sharpening_target: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_directional_sharpening_target: %d.\n", ctrl->val );
         ret = fw_intf_set_system_directional_sharpening_target( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_UN_DIRECTIONAL_SHARPENING_TARGET:
-        LOG( LOG_INFO, "new system_un_directional_sharpening_target: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_un_directional_sharpening_target: %d.\n", ctrl->val );
         ret = fw_intf_set_system_un_directional_sharpening_target( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_AWB_RED_GAIN:
-        LOG( LOG_INFO, "new system_awb_red_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_awb_red_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_awb_red_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_AWB_BLUE_GAIN:
-        LOG( LOG_INFO, "new system_awb_blue_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_awb_blue_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_awb_blue_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_AWB_CCT:
-        LOG( LOG_INFO, "new system_awb_cct: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_awb_cct: %d.\n", ctrl->val );
         ret = fw_intf_set_system_awb_cct( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SATURATION_TARGET:
-        LOG( LOG_INFO, "new system_saturation_target: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_saturation_target: %d.\n", ctrl->val );
         ret = fw_intf_set_system_saturation_target( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_ANTI_FLICKER_FREQUENCY:
-        LOG( LOG_INFO, "new system_anti_flicker_frequency: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_anti_flicker_frequency: %d.\n", ctrl->val );
         ret = fw_intf_set_system_anti_flicker_frequency( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_IRIDIX_DIGITAL_GAIN:
-        LOG( LOG_INFO, "new system_iridix_digital_gain: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_iridix_digital_gain: %d.\n", ctrl->val );
         ret = fw_intf_set_system_iridix_digital_gain( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_SINTER_THRESHOLD_TARGET:
-        LOG( LOG_INFO, "new system_sinter_threshold_target: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_sinter_threshold_target: %d.\n", ctrl->val );
         ret = fw_intf_set_system_sinter_threshold_target( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MINIMUM_IRIDIX_STRENGTH:
-        LOG( LOG_INFO, "new system_minimum_iridix_strength: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_minimum_iridix_strength: %d.\n", ctrl->val );
         ret = fw_intf_set_system_minimum_iridix_strength( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_MAXIMUM_IRIDIX_STRENGTH:
-        LOG( LOG_INFO, "new system_maximum_iridix_strength: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_maximum_iridix_strength: %d.\n", ctrl->val );
         ret = fw_intf_set_system_maximum_iridix_strength( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_IRIDIX_STRENGTH_TARGET:
-        LOG( LOG_INFO, "new system_iridix_strength_target: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_iridix_strength_target: %d.\n", ctrl->val );
         ret = fw_intf_set_system_iridix_strength_target( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_LOGGER_LEVEL_ID:
         ret = fw_intf_set_system_logger_level( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "fw_intf_set_system_logger_level: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_set_system_logger_level: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_LOGGER_MASK_ID:
         ret = fw_intf_set_system_logger_mask( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "fw_intf_set_system_logger_mask: %d, rc: %d.\n", ctrl->val, ret );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "fw_intf_set_system_logger_mask: %d, rc: %d.\n", ctrl->val, ret );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_IRIDIX:
-        LOG( LOG_INFO, "new isp_modules_manual_iridix: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new isp_modules_manual_iridix: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_manual_iridix( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_SINTER:
-        LOG( LOG_INFO, "new isp_modules_manual_sinter: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new isp_modules_manual_sinter: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_manual_sinter( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_FRAME_STITCH:
-        LOG( LOG_INFO, "new isp_modules_manual_frame_stitch: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new isp_modules_manual_frame_stitch: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_manual_frame_stitch( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_RAW_FRONTEND:
-        LOG( LOG_INFO, "new isp_modules_manual_raw_frontend: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new isp_modules_manual_raw_frontend: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_manual_raw_frontend( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_BLACK_LEVEL:
-        LOG( LOG_INFO, "new isp_modules_manual_black_level: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new isp_modules_manual_black_level: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_manual_black_level( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_SHADING:
-        LOG( LOG_INFO, "new isp_modules_manual_shading: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new isp_modules_manual_shading: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_manual_shading( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_FORCE_BIST_MISMATCH:
-        LOG( LOG_INFO, "new fw_intf_set_isp_modules_force_bist_mismatch: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new fw_intf_set_isp_modules_force_bist_mismatch: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_force_bist_mismatch( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_DEMOSAIC:
-        LOG( LOG_INFO, "new isp_modules_manual_demosaic: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new isp_modules_manual_demosaic: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_manual_demosaic( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_M2M_PROCESS_REQUEST:
-        LOG( LOG_INFO, "new system_m2m_process_request: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_m2m_process_request: %d.\n", ctrl->val );
         ret = fw_intf_set_system_m2m_process_request( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_SYSTEM_V4L2_INTERFACE_MODE:
-        LOG( LOG_INFO, "new system_v4l2_interface_mode: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new system_v4l2_interface_mode: %d.\n", ctrl->val );
         ret = fw_intf_set_system_v4l2_interface_mode( ctx_id, ctrl->val );
         break;
 #if ( ISP_RTL_VERSION_R == 2 )
     case MODALIX_ISP_V4L2_CID_ISP_MODULES_MANUAL_CNR:
-        LOG( LOG_INFO, "new isp_modules_manual_cnr: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new isp_modules_manual_cnr: %d.\n", ctrl->val );
         ret = fw_intf_set_isp_modules_manual_cnr( ctx_id, ctrl->val );
         break;
 #endif
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_XOFFSET_ID:
-        LOG( LOG_INFO, "new image_crop_xoffset: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new image_crop_xoffset: %d.\n", ctrl->val );
         ret = fw_intf_set_image_crop_xoffset( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_YOFFSET_ID:
-        LOG( LOG_INFO, "new image_crop_yoffset: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new image_crop_yoffset: %d.\n", ctrl->val );
         ret = fw_intf_set_image_crop_yoffset( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_FORMAT_ID:
         ret = fw_intf_set_output_format_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set image_output_format_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set image_output_format_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_FORMAT_MANUAL_CFG_APPLY_ID:
         ret = fw_intf_set_output_format_manual_cfg_apply_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_set_output_format_manual_cfg_apply_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_set_output_format_manual_cfg_apply_id: %d.\n", ctrl->val );
         break;
 #if ( ISP_RTL_VERSION_R == 2 )
     case MODALIX_ISP_V4L2_CID_IMAGE_RAW_SCALER_ENABLE_ID:
         ret = fw_intf_set_raw_scaler_enable_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_set_raw_scaler_enable_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_set_raw_scaler_enable_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RAW_SCALER_WIDTH_ID:
         ret = fw_intf_set_raw_scaler_width_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_set_raw_scaler_width_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_set_raw_scaler_width_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RAW_SCALER_HEIGHT_ID:
         ret = fw_intf_set_raw_scaler_height_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_set_raw_scaler_height_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_set_raw_scaler_height_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RGB_SCALER_ENABLE_ID:
         ret = fw_intf_set_rgb_scaler_enable_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_set_rgb_scaler_enable_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_set_rgb_scaler_enable_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RGB_SCALER_WIDTH_ID:
         ret = fw_intf_set_rgb_scaler_width_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_set_rgb_scaler_width_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_set_rgb_scaler_width_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_RGB_SCALER_HEIGHT_ID:
         ret = fw_intf_set_rgb_scaler_height_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_set_rgb_scaler_height_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_set_rgb_scaler_height_id: %d.\n", ctrl->val );
         break;
 #endif
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_AXI1_FORMAT_ID:
         ret = fw_intf_set_output_axi1_format_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_get_output_axi1_format_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_get_output_axi1_format_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_AXI2_FORMAT_ID:
         ret = fw_intf_set_output_axi2_format_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_get_output_axi2_format_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_get_output_axi2_format_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_OUTPUT_AXI3_FORMAT_ID:
         ret = fw_intf_set_output_axi3_format_id( ctx_id, ctrl->val );
-        LOG( LOG_INFO, "set fw_intf_get_output_axi3_format_id: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "set fw_intf_get_output_axi3_format_id: %d.\n", ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_HEIGHT_ID:
-        LOG( LOG_INFO, "new image_crop_height: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new image_crop_height: %d.\n", ctrl->val );
         ret = fw_intf_set_image_crop_height( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_WIDTH_ID:
-        LOG( LOG_INFO, "new image_crop_width: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new image_crop_width: %d.\n", ctrl->val );
         ret = fw_intf_set_image_crop_width( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_IMAGE_CROP_ENABLE_ID:
-        LOG( LOG_INFO, "new image_crop_enable: %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new image_crop_enable: %d.\n", ctrl->val );
         ret = fw_intf_set_image_crop_enable( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_REGISTERS_VALUE_ID:
-        LOG( LOG_INFO, "new register value : %d.\n", ctrl->p_new.p_u32[0] );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new register value : %d.\n", ctrl->p_new.p_u32[0] );
         ret = fw_intf_set_register_value( ctx_id, ctrl->p_new.p_u32[0] );
         break;
     case MODALIX_ISP_V4L2_CID_REGISTERS_SOURCE_ID:
-        LOG( LOG_INFO, "new register source : %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new register source : %d.\n", ctrl->val );
         ret = fw_intf_set_register_source( ctx_id, ctrl->val );
         break;
     case MODALIX_ISP_V4L2_CID_REGISTERS_SIZE_ID:
-        LOG( LOG_INFO, "new register size : %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new register size : %d.\n", ctrl->val );
         ret = fw_intf_set_register_size( ctx_id, ( 1 << ( ctrl->val + 3 ) ) );
         break;
     case MODALIX_ISP_V4L2_CID_REGISTERS_ADDRESS_ID:
-        LOG( LOG_INFO, "new register address : 0x%x.\n", ctrl->p_new.p_u32[0] );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new register address : 0x%x.\n", ctrl->p_new.p_u32[0] );
         ret = fw_intf_set_register_address( ctx_id, ctrl->p_new.p_u32[0] );
         break;
     case MODALIX_ISP_V4L2_CID_ACTIVE_CONTEXT:
-        LOG( LOG_INFO, "new active context : %d.\n", ctrl->val );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "new active context : %d.\n", ctrl->val );
         ret = fw_intf_set_active_context( ctx_id, ctrl->val );
         break;
     default:
-        LOG( LOG_INFO, "Unknown control ID: %d.\n", ctrl->id );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "Unknown control ID: %d.\n", ctrl->id );
     }
     return ret;
 }
@@ -849,6 +854,18 @@ static int isp_v4l2_ctrl_s_ctrl_custom( struct v4l2_ctrl *ctrl )
 static const struct v4l2_ctrl_ops isp_v4l2_ctrl_ops_custom = {
     .s_ctrl = isp_v4l2_ctrl_s_ctrl_custom,
     .g_volatile_ctrl = isp_v4l2_ctrl_g_ctrl_custom,
+};
+
+/* i2c bus of the sensor feeding this m2m context; -1 = unset. */
+static const struct v4l2_ctrl_config isp_v4l2_ctrl_sensor_source_bus = {
+    .ops = &isp_v4l2_ctrl_ops_custom,
+    .id = MODALIX_ISP_V4L2_CID_SENSOR_SOURCE_BUS,
+    .name = "Sensor Source I2C Bus",
+    .type = V4L2_CTRL_TYPE_INTEGER,
+    .min = -1,
+    .max = 255,
+    .step = 1,
+    .def = -1,
 };
 
 static const struct v4l2_ctrl_config isp_v4l2_ctrl_test_pattern = {
@@ -2336,7 +2353,7 @@ int isp_v4l2_ctrl_init( uint32_t ctx_id, isp_v4l2_ctrl_t *ctrl )
 
     ctrl->ctx_id = ctx_id;
 
-    LOG( LOG_INFO, "[ctrl] ctx_id#%d: ctrl: %p, hdl_std_ctrl: %p, ctrl_hdl_cst_ctrl: %p.",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[ctrl] ctx_id#%d: ctrl: %p, hdl_std_ctrl: %p, ctrl_hdl_cst_ctrl: %p.",
          ctx_id, ctrl, hdl_std_ctrl, hdl_cst_ctrl );
 
     /* Init and add standard controls */
@@ -2347,6 +2364,7 @@ int isp_v4l2_ctrl_init( uint32_t ctx_id, isp_v4l2_ctrl_t *ctrl )
     v4l2_ctrl_handler_init( hdl_cst_ctrl, 64 );
     v4l2_ctrl_new_custom( hdl_cst_ctrl, &isp_v4l2_ctrl_class, NULL );
 
+    ADD_CTRL_CST( MODALIX_ISP_V4L2_CID_SENSOR_SOURCE_BUS, &isp_v4l2_ctrl_sensor_source_bus, NULL );
     ADD_CTRL_CST_VOLATILE( MODALIX_ISP_V4L2_CID_TEST_PATTERN, &isp_v4l2_ctrl_test_pattern, NULL );
     ADD_CTRL_CST_VOLATILE( MODALIX_ISP_V4L2_CID_TEST_PATTERN_TYPE, &isp_v4l2_ctrl_test_pattern_type, NULL );
     ADD_CTRL_CST_VOLATILE( MODALIX_ISP_V4L2_CID_SENSOR_SUPPORTED_PRESETS, &isp_v4l2_ctrl_sensor_supported_presets, NULL );

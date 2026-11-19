@@ -28,6 +28,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/jiffies.h>
+#include <linux/debugfs.h>
 
 #include "dw-axi-dmac.h"
 #include "../dmaengine.h"
@@ -482,6 +483,11 @@ static void axi_chan_list_dump_lli(struct axi_dma_chan *chan,
 		axi_chan_dump_lli(chan, &desc_head->hw_desc[i]);
 }
 
+static dma_addr_t axi_chan_video_src_addr(struct axi_dma_chan *chan)
+{
+	return (dma_addr_t)chan->hw_handshake_num * CH_LLI_SRC_START_ADDR;
+}
+
 /* Called in chan locked context */
 static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 				      struct axi_dma_desc *first)
@@ -503,9 +509,10 @@ static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 	axi_dma_enable(chan->chip);
 	axi_dma_irq_enable(chan->chip);
 	if (chan->is_video_mode) {
-		dev_info(chan->chip->dev, "video mode setting SSTATA");
-		axi_chan_iowrite64(chan, CH_SSTATAR, (chan->id * CH_LLI_SRC_START_ADDR) +
-			CH_SSTATAR_START_ADDR);
+		dev_dbg(chan->chip->dev, "video mode setting SSTATA");
+		axi_chan_iowrite64(chan, CH_SSTATAR,
+				   axi_chan_video_src_addr(chan) +
+				   CH_SSTATAR_START_ADDR);
 	}
 
 	config.dst_multblk_type = chan->chip->dw->hdata->xfer_mode;
@@ -535,11 +542,11 @@ static void axi_chan_block_xfer_start(struct axi_dma_chan *chan,
 			config.src_per = chan->hw_handshake_num;
 
 		if (chan->is_video_mode) {
-			dev_info(chan->chip->dev, "hs sel tt func video mode");
+			dev_dbg(chan->chip->dev, "hs sel tt func video mode");
 			config.hs_sel_dst = DWAXIDMAC_HS_SEL_SW;
 			config.hs_sel_src = DWAXIDMAC_HS_SEL_HW;
 			config.tt_fc = DWAXIDMAC_TT_FC_PER_TO_MEM_SRC;
-			config.src_per = chan->id;
+			config.src_per = chan->hw_handshake_num;
 			config.wr_uid = CH_CFG_L_WR_UID_VAL;
 			config.dst_osr_limit = CH_CFG_H_DST_OST_LIMIT_VAL; 
 		}
@@ -593,14 +600,9 @@ static void axi_chan_scratch_reload_start(struct axi_dma_chan *chan);
  * Leave the RELOAD idle drain only at a frame boundary: give the reload block an
  * IOC (BLOCK_TRF per lap = per frame) and defer the RELOAD->LL switch to that IRQ,
  * instead of the mid-frame channel disable that desyncs the CSI glue and wedges
- * after a long park (SOCSW-5392). 0 = legacy mid-frame disable (reproduces the wedge).
+ * after a long park. 0 = legacy mid-frame disable (reproduces the wedge).
  */
 static bool reload_frameboundary_exit = true;
-#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
-module_param(reload_frameboundary_exit, bool, 0644);
-MODULE_PARM_DESC(reload_frameboundary_exit,
-	"leave RELOAD idle at a frame boundary, not mid-frame (0 = legacy wedge, test)");
-#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
 
 static void axi_chan_start_first_queued(struct axi_dma_chan *chan)
 {
@@ -617,6 +619,46 @@ static void axi_chan_start_first_queued(struct axi_dma_chan *chan)
 	axi_chan_block_xfer_start(chan, desc);
 }
 
+/* The HW clears LLI_VALID when it finishes a block: true once this buffer is done */
+static bool axi_desc_hw_done(struct virt_dma_desc *vd)
+{
+	return !(READ_ONCE(vd_to_axi_desc(vd)->hw_desc[0].lli->ctl_hi) &
+		 cpu_to_le32(CH_CTL_H_LLI_VALID));
+}
+
+/*
+ * Complete every queued video buffer the HW has finished; a late IRQ can find
+ * more than one. Returns the first unfinished buffer. Caller holds vc.lock.
+ */
+static struct virt_dma_desc *axi_chan_complete_hw_done(struct axi_dma_chan *chan)
+{
+	struct virt_dma_desc *vd;
+
+	while ((vd = vchan_next_desc(&chan->vc)) && axi_desc_hw_done(vd)) {
+		list_del(&vd->node);
+		vchan_cookie_complete(vd);
+	}
+	return vd;
+}
+
+/* Run the issued video queue: out of RELOAD at the next frame boundary, else now */
+static void axi_chan_run_queue(struct axi_dma_chan *chan)
+{
+	if (chan->reload_looping) {
+		if (reload_frameboundary_exit) {
+			/* defer RELOAD->LL to the next frame-boundary BLOCK_TRF
+			 * IRQ; the user chain is already spliced onto scratch_a. */
+			chan->reload_exit_pending = true;
+		} else {
+			/* legacy: mid-frame disable (reproduces the park wedge) */
+			axi_chan_disable(chan);
+			chan->reload_looping = false;
+		}
+	}
+	if (!chan->reload_looping && !axi_chan_is_hw_enable(chan))
+		axi_chan_start_first_queued(chan);
+}
+
 static void dma_chan_issue_pending(struct dma_chan *dchan)
 {
 	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
@@ -630,7 +672,8 @@ static void dma_chan_issue_pending(struct dma_chan *dchan)
 
 		if (chan->is_video_mode) {
 			list_for_each_entry(vd, &chan->vc.desc_issued, node) {
-				if (!head)
+				/* a finished buffer waits for its IRQ; never turn back to it */
+				if (!head && !axi_desc_hw_done(vd))
 					head = vd_to_axi_desc(vd);
 				if (prev_vd) {
 					write_desc_llp(&vd_to_axi_desc(prev_vd)->hw_desc[0],
@@ -638,7 +681,7 @@ static void dma_chan_issue_pending(struct dma_chan *dchan)
 				}
 				prev_vd = vd;
 			}
-			if (chan->has_scratch && prev_vd) {
+			if (chan->has_scratch && head) {
 				/*
 				 * Ring: user tail -> scratch -> user head. The single
 				 * scratch block is the turnaround; each completion
@@ -654,21 +697,8 @@ static void dma_chan_issue_pending(struct dma_chan *dchan)
 
 		/* Parked for IPI-overflow recovery: splice only, the resume
 		 * restarts the chain (starting here would race the CSI reset). */
-		if (!chan->ovf_quiesced) {
-			if (chan->reload_looping) {
-				if (reload_frameboundary_exit) {
-					/* defer RELOAD->LL to the next frame-boundary BLOCK_TRF
-					 * IRQ; the user chain is already spliced onto scratch_a. */
-					chan->reload_exit_pending = true;
-				} else {
-					/* legacy: mid-frame disable (reproduces the park wedge) */
-					axi_chan_disable(chan);
-					chan->reload_looping = false;
-				}
-			}
-			if (!chan->reload_looping && !axi_chan_is_hw_enable(chan))
-				axi_chan_start_first_queued(chan);
-		}
+		if (!chan->ovf_quiesced)
+			axi_chan_run_queue(chan);
 	}
 	chan->last_buffer = jiffies;
 	spin_unlock_irqrestore(&chan->vc.lock, flags);
@@ -964,7 +994,7 @@ dw_axi_dma_chan_prep_interleaved(struct dma_chan *dchan,
 	}
 
 	if (chan->desc == NULL) {
-		dev_info(chan->chip->dev, "First time init of descriptor list\n");
+		dev_dbg(chan->chip->dev, "First time init of descriptor list\n");
 		chan->desc = desc;
 	}
 
@@ -978,7 +1008,7 @@ dw_axi_dma_chan_prep_interleaved(struct dma_chan *dchan,
 	if (unlikely(!hw_desc->lli))
 		return NULL;
 
-	write_desc_sar(hw_desc, (chan->id) * CH_LLI_SRC_START_ADDR);
+	write_desc_sar(hw_desc, axi_chan_video_src_addr(chan));
 	write_desc_dar(hw_desc, xt->dst_start);
 
 	block_ts = (xt->sgl[0].size + FRAME_METADATA_SIZE)/8 -1;
@@ -1035,7 +1065,7 @@ static int axi_chan_build_scratch_block(struct axi_dma_chan *chan,
 	if (unlikely(!hw->lli))
 		return -ENOMEM;
 
-	write_desc_sar(hw, (chan->id) * CH_LLI_SRC_START_ADDR);
+	write_desc_sar(hw, axi_chan_video_src_addr(chan));
 	write_desc_dar(hw, dst);
 
 	block_ts = (size + FRAME_METADATA_SIZE) / 8 - 1;
@@ -1164,7 +1194,7 @@ void dw_axi_dma_disarm_scratch(struct dma_chan *dchan)
 EXPORT_SYMBOL_GPL(dw_axi_dma_disarm_scratch);
 
 /*
- * Park the channel across the CSI IPI-overflow reset (SOCSW-5392): resetting
+ * Park the channel across the CSI IPI-overflow reset: resetting
  * the glue/IPI under a running DEV_TO_MEM block raises an async src bus error
  * that drops the in-flight user buffer. ovf_quiesced gates issue_pending/
  * handle_err/reload_start until resume_after_overflow() restarts the channel.
@@ -1198,10 +1228,12 @@ int dw_axi_dma_resume_after_overflow(struct dma_chan *dchan)
 	spin_lock_irqsave(&chan->vc.lock, flags);
 	chan->ovf_quiesced = false;
 	if (chan->has_scratch && chan->scratch_a) {
-		/* Restart cleanly from the kept queue (no in-place RESUMEREQ):
-		 * re-validate the scratch LLI, then LL chain or RELOAD idle. */
+		/*
+		 * Restart from the kept queue: re-validate the scratch LLI, complete
+		 * what the HW finished, then LL chain or RELOAD idle.
+		 */
 		chan->scratch_a->lli->ctl_hi |= cpu_to_le32(CH_CTL_H_LLI_VALID);
-		next = vchan_next_desc(&chan->vc);
+		next = axi_chan_complete_hw_done(chan);
 		if (next) {
 			write_desc_llp(chan->scratch_a,
 				       vd_to_axi_desc(next)->hw_desc[0].llp | lms);
@@ -1222,7 +1254,7 @@ EXPORT_SYMBOL_GPL(dw_axi_dma_resume_after_overflow);
 /*
  * Test injector: the exact inverse of the resume above — clear LLI_VALID on both
  * ping-pong scratch LLIs so the next FSM fetch is invalid and the channel halts,
- * reproducing the descriptor-exhaustion wedge (SOCSW-5392) deterministically with
+ * reproducing the descriptor-exhaustion wedge deterministically with
  * the scratch buffer enabled. Used to validate whether the recovery needs the DMA resume
  * or an IPI-only reset suffices. Not for production use.
  */
@@ -1593,7 +1625,7 @@ static void axi_chan_scratch_rearm(struct axi_dma_chan *chan, bool restart)
 
 /*
  * Enter the auto-reload idle drain. The LL scratch self-loop self-invalidates
- * (HW clears LLI_VALID each block-end -> INVALID_ERR storm, SOCSW-5392). Instead
+ * (HW clears LLI_VALID each block-end -> INVALID_ERR storm). Instead
  * run the single scratch block in RELOAD multiblock: program it straight into the
  * channel registers (no LLI), and the HW reloads SAR/DAR/CTL/BLOCK_TS and reruns
  * it forever. With reload_frameboundary_exit the block also carries an IOC so each
@@ -1623,7 +1655,7 @@ static void axi_chan_scratch_reload_start(struct axi_dma_chan *chan)
 	config.prior = chan->chip->dw->hdata->priority[chan->id];
 	config.hs_sel_dst = DWAXIDMAC_HS_SEL_SW;
 	config.hs_sel_src = DWAXIDMAC_HS_SEL_HW;
-	config.src_per = chan->id;
+	config.src_per = chan->hw_handshake_num;
 	config.wr_uid = CH_CFG_L_WR_UID_VAL;
 	config.dst_osr_limit = CH_CFG_H_DST_OST_LIMIT_VAL;
 	axi_chan_config_write(chan, &config);
@@ -1652,19 +1684,15 @@ static void axi_chan_scratch_reload_start(struct axi_dma_chan *chan)
 }
 
 /*
- * Video active turnaround, shared by both completion handlers. Complete the finished
- * user buffer, then re-point the single scratch block at the next user head and
- * re-validate it (HW clears LLI_VALID at each block-end). If the queue drained, switch
- * to the RELOAD idle drain and return true so the caller stops. Caller holds vc.lock.
+ * Complete the buffers the HW finished and turn the scratch block to the next one,
+ * or idle in RELOAD once the queue drained (returns true). Caller holds vc.lock.
  */
-static bool axi_chan_scratch_advance(struct axi_dma_chan *chan, struct virt_dma_desc *vd)
+static bool axi_chan_scratch_advance(struct axi_dma_chan *chan)
 {
 	u8 lms = chan->chip->dw->hdata->lms_axi_master;
 	struct virt_dma_desc *next;
 
-	list_del(&vd->node);
-	vchan_cookie_complete(vd);
-	next = vchan_next_desc(&chan->vc);
+	next = axi_chan_complete_hw_done(chan);
 	if (!next) {
 		axi_chan_scratch_reload_start(chan);	/* queue drained -> RELOAD idle */
 		return true;
@@ -1677,6 +1705,7 @@ static bool axi_chan_scratch_advance(struct axi_dma_chan *chan, struct virt_dma_
 
 static noinline void axi_chan_handle_err(struct axi_dma_chan *chan, u32 status)
 {
+	u8 lms = chan->chip->dw->hdata->lms_axi_master;
 	struct virt_dma_desc *vd;
 	unsigned long flags;
 
@@ -1694,20 +1723,32 @@ static noinline void axi_chan_handle_err(struct axi_dma_chan *chan, u32 status)
 			goto out;
 		}
 		/*
-		 * INVALID_ERR from the idle scratch loop self-invalidating, or a
-		 * transient src error during CSI/IPI recovery: drop the in-flight
-		 * buffer (if any), restore a valid scratch loop and restart. Do not
-		 * wedge the channel.
+		 * Keep what the HW finished; drop the next buffer on a transfer
+		 * error, which may have torn it, but not on an invalid LLI fetch.
 		 */
-		vd = vchan_next_desc(&chan->vc);
-		if (vd) {
+		vd = axi_chan_complete_hw_done(chan);
+		if (vd && !chan->reload_looping && !(status & DWAXIDMAC_IRQ_INVALID_ERR)) {
 			list_del(&vd->node);
+			vd->tx_result.result = DMA_TRANS_ABORTED;
 			vchan_cookie_complete(vd);
+			vd = vchan_next_desc(&chan->vc);
 		}
-		dev_err_ratelimited(chan2dev(chan),
-			"%s: video-mode DMA err 0x%08x; re-armed scratch loop\n",
-			axi_chan_name(chan), status);
+		/*
+		 * No print from this IRQ path: one console line holds the CPU
+		 * with interrupts off for ms and delays the other channels.
+		 * Count it; terminate_all() reports it once per stream.
+		 */
+		chan->video_errs++;
+		chan->video_err_status |= status;
 		axi_chan_scratch_reload_start(chan);	/* deep-idle drain is RELOAD */
+		/* Restart the buffers still queued at the next frame boundary */
+		if (vd) {
+			write_desc_llp(chan->scratch_a,
+				       vd_to_axi_desc(vd)->hw_desc[0].llp | lms);
+			chan->scratch_a->lli->ctl_hi |= cpu_to_le32(CH_CTL_H_LLI_VALID);
+			wmb();	/* scratch LLI updated before the channel restarts */
+			axi_chan_run_queue(chan);
+		}
 		goto out;
 	}
 
@@ -1789,7 +1830,7 @@ static void axi_chan_dma_xfer_complete(struct axi_dma_chan *chan)
 		}
 	} else if (chan->is_video_mode && chan->has_scratch) {
 		/* video active turnaround: complete + re-point the scratch block (or RELOAD if drained) */
-		axi_chan_scratch_advance(chan, vd);
+		axi_chan_scratch_advance(chan);
 	} else {
 		if (chan->chip->dw->hdata->xfer_mode == DWAXIDMAC_MBLK_TYPE_CONTIGUOUS)
 			mark_hwdesc_done(desc);
@@ -1826,7 +1867,7 @@ static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 	 * armed the block's IOC. If user buffers were spliced in (reload_exit_pending),
 	 * leave RELOAD HERE, at the frame boundary, and start the LL user chain -- never
 	 * the mid-frame disable in issue_pending, which desyncs the CSI glue and wedges
-	 * after a long park (SOCSW-5392). Otherwise the HW has auto-reloaded; stay idle.
+	 * after a long park. Otherwise the HW has auto-reloaded; stay idle.
 	 */
 	if (chan->is_video_mode && chan->has_scratch && chan->reload_looping) {
 		if (chan->reload_exit_pending && vchan_next_desc(&chan->vc)) {
@@ -1853,7 +1894,7 @@ static void axi_chan_block_xfer_complete(struct axi_dma_chan *chan)
 
 	if (chan->is_video_mode && chan->has_scratch) {
 		/* video active turnaround: complete + re-point the scratch block (or RELOAD if drained) */
-		axi_chan_scratch_advance(chan, vd);
+		axi_chan_scratch_advance(chan);
 		goto out;
 	}
 
@@ -1960,6 +2001,7 @@ static int dma_chan_terminate_all(struct dma_chan *dchan)
 	void *free_vaddr;
 	dma_addr_t free_dma;
 	size_t free_size;
+	u32 errs, err_status;
 	LIST_HEAD(to_abort);
 	LIST_HEAD(to_free);
 
@@ -2002,6 +2044,10 @@ static int dma_chan_terminate_all(struct dma_chan *dchan)
 	chan->completed = 0;
 	chan->dropped = 0;
 	chan->reported = 0;
+	errs = chan->video_errs;
+	err_status = chan->video_err_status;
+	chan->video_errs = 0;
+	chan->video_err_status = 0;
 
 	/* terminate must leave a reusable channel: drop scratch/RELOAD state. */
 	__dw_axi_dma_teardown_scratch(chan, &free_vaddr, &free_dma, &free_size);
@@ -2010,6 +2056,11 @@ static int dma_chan_terminate_all(struct dma_chan *dchan)
 
 	if (free_vaddr)
 		dma_free_coherent(chan->chip->dev, free_size, free_vaddr, free_dma);
+
+	if (errs)
+		dev_warn(dchan2dev(dchan),
+			 "%s: %u video-mode DMA errors this stream, status 0x%08x\n",
+			 axi_chan_name(chan), errs, err_status);
 
 	dev_vdbg(dchan2dev(dchan), "terminated: %s\n", axi_chan_name(chan));
 
@@ -2352,7 +2403,7 @@ static int dw_probe(struct platform_device *pdev)
 			if (dw->chan[i].irq < 0)
 				return dw->chan[i].irq;
 
-			dev_info(chip->dev, "channel: %u interrupt number: %u\n", i, dw->chan[i].irq); 
+			dev_dbg(chip->dev, "channel: %u interrupt number: %u\n", i, dw->chan[i].irq);
 
 			ret = devm_request_irq(chip->dev, dw->chan[i].irq, dw_axi_dma_ch_interrupt,
 					IRQF_SHARED, KBUILD_MODNAME, &dw->chan[i]);
@@ -2470,7 +2521,7 @@ static int dw_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev,
 			 "Failed to register OF DMA controller, fallback to MEM_TO_MEM mode\n");
 
-	dev_info(chip->dev, "DesignWare AXI DMA Controller, %d channels\n",
+	dev_dbg(chip->dev, "DesignWare AXI DMA Controller, %d channels\n",
 		 dw->hdata->nr_channels);
 
 	return 0;
@@ -2532,7 +2583,36 @@ static struct platform_driver dw_driver = {
 		.pm = &dw_axi_dma_pm_ops,
 	},
 };
-module_platform_driver(dw_driver);
+
+static struct dentry *dw_dma_debugfs_dir;
+
+/* debug knobs; absent on production (!SIMAAI_CAMERA_INSTRUMENTATION) builds */
+static void dw_dma_debugfs_init(void)
+{
+	if (!IS_ENABLED(CONFIG_SIMAAI_CAMERA_INSTRUMENTATION))
+		return;
+
+	dw_dma_debugfs_dir = debugfs_create_dir("dw-axi-dmac", NULL);
+	debugfs_create_bool("reload_frameboundary_exit", 0644, dw_dma_debugfs_dir,
+			    &reload_frameboundary_exit);
+}
+
+static int __init dw_driver_init(void)
+{
+	int ret = platform_driver_register(&dw_driver);
+
+	if (!ret)
+		dw_dma_debugfs_init();
+	return ret;
+}
+module_init(dw_driver_init);
+
+static void __exit dw_driver_exit(void)
+{
+	debugfs_remove_recursive(dw_dma_debugfs_dir);
+	platform_driver_unregister(&dw_driver);
+}
+module_exit(dw_driver_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Synopsys DesignWare AXI DMA Controller platform driver");

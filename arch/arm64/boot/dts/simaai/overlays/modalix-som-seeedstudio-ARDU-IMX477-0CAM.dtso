@@ -70,7 +70,7 @@
 &csi00in {
     clock-lanes = <0>;
     data-lanes = <1 2>;
-    link-frequencies = /bits/ 64 <450000000>;
+    link-frequencies = /bits/ 64 <450000000 744000000 1050000000>;
     remote-endpoint = <&cam00out>;
     clock-continuous;
 };
@@ -87,7 +87,7 @@
                         cam00out: endpoint@0 {
                                 clock-lanes = <0>;
                                 data-lanes = <1 2>;
-                                link-frequencies = /bits/ 64 <450000000>;
+                                link-frequencies = /bits/ 64 <450000000 744000000 1050000000>;
                                 remote-endpoint = <&csi00in>;
                                 clock-continuous;
                         };

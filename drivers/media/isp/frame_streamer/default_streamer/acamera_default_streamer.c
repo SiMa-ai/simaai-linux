@@ -90,7 +90,7 @@ static ds_context_t ds_contexts[FIRMWARE_CONTEXT_NUMBER];
 static ds_stream_t *get_stream_unsafe( const unsigned int context_id, const aframe_type_t type )
 {
     if ( context_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0;%d].",
              context_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? ( FIRMWARE_CONTEXT_NUMBER - 1 ) : 0 ) );
         return NULL;
     }
@@ -106,7 +106,7 @@ static ds_stream_t *get_stream_unsafe( const unsigned int context_id, const afra
         return &( ds_contexts[context_id].meta );
 
     default:
-        LOG( LOG_ERR, "Invalid parameter. Incorrect frame type value (%d).", type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Incorrect frame type value (%d).", type );
         return NULL;
     }
 }
@@ -123,10 +123,10 @@ static ds_stream_t *get_stream( const unsigned int context_id, const aframe_type
     ds_stream_t *stream = get_stream_unsafe( context_id, type );
 
     if ( stream == NULL ) {
-        LOG( LOG_ERR, "Failed to get stream (context id: %d, type: %d).", context_id, type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get stream (context id: %d, type: %d).", context_id, type );
         return NULL;
     } else if ( !stream->initialised ) {
-        LOG( LOG_ERR, "Failed to get stream (context id: %d, type: %d). Stream is not initialised.", context_id, type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get stream (context id: %d, type: %d). Stream is not initialised.", context_id, type );
         return NULL;
     }
 
@@ -176,7 +176,7 @@ static int alloc_frame( const frame_stream_cfg_t *stream_cfg, aframe_t *frame )
 
         const uint32_t data_size = plane_cfg->line_offset * plane_cfg->height;
         if ( data_size == 0 ) {
-            LOG( LOG_ERR, "Failed to allocate frame. Incorrect plane parameters (line offset: %u, height: %u)",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to allocate frame. Incorrect plane parameters (line offset: %u, height: %u)",
                  plane_cfg->line_offset, plane_cfg->height );
             goto frame_alloc_failed;
         }
@@ -185,7 +185,7 @@ static int alloc_frame( const frame_stream_cfg_t *stream_cfg, aframe_t *frame )
         plane->address.high = 0;
 
         if ( system_cma_alloc( &( plane->virt_addr ), &( plane->address.low ), data_size ) ) {
-            LOG( LOG_ERR, "Failed to allocate frame (plane: %d, plane data size: %u)", i, data_size );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to allocate frame (plane: %d, plane data size: %u)", i, data_size );
             plane->virt_addr = NULL;
             plane->address.low = 0;
             goto frame_alloc_failed;
@@ -236,7 +236,7 @@ static int reclaim_frame( ds_stream_t *stream, aframe_t *frame )
         return -1;
     }
 
-    LOG( LOG_DEBUG, "%s, frame (ptr: %p) removed from reclaim pool and going to be deallocated", __func__, temp );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "%s, frame (ptr: %p) removed from reclaim pool and going to be deallocated", __func__, temp );
 
     // Deallocating returned frame
     dealloc_frame( temp );
@@ -270,7 +270,7 @@ static void release_queue_from_pool( ds_stream_pool_t *pool, ds_stream_queue_t *
 
         if ( apool_remove( &( pool->hndl ), frame ) == NULL ) {
             // This should never happen
-            LOG( LOG_CRIT, "Frame is not present in the active pool, context id: %u, type: %u, id: %u, state: %u, ptr: %p.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Frame is not present in the active pool, context id: %u, type: %u, id: %u, state: %u, ptr: %p.",
                  frame->context_id,
                  frame->type,
                  frame->frame_id,
@@ -304,11 +304,11 @@ void static move_frames( ds_stream_pool_t *src, ds_stream_pool_t *dst )
     const uint32_t pool_size = apool_size( &( src->hndl ) );
 
     uint32_t i;
-    LOG( LOG_DEBUG, "%s, source pool size before move: %d", __func__, pool_size );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "%s, source pool size before move: %d", __func__, pool_size );
 
     for ( i = 0; i < pool_size; ++i ) {
         void *frame = apool_remove_used( &( src->hndl ) );
-        LOG( LOG_DEBUG, "%s, frame (ptr: %p) is going to destination pool", __func__, frame );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "%s, frame (ptr: %p) is going to destination pool", __func__, frame );
         apool_add( &( dst->hndl ), frame );
     }
 
@@ -380,7 +380,7 @@ static int put_empty_frame( ds_stream_t *stream, aframe_t *frame )
     system_mutex_unlock( stream->empty_queue.lock );
 
     if ( ret ) {
-        LOG( LOG_ERR, "Failed to enqueue empty frame (context id: %u, type: %d).", frame->context_id, frame->type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to enqueue empty frame (context id: %u, type: %d).", frame->context_id, frame->type );
         return -1;
     }
 
@@ -428,7 +428,7 @@ static int put_filled_frame( ds_stream_t *stream, aframe_t *frame )
     system_mutex_unlock( stream->filled_queue.lock );
 
     if ( ret ) {
-        LOG( LOG_ERR, "Failed to enqueue filled frame (context id: %u, type: %d).", frame->context_id, frame->type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to enqueue filled frame (context id: %u, type: %d).", frame->context_id, frame->type );
         return -1;
     }
 
@@ -438,14 +438,14 @@ static int put_filled_frame( ds_stream_t *stream, aframe_t *frame )
 int default_streamer_create_stream( const frame_stream_cfg_t *stream_cfg )
 {
     if ( stream_cfg == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame stream configuration pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame stream configuration pointer is NULL." );
         return -1;
     } else if ( ( stream_cfg->num_frames == 0 ) || ( stream_cfg->num_frames > DS_STREAM_MAX_FRAMES ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Requested number of frames (%u) is out of range [1;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Requested number of frames (%u) is out of range [1;%d].",
              stream_cfg->num_frames, DS_STREAM_MAX_FRAMES );
         return -1;
     } else if ( ( stream_cfg->num_planes == 0 ) || ( stream_cfg->num_planes > AFRAME_MAX_PLANES ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Requested number of planes (%u) is out of range [1;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Requested number of planes (%u) is out of range [1;%d].",
              stream_cfg->num_planes, AFRAME_MAX_PLANES );
         return -1;
     }
@@ -453,39 +453,39 @@ int default_streamer_create_stream( const frame_stream_cfg_t *stream_cfg )
     // Get stream poiter without checking initialised flag
     ds_stream_t *stream = get_stream_unsafe( stream_cfg->context_id, stream_cfg->type );
     if ( stream == NULL ) {
-        LOG( LOG_ERR, "Failed to get stream (context id: %d, type: %d).", stream_cfg->context_id, stream_cfg->type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get stream (context id: %d, type: %d).", stream_cfg->context_id, stream_cfg->type );
         return -1;
     }
 
     if ( stream->initialised ) {
-        LOG( LOG_ERR, "Failed to create a stream. Stream has been already created." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create a stream. Stream has been already created." );
         return -1;
     }
 
     if ( !stream->filled_queue.lock ) {
         if ( system_mutex_init( &( stream->filled_queue.lock ) ) ) {
-            LOG( LOG_ERR, "Failed to create stream. Failed to initialise filled queue mutex." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create stream. Failed to initialise filled queue mutex." );
             goto stream_create_failed;
         }
     }
 
     if ( !stream->empty_queue.lock ) {
         if ( system_mutex_init( &( stream->empty_queue.lock ) ) ) {
-            LOG( LOG_ERR, "Failed to create stream. Failed to initialise empty queue mutex." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create stream. Failed to initialise empty queue mutex." );
             goto stream_create_failed;
         }
     }
 
     if ( !stream->active_pool.lock ) {
         if ( system_mutex_init( &( stream->active_pool.lock ) ) ) {
-            LOG( LOG_ERR, "Failed to create stream. Failed to initialise active pool mutex." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create stream. Failed to initialise active pool mutex." );
             goto stream_create_failed;
         }
     }
 
     if ( !stream->reclaim_pool.lock ) {
         if ( system_mutex_init( &( stream->reclaim_pool.lock ) ) ) {
-            LOG( LOG_ERR, "Failed to create stream. Failed to initialise reclaim pool mutex." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create stream. Failed to initialise reclaim pool mutex." );
             goto stream_create_failed;
         }
     }
@@ -512,14 +512,14 @@ int default_streamer_create_stream( const frame_stream_cfg_t *stream_cfg )
 
         // Check if frame is in the reclaim pool, skip if yes
         if ( !apool_contains( &( stream->reclaim_pool.hndl ), frame ) ) {
-            LOG( LOG_DEBUG, "Frame (ptr: %p) is currently in use (reclaim pool). Skipping...", frame );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Frame (ptr: %p) is currently in use (reclaim pool). Skipping...", frame );
             continue;
         }
 
         system_memset( frame, 0, sizeof( *frame ) );
 
         if ( alloc_frame( stream_cfg, frame ) ) {
-            LOG( LOG_ERR, "Failed to create a stream. Frame allocation failed." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create a stream. Frame allocation failed." );
 
             // Update stream num frames so deallocate function
             // could clean up partially allocated frames ( with plane allocation failed )
@@ -540,7 +540,7 @@ int default_streamer_create_stream( const frame_stream_cfg_t *stream_cfg )
 
     // Check if requested number of frames has been allocated
     if ( stream->num_frames != stream_cfg->num_frames ) {
-        LOG( LOG_ERR, "Only %d out of %d frames has been allocated, not enough free entries in the frame storage.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Only %d out of %d frames has been allocated, not enough free entries in the frame storage.",
              stream->num_frames, stream_cfg->num_frames );
         goto stream_create_failed_unlock;
     }
@@ -572,7 +572,7 @@ int default_streamer_destroy_stream( const unsigned int ctx_id, const aframe_typ
     ds_stream_t *stream = get_stream_unsafe( ctx_id, type );
 
     if ( stream == NULL ) {
-        LOG( LOG_ERR, "Failed to get stream (context id: %d, type: %d).", ctx_id, type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get stream (context id: %d, type: %d).", ctx_id, type );
         return -1;
     }
 
@@ -616,7 +616,7 @@ int default_streamer_destroy_stream( const unsigned int ctx_id, const aframe_typ
 int default_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type, const aframe_state_t state, aframe_t **frame )
 {
     if ( frame == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame pointer is NULL." );
         return -1;
     }
 
@@ -636,7 +636,7 @@ int default_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t t
         break;
 
     default:
-        LOG( LOG_ERR, "Invalid parameter. Frame state (%d) doesn't belong to any valid state.", state );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame state (%d) doesn't belong to any valid state.", state );
         *frame = NULL;
         break;
     }
@@ -647,12 +647,12 @@ int default_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t t
 int default_streamer_put_frame( aframe_t *frame )
 {
     if ( frame == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame pointer is NULL." );
         return -1;
     }
 
     if ( frame->source != AFRAME_SOURCE_DEFAULT_STREAMER ) {
-        LOG( LOG_ERR, "Incorrect parameter. Frame (context id: %u, type: %d, source: %d) doesn't belong to Default Streamer.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Incorrect parameter. Frame (context id: %u, type: %d, source: %d) doesn't belong to Default Streamer.",
              frame->context_id, frame->type, frame->source );
         return -1;
     }
@@ -667,7 +667,7 @@ int default_streamer_put_frame( aframe_t *frame )
 
     // Check if frame is to be reclaimed
     if ( !reclaim_frame( stream, frame ) ) {
-        LOG( LOG_DEBUG, "%s, frame (ptr: %p) successfully reclaimed and will not be enqueued.", __func__, frame );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "%s, frame (ptr: %p) successfully reclaimed and will not be enqueued.", __func__, frame );
         return 0;
     }
 
@@ -694,7 +694,7 @@ int default_streamer_put_frame( aframe_t *frame )
         break;
 
     default:
-        LOG( LOG_ERR, "Invalid parameter. Frame state (%d) doesn't belong to any valid type.", frame->state );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame state (%d) doesn't belong to any valid type.", frame->state );
         return -1;
     }
 

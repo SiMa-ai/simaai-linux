@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/arm/simaai.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SiMa.ai Modalix Platforms
+
+maintainers:
+  - Bharanidharan Ramalingam <bharanidharan.ramalingam@sima.ai>
+
+description: SiMa.ai Modalix MLSoC.
+
+properties:
+  $nodename:
+    const: '/'
+  compatible:
+    const: simaai,modalix
+
+additionalProperties: true
+

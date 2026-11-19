@@ -32,9 +32,9 @@ unsigned char MODULE_MCFE_HWIF_VIDEOINPUT_MODE_SAFE_START = ACAMERA_FRONTEND_INP
 inline void mcfe_hwif_input_wrbuf_set( uint8_t input, uint8_t wrbuf_first, uint8_t wrbuf_second )
 {
     acamera_frontend_mcfe_input_write_buffer1_write( PHY_ADDR_ISP, input, wrbuf_first );
-    LOG( LOG_DEBUG, "Input cfg read 1st %x", acamera_frontend_mcfe_input_write_buffer1_read( PHY_ADDR_ISP, input ) );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Input cfg read 1st %x", acamera_frontend_mcfe_input_write_buffer1_read( PHY_ADDR_ISP, input ) );
     acamera_frontend_mcfe_input_write_buffer2_write( PHY_ADDR_ISP, input, wrbuf_second );
-    LOG( LOG_DEBUG, "Input cfg read 2nd %x", acamera_frontend_mcfe_input_write_buffer2_read( PHY_ADDR_ISP, input ) );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Input cfg read 2nd %x", acamera_frontend_mcfe_input_write_buffer2_read( PHY_ADDR_ISP, input ) );
 }
 
 inline void mcfe_hwif_slot_input_config( uint8_t tslot, uint8_t *input, uint8_t num_of_inputs )
@@ -117,7 +117,7 @@ inline void mcfe_hwif_set_slot_mode( uint8_t tslot, uint8_t mode )
         int iterations = 0;
         while ( iterations < 100 ) {
             if ( acamera_frontend_mcfe_slot_status_read( PHY_ADDR_ISP, tslot ) == ACAMERA_FRONTEND_MCFE_SLOT_STATUS_PASSING_DATA_THROUGH ) {
-                LOG( LOG_INFO, "Slot %d was cancelled after %d ms.", tslot, iterations );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Slot %d was cancelled after %d ms.", tslot, iterations );
                 break;
             }
             system_timer_usleep( 1000 );
@@ -125,7 +125,7 @@ inline void mcfe_hwif_set_slot_mode( uint8_t tslot, uint8_t mode )
         }
 
         if ( iterations >= 100 ) {
-            LOG( LOG_ERR, "Failed to cancel the slot %d after %d ms.", tslot, iterations );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to cancel the slot %d after %d ms.", tslot, iterations );
         }
     }
 #endif
@@ -356,7 +356,7 @@ void mcfe_hwif_input_hist_config( uint8_t input, uint16_t rggb_start, uint8_t cf
 
 void isp_hwif_top_config( uint32_t cdma_addr, uint16_t width, uint16_t height, uint16_t rggb_start, uint8_t cfa_pattern )
 {
-    LOG( LOG_INFO, "isp_hwif_top_config %#x %d, %d", cdma_addr, rggb_start, cfa_pattern);
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isp_hwif_top_config %#x %d, %d", cdma_addr, rggb_start, cfa_pattern);
     acamera_isp_top_rggb_start_write( cdma_addr, rggb_start );
     acamera_isp_top_active_width_write( cdma_addr, width );
     acamera_isp_top_active_height_write( cdma_addr, height );

@@ -287,7 +287,7 @@ int modalix_meta_params_init( uint32_t ctx_id,
 
 	rc = video_register_device( vdev, VFL_TYPE_VIDEO, -1 );
 	if ( rc ) {
-		LOG( LOG_ERR, "ctx %u: meta-params video_register_device failed, rc=%d",
+		LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "ctx %u: meta-params video_register_device failed, rc=%d",
 		     ctx_id, rc );
 		vb2_queue_release( &dev->q );
 		mutex_destroy( &dev->queue_lock );
@@ -299,7 +299,7 @@ int modalix_meta_params_init( uint32_t ctx_id,
 		g_params_devs[ctx_id] = dev;
 	}
 	*out = dev;
-	LOG( LOG_INFO, "ctx %u: /dev/video%d registered (%s)",
+	LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "ctx %u: /dev/video%d registered (%s)",
 	     ctx_id, vdev->num, vdev->name );
 	return 0;
 }
@@ -321,7 +321,7 @@ void modalix_meta_params_exit( struct modalix_meta_params_dev *dev )
 	video_unregister_device( &dev->vdev );
 	vb2_queue_release( &dev->q );
 	mutex_destroy( &dev->queue_lock );
-	LOG( LOG_INFO, "meta-params ctx %u released", dev->ctx_id );
+	LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "meta-params ctx %u released", dev->ctx_id );
 	kfree( dev );
 }
 
@@ -393,7 +393,7 @@ static int apply_v4l2_params_once( uint32_t ctx_id )
 	}
 
 	if ( p.version != MODALIX_ISP_PARAMS_BUFFER_VERSION_V1 ) {
-		LOG( LOG_ERR, "ctx %u: unknown params buffer version %u",
+		LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "ctx %u: unknown params buffer version %u",
 		     ctx_id, p.version );
 		return -EINVAL;
 	}

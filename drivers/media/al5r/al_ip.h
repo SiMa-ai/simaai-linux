@@ -35,6 +35,7 @@
 	dev_err(codec->device, format, ## __VA_ARGS__)
 
 struct al5r_codec_desc;
+struct al5_cmd_engine;
 struct dma_buf_info {
 	struct al5_dma_buffer *buffer;
 	struct al5r_codec_desc *codec;
@@ -52,9 +53,11 @@ struct al5r_codec_desc {
 	u32 regs_min_addr;              /* first regs that can be addressed in the mmio.*/
 	dma_addr_t dma_offset;          /* hw ip adds this offset to the dma address it is given */
 	struct cdev cdev;
-	/* one for one mapping in the no mcu case */
-	struct al5r_codec_chan *chan;
-	struct list_head irq_masks;
+	/* exclusive owner of the raw register interface, if any */
+	struct al5r_codec_chan *legacy_chan;
+	/* exclusive holder of the MVD (AV1/VP9) engine, if any */
+	struct al5r_codec_chan *mvd_chan;
+	struct al5_cmd_engine *engine;
 	spinlock_t i_lock;
 	struct kmem_cache *cache;
 	int minor;
@@ -73,12 +76,28 @@ struct al5r_codec_chan {
 	spinlock_t lock;
 	struct list_head mem;
 	int num_bufs;
+	/* DMA-BUFs this channel resolved to a bus address.  Refcounted: the
+	 * channel holds one reference, and any command still on the hardware
+	 * when the channel closes holds another, so a mapping outlives both
+	 * the address it produced and the channel that asked for it.
+	 */
+	struct al5_import_set *import_set;
 	struct al5r_codec_desc *codec;
+	/* interrupt events routed to this channel (legacy owner / MVD
+	 * holder), protected by codec->i_lock
+	 */
+	struct list_head irq_masks;
+	/* Commands admitted on this channel and not yet retired, protected
+	 * by engine->lock.  64-bit: the count cannot wrap, whatever the
+	 * reporting field can hold.
+	 */
+	u64 queued_cmds;
+	/* command-arbiter completions, protected by engine->lock */
+	struct list_head done_list;
+	wait_queue_head_t done_wait;
+	bool holds_mvd;
 };
 
-int al5r_codec_bind_channel(struct al5r_codec_chan *chan,
-			    struct inode *inode);
-void al5r_codec_unbind_channel(struct al5r_codec_chan *chan);
 int al5r_codec_read_register(struct al5r_codec_chan *chan,
 			     struct al5_reg *reg);
 void al5r_codec_write_register(struct al5r_codec_chan *chan,

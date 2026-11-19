@@ -167,6 +167,14 @@ struct dma_buf_import_sync_file {
 	__s32 fd;
 };
 
+
+struct dma_buf_desc {
+	__u64 paddr;
+	__u64 size;
+	__u64 busAddr;
+	__u32 fd;
+};
+
 #define DMA_BUF_BASE		'b'
 #define DMA_BUF_IOCTL_SYNC	_IOW(DMA_BUF_BASE, 0, struct dma_buf_sync)
 
@@ -178,5 +186,6 @@ struct dma_buf_import_sync_file {
 #define DMA_BUF_SET_NAME_B	_IOW(DMA_BUF_BASE, 1, __u64)
 #define DMA_BUF_IOCTL_EXPORT_SYNC_FILE	_IOWR(DMA_BUF_BASE, 2, struct dma_buf_export_sync_file)
 #define DMA_BUF_IOCTL_IMPORT_SYNC_FILE	_IOW(DMA_BUF_BASE, 3, struct dma_buf_import_sync_file)
+#define DMA_BUF_IOCTL_GET_DESC _IOWR(DMA_BUF_BASE, 4, struct dma_buf_desc)
 
 #endif

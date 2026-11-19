@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+#include "modalix-kontron.dts"
+
+/ {
+	model = "SiMa.ai Modalix Kontron 16Gig Board";
+
+	/* 16GB (2 x 8GB, single rank), 14GB usable with ECC enabled. Covers the
+	 * reusable DMS0 pool below: CMA needs a struct page for every pfn in it.
+	 */
+	memory@1000000000 {
+		device_type = "memory";
+		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
+				0x00000010 0x75000000 0x00000003 0x0B000000>;
+	};
+};
+
+&dms0_reserved {
+	// 8GiB for DMS0 region
+	reg = <0x00000011 0x80000000 0x00000002 0x00000000>;
+};

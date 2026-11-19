@@ -24,7 +24,7 @@ static void demosaic_load_configuration( demosaic_fsm_ptr_t p_fsm )
 {
     if ( !calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ),
                                 MODALIX_ISP_CALIB_DEMOSAIC_CONFIG ) ) {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_DEMOSAIC_CONFIG does not exist for this context." );
+        LOG_CAT( ALOG_CAT_DEMOSAIC, LOG_ERR, "MODALIX_ISP_CALIB_DEMOSAIC_CONFIG does not exist for this context." );
         return;
     }
 
@@ -67,8 +67,13 @@ static void demosaic_weight_lut_reload( demosaic_fsm_ptr_t p_fsm )
     const uint8_t *demosaic_lut = calib_mgr_u8_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DEMOSAIC );
     const uint32_t demosaic_lut_size = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DEMOSAIC );
 
+    /* Indexes the hardware array by the descriptor's own length, so bound
+     * it by the array rather than by what the tuning claims. */
+    const uint32_t hw = ACAMERA_ISP_DEMOSAIC_LUT_WEIGHT_LUT_ARRAY_DIM_0_SIZE;
+    const uint32_t n = ( demosaic_lut_size < hw ) ? demosaic_lut_size : hw;
     uint32_t i;
-    for ( i = 0; i < demosaic_lut_size; i++ ) {
+
+    for ( i = 0; i < n; i++ ) {
         acamera_isp_demosaic_lut_weight_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, demosaic_lut[i] );
     }
 }

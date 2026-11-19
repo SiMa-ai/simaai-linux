@@ -2437,6 +2437,17 @@ enum rmqueue_mode {
 	RMQUEUE_STEAL,
 };
 
+#ifdef CONFIG_CMA
+/*
+ * vm.cma_first: 0 (default) makes CMA strictly a last resort for the page
+ * allocator and compaction, so a large reusable device pool stays empty
+ * unless the rest of the zone really is exhausted.  1 restores the
+ * upstream balancing below, which serves movable allocations from CMA as
+ * soon as more than half of the zone's free memory is CMA.
+ */
+int sysctl_cma_first __read_mostly;
+#endif
+
 /*
  * Do the hard work of removing an element from the buddy allocator.
  * Call me with the zone->lock already held.
@@ -2453,7 +2464,7 @@ __rmqueue(struct zone *zone, unsigned int order, int migratetype,
 		 * allocating from CMA when over half of the zone's free memory
 		 * is in the CMA area.
 		 */
-		if (alloc_flags & ALLOC_CMA &&
+		if (alloc_flags & ALLOC_CMA && READ_ONCE(sysctl_cma_first) &&
 		    zone_page_state(zone, NR_FREE_CMA_PAGES) >
 		    zone_page_state(zone, NR_FREE_PAGES) / 2) {
 			page = __rmqueue_cma_fallback(zone, order);
@@ -6712,6 +6723,17 @@ static const struct ctl_table page_alloc_sysctl_table[] = {
 		.proc_handler	= sysctl_min_slab_ratio_sysctl_handler,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_ONE_HUNDRED,
+	},
+#endif
+#ifdef CONFIG_CMA
+	{
+		.procname	= "cma_first",
+		.data		= &sysctl_cma_first,
+		.maxlen		= sizeof(sysctl_cma_first),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
 	},
 #endif
 };

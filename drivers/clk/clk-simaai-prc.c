@@ -17,9 +17,9 @@
 #define PLL_FBDIV_MIN		16
 #define PLL_FBDIV_MAX		4095
 #define PLL_POSTDIV1_MAX	7
-#define SIMAAI_PLL_LOCK_TIMEOUT_US	1000
+#define SIMAAI_PLL_LOCK_TIMEOUT_US	50
 #define SIMAAI_PLL_EN        BIT(0)
-#define SIMAAI_PLL_RST       BIT(1)
+#define SIMAAI_PLL_RSTN      BIT(1)
 #define SIMAAI_PLL_BYP       BIT(2)
 #define SIMAAI_PLL_REFDIV    GENMASK(9, 4)
 #define SIMAAI_PLL_FBDIV     GENMASK(22, 11)
@@ -56,9 +56,8 @@ static int simaai_prc_clk_enable(struct clk_hw *hw)
 	u32 val = readl(c->reg);
 
 	writel(val |= c->enable_mask, c->reg);
-	udelay(1);
 
-	pr_debug("%s reg:0x%p val:0x%x\n", __func__, c->reg, readl(c->reg));
+	pr_debug("%s %s val:0x%x\n", __func__, clk_hw_get_name(hw), readl(c->reg));
 	return 0;
 }
 
@@ -75,8 +74,8 @@ static void simaai_prc_clk_disable(struct clk_hw *hw)
 	u32 val = readl(c->reg);
 
 	writel(val &= ~c->enable_mask, c->reg);
-	udelay(1);
-	pr_debug("%s reg:0x%p val:0x%x\n", __func__, c->reg, readl(c->reg));
+
+	pr_debug("%s %s val:0x%x\n", __func__, clk_hw_get_name(hw), readl(c->reg));
 }
 
 /**
@@ -94,32 +93,49 @@ static int simaai_prc_clk_is_enabled(struct clk_hw *hw)
 	return !!(readl(c->reg) & c->enable_mask);
 }
 
+static void print_pll_bits(struct clk_hw *hw, u32 val)
+{
+	pr_debug("simaai-pll: %s = 0x%08x (to=%x lk=%x pd2=%x pd1=%x fb=%x ref=%x byp=%x rst=%x en=%x)\n",
+		clk_hw_get_name(hw), val,
+		(u32)FIELD_GET(SIMAAI_PLL_TIMEOUT,  val),
+		(u32)FIELD_GET(SIMAAI_PLL_LOCKED,   val),
+		(u32)FIELD_GET(SIMAAI_PLL_POSTDIV2, val),
+		(u32)FIELD_GET(SIMAAI_PLL_POSTDIV1, val),
+		(u32)FIELD_GET(SIMAAI_PLL_FBDIV,    val),
+		(u32)FIELD_GET(SIMAAI_PLL_REFDIV,   val),
+		(u32)FIELD_GET(SIMAAI_PLL_BYP,      val),
+		(u32)FIELD_GET(SIMAAI_PLL_RSTN,     val),
+		(u32)FIELD_GET(SIMAAI_PLL_EN,       val));
+}
+
 /**
  * simaai_prc_pll_recalc_rate() - compute the current PLL output rate
  * @hw:          clock framework handle
  * @parent_rate: rate of the PLL reference input, in Hz
  *
  * Reconstructs the rate from the programmed divider fields:
- *	rate = (parent_rate * FBDIV) / POSTDIV1
+ *	rate = (parent_rate * FBDIV) / (REFDIV * POSTDIV1 * POSTDIV2)
  * and rounds it to the nearest kHz to hide sub-kHz rounding noise.
  *
  * Return: the output rate in Hz, or 0 if the PLL is unconfigured.
  */
 
 static unsigned long simaai_prc_pll_recalc_rate(struct clk_hw *hw,
-					    unsigned long parent_rate)
+						unsigned long parent_rate)
 {
 	struct simaai_prc_clk *c = to_simaai_prc_clk(hw);
-
-	u32 val = readl(c->reg);
-	u32 fbdiv = FIELD_GET(SIMAAI_PLL_FBDIV,    val);
-	u32 p1    = FIELD_GET(SIMAAI_PLL_POSTDIV1, val);
+	u32 val    = readl(c->reg);
+	u32 fbdiv  = FIELD_GET(SIMAAI_PLL_FBDIV,    val);
+	u32 refdiv = FIELD_GET(SIMAAI_PLL_REFDIV,   val);
+	u32 p1     = FIELD_GET(SIMAAI_PLL_POSTDIV1, val);
+	u32 p2     = FIELD_GET(SIMAAI_PLL_POSTDIV2, val);
+	u32 div    = refdiv * p1 * p2;
 	unsigned long rate;
 
-	if (!fbdiv || !p1)
+	if (!fbdiv || !div)
 		return 0;
 
-	rate = div_u64((u64)parent_rate * fbdiv, p1);
+	rate = div_u64((u64)parent_rate * fbdiv, div);
 	return DIV_ROUND_CLOSEST(rate, 1000) * 1000;
 }
 
@@ -128,11 +144,11 @@ static unsigned long simaai_prc_pll_recalc_rate(struct clk_hw *hw,
  * @c: clock to poll
  *
  * The hardware raises LOCKED on success or TIMEOUT if it gives up. The
- * readl_poll_timeout() guard is a software backstop in case neither bit
+ * readl_poll_timeout_atomic() guard is a software backstop in case neither bit
  * ever asserts.
  *
  * Return: 0 on lock, -ETIMEDOUT if the hardware reports a lock timeout, or
- * the error from readl_poll_timeout() on software timeout.
+ * the error from readl_poll_timeout_atomic() on software timeout.
  */
 
 static int simaai_prc_pll_wait_lock(struct simaai_prc_clk *c)
@@ -140,11 +156,10 @@ static int simaai_prc_pll_wait_lock(struct simaai_prc_clk *c)
 	u32 val;
 	int ret;
 
-	ret = readl_poll_timeout(c->reg, val,
-				 (val & SIMAAI_PLL_LOCKED) ||
-				 (val & SIMAAI_PLL_TIMEOUT),
-				 10,
-				 SIMAAI_PLL_LOCK_TIMEOUT_US);
+	ret = readl_poll_timeout_atomic(c->reg, val,
+				       (val & SIMAAI_PLL_LOCKED) ||
+				       (val & SIMAAI_PLL_TIMEOUT),
+				       1, SIMAAI_PLL_LOCK_TIMEOUT_US);
 	if (ret) {
 		pr_err("simaai-pll: software timeout, reg=0x%08x\n", val);
 		return ret;
@@ -159,58 +174,54 @@ static int simaai_prc_pll_wait_lock(struct simaai_prc_clk *c)
 	return 0;
 }
 
-static void print_pll_bits(struct clk_hw *hw, u32 val)
-{
-	pr_debug("simaai-pll: %s = 0x%08x (to=%u lk=%u pd2=%u pd1=%u fb=%u ref=%u rst=%u en=%u)\n",
-		clk_hw_get_name(hw), val,
-		(u32)FIELD_GET(SIMAAI_PLL_TIMEOUT,  val),
-		(u32)FIELD_GET(SIMAAI_PLL_LOCKED,   val),
-		(u32)FIELD_GET(SIMAAI_PLL_POSTDIV2, val),
-		(u32)FIELD_GET(SIMAAI_PLL_POSTDIV1, val),
-		(u32)FIELD_GET(SIMAAI_PLL_FBDIV,    val),
-		(u32)FIELD_GET(SIMAAI_PLL_REFDIV,   val),
-		(u32)FIELD_GET(SIMAAI_PLL_RST,      val),
-		(u32)FIELD_GET(SIMAAI_PLL_EN,       val));
-}
-
 /**
- * simaai_prc_pll_best_div() - find the divider pair closest to a target rate
+ * simaai_prc_pll_best_div() - find the divider set closest to a target rate
  * @rate:        requested output rate, in Hz
  * @parent_rate: rate of the PLL reference input, in Hz
- * @fbdiv:       output, the chosen feedback divider (FBDIV)
- * @postdiv1:    output, the chosen output post-divider (POSTDIV1)
+ * @refdiv:      REFDIV in effect (fixed at boot, preserved across rate changes)
+ * @fbdiv:       feedback divider
+ * @postdiv1:    post-divider1
+ * @postdiv2:    post-divider2
  *
- * Sweeps every legal POSTDIV1, derives the matching FBDIV for each, and keeps
- * the pair whose synthesized rate (parent_rate * FBDIV / POSTDIV1) is closest
- * to @rate. Pairs whose FBDIV falls outside [PLL_FBDIV_MIN, PLL_FBDIV_MAX] are
- * skipped. On success *@fbdiv and *@postdiv1 hold the result; on failure they
- * are left at 0.
+ * Sweeps every legal (POSTDIV1, POSTDIV2) combination subject to the hardware
+ * rule POSTDIV2 <= POSTDIV1, derives the matching FBDIV for each, and keeps the
+ * combination whose synthesized rate,
+ *	parent_rate * FBDIV / (refdiv * POSTDIV1 * POSTDIV2),
+ * is closest to @rate.
  *
- * Return: 0 on success, or -EINVAL if no in-range pair can produce @rate.
+ * Return: 0 on success, or -EINVAL if no in-range combination can produce @rate.
  */
+
 static int simaai_prc_pll_best_div(unsigned long rate, unsigned long parent_rate,
-			       u32 *fbdiv, u32 *postdiv1)
+				   u32 refdiv, u32 *fbdiv, u32 *postdiv1, u32 *postdiv2)
 {
 	unsigned long best_diff = ULONG_MAX;
-	u32 p1;
+	u32 p1, p2;
 
 	*fbdiv = 0;
 	*postdiv1 = 0;
+	*postdiv2 = 0;
 
 	for (p1 = 1; p1 <= PLL_POSTDIV1_MAX; p1++) {
-		u64 m = DIV_ROUND_CLOSEST_ULL((u64)rate * p1, parent_rate);
-		u64 actual;
-		unsigned long diff;
+		for (p2 = 1; p2 <= p1; p2++) {
+			u32 div = refdiv * p1 * p2;
+			u64 m = DIV_ROUND_CLOSEST_ULL((u64)rate * div, parent_rate);
+			u64 actual;
+			unsigned long diff;
 
-		if (m < PLL_FBDIV_MIN || m > PLL_FBDIV_MAX)
-			continue;
+			if (m < PLL_FBDIV_MIN || m > PLL_FBDIV_MAX)
+				continue;
 
-		actual = div_u64((u64)parent_rate * m, p1);
-		diff = abs_diff((unsigned long)actual, rate);
-		if (diff < best_diff) {
-			best_diff = diff;
-			*fbdiv = m;
-			*postdiv1 = p1;
+			actual = div_u64((u64)parent_rate * m, div);
+			diff = abs_diff((unsigned long)actual, rate);
+
+			if (diff < best_diff ||
+			    (diff == best_diff && p2 < *postdiv2)) {
+				best_diff = diff;
+				*fbdiv = m;
+				*postdiv1 = p1;
+				*postdiv2 = p2;
+			}
 		}
 	}
 
@@ -223,22 +234,30 @@ static int simaai_prc_pll_best_div(unsigned long rate, unsigned long parent_rate
  * @rate:        requested rate, in Hz
  * @parent_rate: rate of the PLL reference input, in Hz
  *
- * Runs the divider search and returns the rate the resulting FBDIV/POSTDIV1
- * pair would actually synthesize, without touching the hardware.
+ * Runs the divider search and returns the rate the resulting
+ * FBDIV/POSTDIV1/POSTDIV2 set would actually synthesize, without touching the
+ * hardware.
  *
- * Return: the closest achievable rate in Hz, or -EINVAL if no divider pair
+ * Return: the closest achievable rate in Hz, or -EINVAL if no divider set
  * satisfies the hardware constraints.
  */
 
 static long simaai_prc_pll_round_rate(struct clk_hw *hw, unsigned long rate,
-				  unsigned long *parent_rate)
+				      unsigned long *parent_rate)
 {
-	u32 fbdiv, p1;
+	struct simaai_prc_clk *c = to_simaai_prc_clk(hw);
+	u32 refdiv = FIELD_GET(SIMAAI_PLL_REFDIV, readl(c->reg));
+	unsigned long out;
+	u32 fbdiv, p1, p2;
 
-	if (simaai_prc_pll_best_div(rate, *parent_rate, &fbdiv, &p1))
+	if (!refdiv)
 		return -EINVAL;
 
-	return div_u64((u64)*parent_rate * fbdiv, p1);
+	if (simaai_prc_pll_best_div(rate, *parent_rate, refdiv, &fbdiv, &p1, &p2))
+		return -EINVAL;
+
+	out = div_u64((u64)*parent_rate * fbdiv, (u64)refdiv * p1 * p2);
+	return DIV_ROUND_CLOSEST(out, 1000) * 1000;
 }
 
 /**
@@ -247,45 +266,58 @@ static long simaai_prc_pll_round_rate(struct clk_hw *hw, unsigned long rate,
  * @rate:        target rate, in Hz
  * @parent_rate: rate of the PLL reference input, in Hz
  *
- * The dividers can only be changed while the PLL is disabled, so the sequence
- * is: pick the best FBDIV/POSTDIV1, gate the PLL off, write the divider fields
- * (preserving the rest of the register), re-enable, then wait for lock.
- * CLK_SET_RATE_GATE guarantees consumers are already gated on entry.
+ * Picks the best FBDIV/POSTDIV1/POSTDIV2 set (REFDIV is left untouched), then:
+ * assert BYP so consumers run from the reference clock, clear RSTN, write the
+ * divider fields (restoring RSTN in the same store), wait for lock, let the PLL
+ * settle, then deassert BYP so consumers switch to the new rate.
  *
- * Return: 0 on success, -EINVAL if no divider pair can reach @rate, or the
+ * Return: 0 on success, -EINVAL if no divider set can reach @rate, or the
  * error from simaai_prc_pll_wait_lock() if the PLL fails to lock.
  */
 
 static int simaai_prc_pll_set_rate(struct clk_hw *hw, unsigned long rate,
-			       unsigned long parent_rate)
+				   unsigned long parent_rate)
 {
 	struct simaai_prc_clk *c = to_simaai_prc_clk(hw);
-	u32 fbdiv, p1, val;
+	u32 fbdiv, p1, p2, refdiv;
+	u32 cur, v_byp, v_rst, v_prog, v_unbyp;
 	int ret;
+	unsigned long flags;
 
-	ret = simaai_prc_pll_best_div(rate, parent_rate, &fbdiv, &p1);
+	cur = readl(c->reg);
+
+	refdiv = FIELD_GET(SIMAAI_PLL_REFDIV, cur);
+	if (!refdiv)
+		return -EINVAL;
+
+	ret = simaai_prc_pll_best_div(rate, parent_rate, refdiv, &fbdiv, &p1, &p2);
 	if (ret)
 		return ret;
 
-	/* dividers can only change while the PLL is disabled */
-	val = readl(c->reg);
-	writel(val & ~c->enable_mask, c->reg);
+	v_byp   = cur | SIMAAI_PLL_BYP;
+	v_rst   = v_byp & ~SIMAAI_PLL_RSTN;
+	v_prog  = (v_rst & ~(SIMAAI_PLL_FBDIV | SIMAAI_PLL_POSTDIV1 | SIMAAI_PLL_POSTDIV2))
+		  | FIELD_PREP(SIMAAI_PLL_FBDIV,    fbdiv)
+		  | FIELD_PREP(SIMAAI_PLL_POSTDIV1, p1)
+		  | FIELD_PREP(SIMAAI_PLL_POSTDIV2, p2)
+		  | SIMAAI_PLL_RSTN;
+	v_unbyp = v_prog & ~SIMAAI_PLL_BYP;
+
+	/* Interrupts will extend the window spent on the bypass clock */
+	local_irq_save(flags);
+	writel(v_byp,  c->reg);
+	readl(c->reg);
+	writel(v_rst,  c->reg);
+	readl(c->reg);
+	writel(v_prog, c->reg);
+
+	ret = simaai_prc_pll_wait_lock(c);
 	udelay(1);
+	writel(v_unbyp, c->reg);
+	local_irq_restore(flags);
 
-	val = readl(c->reg);
-
-	print_pll_bits(hw, val);
-
-	val &= ~(SIMAAI_PLL_FBDIV | SIMAAI_PLL_POSTDIV1);
-	val |= FIELD_PREP(SIMAAI_PLL_FBDIV, fbdiv) |
-	       FIELD_PREP(SIMAAI_PLL_POSTDIV1, p1);
-	writel(val, c->reg);
-	udelay(1);
-
-	writel(val | c->enable_mask, c->reg);
-	udelay(1);
-
-	return simaai_prc_pll_wait_lock(c);
+	print_pll_bits(hw, readl(c->reg));
+	return ret;
 }
 
 static const struct clk_ops simaai_prc_gate_ops = {
@@ -320,6 +352,7 @@ static const struct simaai_prc_clk_desc simaai_prc_clocks[] = {
 	[SIMAAI_PRC_CLK_ISP_PLL] = { "isppll", NULL, 0x008, SIMAAI_PLL_EN, SIMAAI_PLL},
 	[SIMAAI_PRC_CLK_MLA_GATE]  = { "mlaclk", "mlapll", 0x594, (BIT(0) | BIT(1)), SIMAAI_GATE},
 	[SIMAAI_PRC_CLK_ISP_GATE] = { "ispclk", "isppll", 0x518, BIT(0), SIMAAI_GATE},
+	[SIMAAI_PRC_CLK_APU_PLL] = { "apupll", NULL, 0x004, SIMAAI_PLL_EN, SIMAAI_PLL},
 
 	/* TODO: add more clocks here */
 };
@@ -385,7 +418,7 @@ static int simaai_prc_clkc_probe(struct platform_device *pdev)
 		if (ignore_unused & (1 << i))
 			init.flags |= CLK_IGNORE_UNUSED;
 
-		/* PLL dividers can only change while gated. */
+		/* Applies to plls which have GATE */
 		if (d->type == SIMAAI_PLL)
 			init.flags |= CLK_SET_RATE_GATE;
 

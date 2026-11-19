@@ -17,5 +17,6 @@ struct simaai_hpi_mbox_msg {
 /* in-kernel API for other drivers */
 int simaai_hpi_xfer(const struct simaai_hpi_msg *req, struct simaai_hpi_msg *rsp,
 		    const void *payload, size_t len);
+int simaai_hpi_send(u32 p0, u32 p1);
 
 #endif  /* __LINUX_SIMAAI_HPI_H__ */

@@ -686,6 +686,11 @@ static void si_pep_dav_net_release(struct si_pep_dev *pep)
 	}
 }
 
+/* The poller is what finds the host's packets, so there is no interrupt */
+static void si_pep_dav_net_rxint(struct si_pep_dev *pep)
+{
+}
+
 const struct si_pep_drv_ops davinci_drv_ops = {
 	.mq_set_val = si_pep_dav_mq_set_val,
 	.mq_get_val = si_pep_dav_mq_get_val,
@@ -704,6 +709,8 @@ const struct si_pep_drv_ops davinci_drv_ops = {
 	.net_set_val = si_pep_dav_net_set_val,
 	.net_get_val = si_pep_dav_net_get_val,
 	.net_open = si_pep_dav_net_open,
-	.net_release = si_pep_dav_net_release
+	.net_release = si_pep_dav_net_release,
+	.net_enable_rxint = si_pep_dav_net_rxint,
+	.net_disable_rxint = si_pep_dav_net_rxint
 };
 

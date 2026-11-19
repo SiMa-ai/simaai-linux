@@ -84,7 +84,7 @@ static int isp_v4l2_cap_fop_open( struct file *file )
     }
 
     if ( stream_type == V4L2_STREAM_TYPE_MAX ) {
-        LOG( LOG_ERR, "Unable to find matching video device, video device: %p, file: %p", video_dev, file );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Unable to find matching video device, video device: %p, file: %p", video_dev, file );
         return -EINVAL;
     }
 
@@ -93,7 +93,7 @@ static int isp_v4l2_cap_fop_open( struct file *file )
 
     const int stream_opened = atomic_read( &dev->opened );
     if ( stream_opened >= V4L2_STREAM_TYPE_MAX ) {
-        LOG( LOG_ERR, "Too many open streams, stream_opened: %d, V4L2_STREAM_TYPE_MAX: %d", stream_opened, V4L2_STREAM_TYPE_MAX );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Too many open streams, stream_opened: %d, V4L2_STREAM_TYPE_MAX: %d", stream_opened, V4L2_STREAM_TYPE_MAX );
         rc = -EBUSY;
         goto unlock;
     }
@@ -104,12 +104,12 @@ static int isp_v4l2_cap_fop_open( struct file *file )
         goto unlock;
     }
 
-    LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, stream_type );
 
     /* init stream */
     rc = isp_v4l2_stream_init( &dev->pstreams[stream_type], stream_type, dev->ctx_id );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "Error, isp_v4l2_stream_init call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error, isp_v4l2_stream_init call failed, rc: %d", rc );
         goto clear_open_bit;
     }
     pstream = dev->pstreams[stream_type];
@@ -121,7 +121,7 @@ static int isp_v4l2_cap_fop_open( struct file *file )
     // Init capture vb2 queue
     rc = isp_vb2_cap_queue_init( &pstream->vb2_q, pstream );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "Error, isp_vb2_cap_queue_init call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error, isp_vb2_cap_queue_init call failed, rc: %d", rc );
         goto vb2_q_fail;
     }
 
@@ -136,7 +136,7 @@ static int isp_v4l2_cap_fop_open( struct file *file )
         rc = pm_runtime_resume_and_get( dev->v4l2_dev->dev );
         if ( rc < 0 ) {
 	    atomic_dec( &dev->opened );
-            LOG( LOG_ERR, "pm_runtime_resume_and_get failed, rc: %d", rc );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "pm_runtime_resume_and_get failed, rc: %d", rc );
             goto release_fh;
         }
     }
@@ -180,7 +180,7 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
     }
 
     if ( stream_type == V4L2_STREAM_TYPE_MAX ) {
-        LOG( LOG_ERR, "Unable to find matching video device, video device: %p, file: %p", video_dev, file );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Unable to find matching video device, video device: %p, file: %p", video_dev, file );
         return -EINVAL;
     }
 
@@ -189,7 +189,7 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
 
     const int stream_opened = atomic_read( &dev->opened );
     if ( stream_opened >= V4L2_STREAM_TYPE_MAX ) {
-        LOG( LOG_ERR, "Too many open streams, stream_opened: %d, V4L2_STREAM_TYPE_MAX: %d", stream_opened, V4L2_STREAM_TYPE_MAX );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Too many open streams, stream_opened: %d, V4L2_STREAM_TYPE_MAX: %d", stream_opened, V4L2_STREAM_TYPE_MAX );
         rc = -EBUSY;
         goto unlock;
     }
@@ -200,12 +200,12 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
         goto unlock;
     }
 
-    LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, stream_type );
 
     /* init stream */
     rc = isp_v4l2_stream_init( &dev->pstreams[stream_type], stream_type, dev->ctx_id );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "Error, isp_v4l2_stream_init call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error, isp_v4l2_stream_init call failed, rc: %d", rc );
         goto clear_open_bit;
     }
     pstream = dev->pstreams[stream_type];
@@ -219,7 +219,7 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
 
     if ( IS_ERR( pstream->fh.m2m_ctx ) ) {
         rc = PTR_ERR( pstream->fh.m2m_ctx );
-        LOG( LOG_ERR, "Error, v4l2_m2m_ctx_init call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error, v4l2_m2m_ctx_init call failed, rc: %d", rc );
         goto vb2_q_fail;
     }
 
@@ -234,7 +234,7 @@ static int isp_v4l2_m2m_fop_open( struct file *file )
         rc = pm_runtime_resume_and_get( dev->v4l2_dev->dev );
         if ( rc < 0 ) {
 	    atomic_dec( &dev->opened );
-            LOG( LOG_ERR, "pm_runtime_resume_and_get failed, rc: %d", rc );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "pm_runtime_resume_and_get failed, rc: %d", rc );
             goto release_fh;
         }
     }
@@ -269,7 +269,7 @@ static int isp_v4l2_cap_fop_release( struct file *file )
     int open_counter;
 	int rc = -1;
 
-    LOG( LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s, ctx_id: %d, called for stream type: %d", __func__, dev->ctx_id, pstream->stream_type );
 
     // Serialize against other opens and releases on this context
     mutex_lock( &dev->open_lock );
@@ -456,7 +456,7 @@ static int isp_v4l2_cap_querycap( struct file *file, void *priv, struct v4l2_cap
     isp_v4l2_dev_t *dev = video_drvdata( file );
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, dev: %p, file: %p, priv: %p", __func__, dev, file, priv );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s, dev: %p, file: %p, priv: %p", __func__, dev, file, priv );
 
     strcpy( cap->driver, "arm-camera-isp" );
     snprintf( cap->card, sizeof( cap->card ), "arm-isp-%s", isp_v4l2_get_stream_name( pstream->stream_type ) );
@@ -474,7 +474,7 @@ static int isp_v4l2_m2m_querycap( struct file *file, void *priv, struct v4l2_cap
     isp_v4l2_dev_t *dev = video_drvdata( file );
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, dev: %p, file: %p, priv: %p", __func__, dev, file, priv );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s, dev: %p, file: %p, priv: %p", __func__, dev, file, priv );
 
     strcpy( cap->driver, "arm-camera-isp" );
     snprintf( cap->card, sizeof( cap->card ), "arm-isp-%s", isp_v4l2_get_stream_name( pstream->stream_type ) );
@@ -491,11 +491,11 @@ static int isp_v4l2_g_fmt_vid_cap( struct file *file, void *priv, struct v4l2_fo
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
 
     isp_v4l2_stream_get_format( pstream, V4L2_STREAM_DIRECTION_CAP, f );
 
-    LOG( LOG_DEBUG, "v4l2_format: type: %u, w: %u, h: %u, pixelformat: 0x%x, field: %u, colorspace: %u, sizeimage: %u, bytesperline: %u, flags: %u",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "v4l2_format: type: %u, w: %u, h: %u, pixelformat: 0x%x, field: %u, colorspace: %u, sizeimage: %u, bytesperline: %u, flags: %u",
          f->type,
          f->fmt.pix_mp.width,
          f->fmt.pix_mp.height,
@@ -513,11 +513,11 @@ static int isp_v4l2_g_fmt_vid_out( struct file *file, void *priv, struct v4l2_fo
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
 
     isp_v4l2_stream_get_format( pstream, V4L2_STREAM_DIRECTION_OUT, f );
 
-    LOG( LOG_DEBUG, "v4l2_format: type: %u, w: %u, h: %u, pixelformat: 0x%x, field: %u, colorspace: %u, sizeimage: %u, bytesperline: %u, flags: %u",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "v4l2_format: type: %u, w: %u, h: %u, pixelformat: 0x%x, field: %u, colorspace: %u, sizeimage: %u, bytesperline: %u, flags: %u",
          f->type,
          f->fmt.pix_mp.width,
          f->fmt.pix_mp.height,
@@ -535,7 +535,7 @@ static int isp_v4l2_enum_fmt_vid_cap( struct file *file, void *priv, struct v4l2
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
     return isp_v4l2_stream_enum_format( pstream, V4L2_STREAM_DIRECTION_CAP, f );
 }
@@ -544,7 +544,7 @@ static int isp_v4l2_enum_fmt_vid_out( struct file *file, void *priv, struct v4l2
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
     return isp_v4l2_stream_enum_format( pstream, V4L2_STREAM_DIRECTION_OUT, f );
 }
@@ -553,7 +553,7 @@ static int isp_v4l2_try_fmt_vid_cap( struct file *file, void *priv, struct v4l2_
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
     return isp_v4l2_stream_try_format( pstream, V4L2_STREAM_DIRECTION_CAP, f );
 }
@@ -562,7 +562,7 @@ static int isp_v4l2_try_fmt_vid_out( struct file *file, void *priv, struct v4l2_
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
     return isp_v4l2_stream_try_format( pstream, V4L2_STREAM_DIRECTION_OUT, f );
 }
@@ -581,14 +581,14 @@ static int isp_v4l2_s_fmt_vid_cap( struct file *file, void *priv, struct v4l2_fo
         q = &pstream->vb2_q;
     }
 
-    LOG( LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s, stream type: %d", __func__, pstream->stream_type );
     if ( vb2_is_busy( q ) ) {
         return -EBUSY;
     }
 
     rc = isp_v4l2_stream_set_format( pstream, V4L2_STREAM_DIRECTION_CAP, f );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "isp_v4l2_stream_set_format call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "isp_v4l2_stream_set_format call failed, rc: %d", rc );
         return rc;
     }
 
@@ -607,14 +607,14 @@ static int isp_v4l2_s_fmt_vid_out( struct file *file, void *priv, struct v4l2_fo
         q = &pstream->vb2_q;
     }
 
-    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
     if ( vb2_is_busy( q ) ) {
         return -EBUSY;
     }
 
     int rc = isp_v4l2_stream_set_format( pstream, V4L2_STREAM_DIRECTION_OUT, f );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "isp_v4l2_stream_set_format call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "isp_v4l2_stream_set_format call failed, rc: %d", rc );
         return rc;
     }
 
@@ -625,7 +625,7 @@ static int isp_v4l2_enum_framesizes( struct file *file, void *priv, struct v4l2_
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d", __func__, pstream->stream_type );
 
 	switch (fsize->pixel_format) {
 		case V4L2_PIX_FMT_SRGGB8:
@@ -655,6 +655,8 @@ static int isp_v4l2_enum_framesizes( struct file *file, void *priv, struct v4l2_
 		case V4L2_PIX_FMT_RGB24:
 		case V4L2_PIX_FMT_ABGR32:
 		case V4L2_PIX_FMT_NV12:
+		case V4L2_PIX_FMT_NV16:
+		case V4L2_PIX_FMT_NV24:
 		{
 			LOG (LOG_DEBUG, " CAP :%#x", fsize->pixel_format);
 			return isp_v4l2_stream_enum_framesizes( pstream, V4L2_STREAM_DIRECTION_CAP, fsize );
@@ -683,7 +685,7 @@ static int isp_v4l2_cap_streamon( struct file *file, void *priv, enum v4l2_buf_t
 
     int rc = vb2_streamon( &pstream->vb2_q, buf_type );
     if ( rc != 0 ) {
-        LOG( LOG_ERR, "vb2_streamon() call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "vb2_streamon() call failed, rc: %d", rc );
         return rc;
     }
 
@@ -691,7 +693,7 @@ static int isp_v4l2_cap_streamon( struct file *file, void *priv, enum v4l2_buf_t
     /* Start hardware */
     rc = isp_v4l2_stream_on( pstream, V4L2_STREAM_DIRECTION_CAP, dev->stream_open_mask );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "isp_v4l2_stream_on() call failed, stream type: %d, stream direction: %d, stream open mask: 0x%lx, rc: %d",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "isp_v4l2_stream_on() call failed, stream type: %d, stream direction: %d, stream open mask: 0x%lx, rc: %d",
              pstream->stream_type, V4L2_STREAM_DIRECTION_CAP, dev->stream_open_mask, rc );
         isp_v4l2_stream_off( pstream, V4L2_STREAM_DIRECTION_CAP, dev->stream_on_mask );
         return rc;
@@ -717,7 +719,7 @@ static int isp_v4l2_m2m_streamon( struct file *file, void *priv, enum v4l2_buf_t
 
     int rc = vb2_streamon( q, buf_type );
     if ( rc != 0 ) {
-        LOG( LOG_ERR, "vb2_streamon() call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "vb2_streamon() call failed, rc: %d", rc );
         return rc;
     }
 
@@ -726,7 +728,7 @@ static int isp_v4l2_m2m_streamon( struct file *file, void *priv, enum v4l2_buf_t
     /* Start hardware */
     rc = isp_v4l2_stream_on( pstream, stream_direction, dev->stream_open_mask );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "isp_v4l2_stream_on() call failed, stream type: %d, stream direction: %d, stream open mask: 0x%lx, rc: %d",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "isp_v4l2_stream_on() call failed, stream type: %d, stream direction: %d, stream open mask: 0x%lx, rc: %d",
              pstream->stream_type, stream_direction, dev->stream_open_mask, rc );
         isp_v4l2_stream_off( pstream, stream_direction, dev->stream_on_mask );
         return rc;
@@ -753,7 +755,7 @@ static int isp_v4l2_cap_streamoff( struct file *file, void *priv, enum v4l2_buf_
     /* Stop hardware */
     rc = isp_v4l2_stream_off( pstream, V4L2_STREAM_DIRECTION_CAP, dev->stream_on_mask );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "isp_v4l2_stream_off() call failed, stream type: %d, stream direction: %d, stream on mask: 0x%lx, rc: %d",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "isp_v4l2_stream_off() call failed, stream type: %d, stream direction: %d, stream on mask: 0x%lx, rc: %d",
              pstream->stream_type, V4L2_STREAM_DIRECTION_CAP, dev->stream_on_mask, rc );
         return rc;
     }
@@ -784,7 +786,7 @@ static int isp_v4l2_m2m_streamoff( struct file *file, void *priv, enum v4l2_buf_
     /* Stop hardware */
     int rc = isp_v4l2_stream_off( pstream, stream_direction, dev->stream_on_mask );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "isp_v4l2_stream_off() call failed, stream type: %d, stream direction: %d, stream on mask: 0x%lx, rc: %d",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "isp_v4l2_stream_off() call failed, stream type: %d, stream direction: %d, stream on mask: 0x%lx, rc: %d",
              pstream->stream_type, V4L2_STREAM_DIRECTION_CAP, dev->stream_on_mask, rc );
         return rc;
     }
@@ -834,7 +836,7 @@ static int isp_v4l2_cap_reqbufs( struct file *file, void *priv,
 {
     isp_v4l2_stream_t *pstream = file->private_data;
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( &pstream->vb2_q, file ) );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( &pstream->vb2_q, file ) );
     if ( isp_v4l2_is_q_busy( &pstream->vb2_q, file ) ) {
         return -EBUSY;
     }
@@ -845,7 +847,7 @@ static int isp_v4l2_cap_reqbufs( struct file *file, void *priv,
         pstream->num_buffers_requested = reqbufs->count;
     }
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, req->type: %d, req->memory: %d, req->count: %d, rc: %d",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, req->type: %d, req->memory: %d, req->count: %d, rc: %d",
          __func__, pstream->stream_type, reqbufs->type, reqbufs->memory, reqbufs->count, rc );
 
     return rc;
@@ -858,7 +860,7 @@ static int isp_v4l2_m2m_reqbufs( struct file *file, void *priv,
 
     struct vb2_queue *q = v4l2_m2m_get_vq( pstream->fh.m2m_ctx, reqbufs->type );
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( q, file ) );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( q, file ) );
     if ( isp_v4l2_is_q_busy( q, file ) ) {
         return -EBUSY;
     }
@@ -869,7 +871,7 @@ static int isp_v4l2_m2m_reqbufs( struct file *file, void *priv,
         pstream->num_buffers_requested = reqbufs->count;
     }
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, req->type: %d, req->memory: %d, req->count: %d, rc: %d",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, req->type: %d, req->memory: %d, req->count: %d, rc: %d",
          __func__, pstream->stream_type, reqbufs->type, reqbufs->memory, reqbufs->count, rc );
 
     return rc;
@@ -884,7 +886,7 @@ static int isp_v4l2_cap_expbuf( struct file *file, void *priv, struct v4l2_expor
     }
 
     int rc = vb2_expbuf( &pstream->vb2_q, expbuf );
-    LOG( LOG_DEBUG, "%s, stream type: %d, expbuf->type: %d, expbuf->index: %d, expbuf->plane: %d, rc: %d",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, expbuf->type: %d, expbuf->index: %d, expbuf->plane: %d, rc: %d",
          __func__, pstream->stream_type, expbuf->type, expbuf->index, expbuf->plane, rc );
 
     return rc;
@@ -901,7 +903,7 @@ static int isp_v4l2_m2m_expbuf( struct file *file, void *priv, struct v4l2_expor
     }
 
     int rc = vb2_expbuf( q, expbuf );
-    LOG( LOG_DEBUG, "%s, stream type: %d, expbuf->type: %d, expbuf->index: %d, expbuf->plane: %d, rc: %d",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, expbuf->type: %d, expbuf->index: %d, expbuf->plane: %d, rc: %d",
          __func__, pstream->stream_type, expbuf->type, expbuf->index, expbuf->plane, rc );
 
     return rc;
@@ -923,7 +925,7 @@ static int isp_v4l2_m2m_querybuf( struct file *file, void *priv, struct v4l2_buf
     isp_v4l2_stream_t *pstream = file->private_data;
 
     int rc = v4l2_m2m_querybuf( file, pstream->fh.m2m_ctx, buf );
-    LOG( LOG_DEBUG, "%s, stream type: %d, buf->type: %d, buf->index: %d, rc: %d",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, buf->type: %d, buf->index: %d, rc: %d",
          __func__, pstream->stream_type, buf->type, buf->index, rc );
 
     return rc;
@@ -955,7 +957,7 @@ static int isp_v4l2_m2m_qbuf( struct file *file, void *priv, struct v4l2_buffer 
     isp_v4l2_stream_t *pstream = file->private_data;
     struct vb2_queue *q = v4l2_m2m_get_vq( pstream->fh.m2m_ctx, buf->type );
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( q, file ) );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( q, file ) );
     if ( isp_v4l2_is_q_busy( q, file ) ) {
         return -EBUSY;
     }
@@ -966,7 +968,7 @@ static int isp_v4l2_m2m_qbuf( struct file *file, void *priv, struct v4l2_buffer 
     int rc = vb2_qbuf( q, buf );
 #endif
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, buf->type: %d, buf->index: %d, rc: %d",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, buf->type: %d, buf->index: %d, rc: %d",
          __func__, pstream->stream_type, buf->type, buf->index, rc );
 
     v4l2_m2m_try_schedule( pstream->fh.m2m_ctx );
@@ -995,13 +997,13 @@ static int isp_v4l2_m2m_dqbuf( struct file *file, void *priv, struct v4l2_buffer
 
     struct vb2_queue *q = v4l2_m2m_get_vq( pstream->fh.m2m_ctx, buf->type );
 
-    LOG( LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( q, file ) );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, ownermatch: %d", __func__, pstream->stream_type, isp_v4l2_is_q_busy( q, file ) );
     if ( isp_v4l2_is_q_busy( q, file ) ) {
         return -EBUSY;
     }
 
     int rc = vb2_dqbuf( q, buf, file->f_flags & O_NONBLOCK );
-    LOG( LOG_DEBUG, "%s, stream type: %d, p->type: %d, p->index: %d, rc: %d", __func__, pstream->stream_type, buf->type, buf->index, rc );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, stream type: %d, p->type: %d, p->index: %d, rc: %d", __func__, pstream->stream_type, buf->type, buf->index, rc );
 
     return rc;
 }
@@ -1117,11 +1119,11 @@ static void isp_v4l2_m2m_device_run( void *priv )
     if ( priv ) {
         const isp_v4l2_stream_t *pstream = priv;
         if ( fw_intf_m2m_process_request( pstream->ctx_id ) ) {
-            LOG( LOG_ERR, "%s, failed to request frame process on context id: %d", __func__, pstream->ctx_id );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "%s, failed to request frame process on context id: %d", __func__, pstream->ctx_id );
             return;
         }
 
-        LOG( LOG_DEBUG, "%s, requesting a frame process on context id: %d", __func__, pstream->ctx_id );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s, requesting a frame process on context id: %d", __func__, pstream->ctx_id );
     }
 }
 
@@ -1131,9 +1133,9 @@ static void isp_v4l2_m2m_job_abort( void *priv )
         const isp_v4l2_stream_t *pstream = priv;
         if ( pstream->ctx_id < FIRMWARE_CONTEXT_NUMBER ) {
             v4l2_m2m_job_finish( pstream->fh.m2m_ctx->m2m_dev, pstream->fh.m2m_ctx );
-            LOG( LOG_DEBUG, "%s called on context id: %d", __func__, pstream->ctx_id );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "%s called on context id: %d", __func__, pstream->ctx_id );
         } else {
-            LOG( LOG_ERR, "%s, stream context id is out of range, context id: %d, stream type: %d",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "%s, stream context id is out of range, context id: %d, stream type: %d",
                  __func__, pstream->ctx_id, pstream->stream_type );
         }
     }
@@ -1155,7 +1157,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
     static char device_names[FIRMWARE_CONTEXT_NUMBER][V4L2_STREAM_TYPE_MAX][16];
 
     if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Context id: %d is out of range [0;%d]",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Context id: %d is out of range [0;%d]",
              ctx_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? FIRMWARE_CONTEXT_NUMBER - 1 : 0 ) );
         return -EINVAL;
     }
@@ -1181,7 +1183,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
     dev->v4l2_m2m_dev = v4l2_m2m_init( &isp_v4l2_m2m_ops );
     if ( IS_ERR( dev->v4l2_m2m_dev ) ) {
         rc = PTR_ERR( dev->v4l2_m2m_dev );
-        LOG( LOG_ERR, "Failed to initialize V4L2 m2m device, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Failed to initialize V4L2 m2m device, rc: %d", rc );
 
         goto free_dev;
     }
@@ -1234,7 +1236,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
             goto unreg_dev;
         }
 
-        LOG( LOG_INFO, "V4L2 device for context id: %u, registered as: %s",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "V4L2 device for context id: %u, registered as: %s",
              ctx_id, video_device_node_name( vfd ) );
     }
 
@@ -1245,7 +1247,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
      * during the staged rollout, so the context stays usable. */
     rc = modalix_meta_stats_init( ctx_id, v4l2_dev, &dev->meta_stats );
     if ( rc ) {
-        LOG( LOG_WARNING, "ctx %u: meta-stats init failed rc=%d, continuing without it",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_WARNING, "ctx %u: meta-stats init failed rc=%d, continuing without it",
              ctx_id, rc );
         dev->meta_stats = NULL;
         rc = 0;
@@ -1255,7 +1257,7 @@ static int isp_v4l2_init_dev( uint32_t ctx_id, struct v4l2_device *v4l2_dev )
      * IPA's 3A decisions. Same fail-soft policy as meta-stats. */
     rc = modalix_meta_params_init( ctx_id, v4l2_dev, &dev->meta_params );
     if ( rc ) {
-        LOG( LOG_WARNING, "ctx %u: meta-params init failed rc=%d, continuing without it",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_WARNING, "ctx %u: meta-params init failed rc=%d, continuing without it",
              ctx_id, rc );
         dev->meta_params = NULL;
         rc = 0;
@@ -1299,7 +1301,7 @@ static void isp_v4l2_destroy_dev( int ctx_id )
         }
 
         for ( i = 0; i < V4L2_STREAM_TYPE_MAX; ++i ) {
-            LOG( LOG_INFO, "Unregistering video device: %s", video_device_node_name( &g_isp_v4l2_devs[ctx_id]->video_dev[i] ) );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "Unregistering video device: %s", video_device_node_name( &g_isp_v4l2_devs[ctx_id]->video_dev[i] ) );
 
             /* unregister video device */
             video_unregister_device( &g_isp_v4l2_devs[ctx_id]->video_dev[i] );
@@ -1311,7 +1313,7 @@ static void isp_v4l2_destroy_dev( int ctx_id )
         kfree( g_isp_v4l2_devs[ctx_id] );
         g_isp_v4l2_devs[ctx_id] = NULL;
     } else {
-        LOG( LOG_INFO, "g_isp_v4l2_devs for context: %d is NULL, skipping", ctx_id );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "g_isp_v4l2_devs for context: %d is NULL, skipping", ctx_id );
     }
 }
 
@@ -1326,28 +1328,28 @@ int isp_v4l2_register_dma_channels(int ctx_id) {
     char dma_names[64];
 
     if( g_isp_v4l2_devs[ctx_id] == NULL) {
-		LOG( LOG_ERR, "no isp v4l2 device for context id %d", ctx_id);
+		LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "no isp v4l2 device for context id %d", ctx_id);
 		return -EINVAL;
     }
 
     dev = g_isp_v4l2_devs[ctx_id];
 
     if(!(dev->v4l2_dev)) {
-		LOG( LOG_ERR, "V4l2 device is not registered yet");
+		LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "V4l2 device is not registered yet");
 		return -EINVAL;
     }
 
     snprintf(dma_names,sizeof(dma_names)-1,"vdma%d",ctx_id);
 
-    LOG( LOG_INFO, "DMA channel request name is %s", dma_names);
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "DMA channel request name is %s", dma_names);
 
     dev->dma = dma_request_slave_channel(dev->v4l2_dev->dev, dma_names);
     if (dev->dma == NULL) {
-		LOG( LOG_ERR, "no VDMA channel found by name vdma %s", dma_names);
+		LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "no VDMA channel found by name vdma %s", dma_names);
 		return -ENODEV;
     }
     
-    LOG( LOG_INFO, "dma chan id %d", dev->dma->chan_id);
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "dma chan id %d", dev->dma->chan_id);
 
     return 0;
 }
@@ -1359,7 +1361,7 @@ int isp_v4l2_create_instance( struct v4l2_device *v4l2_dev )
     uint32_t ctx_id;
 
     if ( v4l2_dev == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter, v4l2_dev is NULL" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter, v4l2_dev is NULL" );
         return -EINVAL;
     }
     
@@ -1367,7 +1369,7 @@ int isp_v4l2_create_instance( struct v4l2_device *v4l2_dev )
     for ( ctx_id = 0; ctx_id < FIRMWARE_CONTEXT_NUMBER; ctx_id++ ) {
         rc = isp_v4l2_init_dev( ctx_id, v4l2_dev );
         if ( rc ) {
-            LOG( LOG_ERR, "isp_v4l2_init_dev for context id: %d failed.", ctx_id );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "isp_v4l2_init_dev for context id: %d failed.", ctx_id );
             goto unreg_dev;
         }
     }
@@ -1393,7 +1395,7 @@ unreg_dev:
 
 void isp_v4l2_destroy_instance( void )
 {
-    LOG( LOG_INFO, "%s: E", __func__ );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s: E", __func__ );
 
     int ctx_id;
 
@@ -1401,7 +1403,7 @@ void isp_v4l2_destroy_instance( void )
         isp_v4l2_destroy_dev( ctx_id );
     }
 
-    LOG( LOG_INFO, "%s: X", __func__ );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "%s: X", __func__ );
 }
 
 
@@ -1456,7 +1458,7 @@ int isp_v4l2_notify_event( int ctx_id, int stream_type, aframe_t *frame, uint32_
     // Caller must hold isp_stream_srcu (frame streamer dispatch path)
     pstream = READ_ONCE( g_isp_v4l2_devs[ctx_id]->pstreams[stream_type] );
     if ( pstream == NULL ) {
-        LOG( LOG_ERR, "Error, stream does not exist, context id: %d, stream type: %d, event type: %d", ctx_id, stream_type, event_type );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error, stream does not exist, context id: %d, stream type: %d, event type: %d", ctx_id, stream_type, event_type );
         return -EINVAL;
     }
 
@@ -1468,7 +1470,7 @@ int isp_v4l2_notify_event( int ctx_id, int stream_type, aframe_t *frame, uint32_
     if ( event_type == V4L2_EVENT_MODALIX_ISP_FRAME_READY ) {
         // Check if event payload data fits into v4l2_event.u.data element
         if ( sizeof( isp_v4l2_event_frame_ready_data_t ) > sizeof( ( (struct v4l2_event *)0 )->u.data ) ) {
-            LOG( LOG_ERR, "Error, isp_v4l2_event_frame_ready_data_t does not fit into v4l2_event.u.data" );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error, isp_v4l2_event_frame_ready_data_t does not fit into v4l2_event.u.data" );
             return -EINVAL;
         }
 

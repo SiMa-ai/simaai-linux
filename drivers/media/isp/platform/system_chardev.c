@@ -60,10 +60,10 @@ static int isp_fops_open( struct inode *inode, struct file *f )
     struct isp_dev_context *p_ctx = NULL;
     int minor = iminor( inode );
 
-    LOG( LOG_DEBUG, "Client is opening..., minor: %d.", minor );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Client is opening..., minor: %d.", minor );
 
     if ( !isp_dev_ctx.dev_inited ) {
-        LOG( LOG_ERR, "Dev is not initialized, failed to open." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Dev is not initialized, failed to open." );
         return -ERESTARTSYS;
     }
 
@@ -71,20 +71,20 @@ static int isp_fops_open( struct inode *inode, struct file *f )
         p_ctx = &isp_dev_ctx;
 
     if ( !p_ctx ) {
-        LOG( LOG_CRIT, "Fatal error, isp dev contexts are wrong, contents dump:" );
-        LOG( LOG_CRIT, "    minor_id: %d, name: %s.", isp_dev_ctx.dev_minor_id, isp_dev_ctx.dev_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Fatal error, isp dev contexts are wrong, contents dump:" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "    minor_id: %d, name: %s.", isp_dev_ctx.dev_minor_id, isp_dev_ctx.dev_name );
 
         return -ERESTARTSYS;
     }
 
     rc = mutex_lock_interruptible( &p_ctx->fops_lock );
     if ( rc ) {
-        LOG( LOG_ERR, "Error: lock failed of dev: %s.", p_ctx->dev_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error: lock failed of dev: %s.", p_ctx->dev_name );
         goto lock_failure;
     }
 
     if ( p_ctx->dev_opened ) {
-        LOG( LOG_ERR, "Open(%s) failed, already opened.", p_ctx->dev_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Open(%s) failed, already opened.", p_ctx->dev_name );
         rc = -EBUSY;
     } else {
         p_ctx->dev_opened = 1;
@@ -95,15 +95,15 @@ static int isp_fops_open( struct inode *inode, struct file *f )
         rc = pm_runtime_resume_and_get( &g_pdev->dev );
         if ( rc < 0 ) {
 	    p_ctx->dev_opened = 0;
-            LOG( LOG_ERR, "Failed to resume ISP, ret: %d.", rc );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to resume ISP, ret: %d.", rc );
             rc = -EACCES;
         } else {
             rc = 0;
-            LOG( LOG_INFO, "Open(%s) succeed.", p_ctx->dev_name );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Open(%s) succeed.", p_ctx->dev_name );
 
-            LOG( LOG_DEBUG, "Bf set, private_data: %p.", f->private_data );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Bf set, private_data: %p.", f->private_data );
             f->private_data = p_ctx;
-            LOG( LOG_DEBUG, "Af set, private_data: %p.", f->private_data );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Af set, private_data: %p.", f->private_data );
 	}
     }
 
@@ -119,13 +119,13 @@ static int isp_fops_release( struct inode *inode, struct file *f )
     struct isp_dev_context *p_ctx = (struct isp_dev_context *)f->private_data;
 
     if ( p_ctx != &isp_dev_ctx ) {
-        LOG( LOG_ERR, "Invalid parameter: %p.", p_ctx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter: %p.", p_ctx );
         return -EINVAL;
     }
 
     rc = mutex_lock_interruptible( &p_ctx->fops_lock );
     if ( rc ) {
-        LOG( LOG_ERR, "Error: lock failed of dev: %s.", p_ctx->dev_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error: lock failed of dev: %s.", p_ctx->dev_name );
         return rc;
     }
 
@@ -136,7 +136,7 @@ static int isp_fops_release( struct inode *inode, struct file *f )
         kfifo_reset( &p_ctx->isp_kfifo_out );
 	pm_runtime_put( &g_pdev->dev );
     } else {
-        LOG( LOG_CRIT, "Fatal error: wrong state of dev: %s, dev_opened: %d.", p_ctx->dev_name, p_ctx->dev_opened );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Fatal error: wrong state of dev: %s, dev_opened: %d.", p_ctx->dev_name, p_ctx->dev_opened );
         rc = -EINVAL;
     }
 
@@ -153,12 +153,12 @@ static ssize_t isp_fops_write( struct file *file, const char __user *buf, size_t
 
     /* isp_dev_uf device only supports read at the moment */
     if ( p_ctx != &isp_dev_ctx ) {
-        LOG( LOG_ERR, "Invalid parameter: %p.", p_ctx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter: %p.", p_ctx );
         return -EINVAL;
     }
 
     if ( mutex_lock_interruptible( &p_ctx->fops_lock ) ) {
-        LOG( LOG_CRIT, "Fatal error: access lock failed." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Fatal error: access lock failed." );
         return -ERESTARTSYS;
     }
 
@@ -167,7 +167,7 @@ static ssize_t isp_fops_write( struct file *file, const char __user *buf, size_t
     /* Awake any reader */
     wake_up_interruptible( &p_ctx->kfifo_in_queue );
 
-    LOG( LOG_DEBUG, "Wake up reader." );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Wake up reader." );
 
     mutex_unlock( &p_ctx->fops_lock );
 
@@ -181,12 +181,12 @@ static ssize_t isp_fops_read( struct file *file, char __user *buf, size_t count,
     struct isp_dev_context *p_ctx = (struct isp_dev_context *)file->private_data;
 
     if ( p_ctx != &isp_dev_ctx ) {
-        LOG( LOG_ERR, "Invalid parameter: %p.", p_ctx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter: %p.", p_ctx );
         return -EINVAL;
     }
 
     if ( mutex_lock_interruptible( &p_ctx->fops_lock ) ) {
-        LOG( LOG_CRIT, "Fatal error: access lock failed." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Fatal error: access lock failed." );
         return -ERESTARTSYS;
     }
 
@@ -199,14 +199,14 @@ static ssize_t isp_fops_read( struct file *file, char __user *buf, size_t count,
             return -EAGAIN;
 
         /* Wait for the event */
-        LOG( LOG_DEBUG, "Input FIFO is empty, wait for data, timeout_in_jiffies: %ld, HZ: %d.", time_out_in_jiffies, HZ );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Input FIFO is empty, wait for data, timeout_in_jiffies: %ld, HZ: %d.", time_out_in_jiffies, HZ );
         rc = wait_event_interruptible_timeout( p_ctx->kfifo_out_queue, !kfifo_is_empty( &p_ctx->isp_kfifo_out ), time_out_in_jiffies );
 
-        LOG( LOG_DEBUG, "Data is coming or timeout, kfifo_out size: %u, rc: %d.", kfifo_len( &p_ctx->isp_kfifo_out ), rc );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Data is coming or timeout, kfifo_out size: %u, rc: %d.", kfifo_len( &p_ctx->isp_kfifo_out ), rc );
 
         /* After wake up, we need to re-gain the mutex. */
         if ( mutex_lock_interruptible( &p_ctx->fops_lock ) ) {
-            LOG( LOG_CRIT, "Fatal error: access lock failed." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Fatal error: access lock failed." );
             return -ERESTARTSYS;
         }
     }
@@ -235,7 +235,7 @@ static int isp_dev_context_init( struct isp_dev_context *p_ctx )
 
     rc = misc_register( &p_ctx->isp_dev );
     if ( rc ) {
-        LOG( LOG_ERR, "Error: register ISP device failed, ret: %d.", rc );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error: register ISP device failed, ret: %d.", rc );
         return rc;
     }
 
@@ -243,13 +243,13 @@ static int isp_dev_context_init( struct isp_dev_context *p_ctx )
 
     rc = kfifo_alloc( &p_ctx->isp_kfifo_in, SYSTEM_CHARDEV_FIFO_SIZE, GFP_KERNEL );
     if ( rc ) {
-        LOG( LOG_ERR, "Error: kfifo_in alloc failed, ret: %d.", rc );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error: kfifo_in alloc failed, ret: %d.", rc );
         goto failed_kfifo_in_alloc;
     }
 
     rc = kfifo_alloc( &p_ctx->isp_kfifo_out, SYSTEM_CHARDEV_FIFO_SIZE, GFP_KERNEL );
     if ( rc ) {
-        LOG( LOG_ERR, "Error: kfifo_out alloc failed, ret: %d.", rc );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error: kfifo_out alloc failed, ret: %d.", rc );
         goto failed_kfifo_out_alloc;
     }
 
@@ -259,7 +259,7 @@ static int isp_dev_context_init( struct isp_dev_context *p_ctx )
 
     p_ctx->dev_inited = 1;
 
-    LOG( LOG_INFO, "isp_dev_context(%s) init OK.", p_ctx->dev_name );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isp_dev_context(%s) init OK.", p_ctx->dev_name );
 
     return 0;
 
@@ -277,7 +277,7 @@ int system_chardev_init( void )
 
     struct isp_dev_context *p_ctx0 = NULL;
 
-    LOG( LOG_INFO, "system init" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "system init" );
 
     p_ctx0 = &isp_dev_ctx;
     system_memset( p_ctx0, 0, sizeof( *p_ctx0 ) );
@@ -285,7 +285,7 @@ int system_chardev_init( void )
     p_ctx0->dev_name = SYSTEM_CHARDEV_NAME;
     rc = isp_dev_context_init( p_ctx0 );
     if ( rc ) {
-        LOG( LOG_ERR, "Error: isp_dev_context_init failed for dev: %s.", p_ctx0->isp_dev.name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error: isp_dev_context_init failed for dev: %s.", p_ctx0->isp_dev.name );
         return rc;
     }
 
@@ -298,7 +298,7 @@ int system_chardev_read( char *data, int size )
     int rc;
 
     if ( !isp_dev_ctx.dev_inited ) {
-        LOG( LOG_ERR, "Dev is not initialized, failed to read." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Dev is not initialized, failed to read." );
         return -1;
     }
 
@@ -309,10 +309,10 @@ int system_chardev_read( char *data, int size )
         mutex_unlock( &isp_dev_ctx.fops_lock ); /* Unlock before we return or go sleeping */
 
         /* Wait for the event. */
-        LOG( LOG_DEBUG, "Input FIFO is empty, wait for data, timeout_in_jiffies: %ld, HZ: %d.", time_out_in_jiffies, HZ );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Input FIFO is empty, wait for data, timeout_in_jiffies: %ld, HZ: %d.", time_out_in_jiffies, HZ );
         rc = wait_event_interruptible_timeout( isp_dev_ctx.kfifo_in_queue, !kfifo_is_empty( &isp_dev_ctx.isp_kfifo_in ), time_out_in_jiffies );
 
-        LOG( LOG_DEBUG, "Data is coming or timeout, kfifo_in size: %u, rc: %d.", kfifo_len( &isp_dev_ctx.isp_kfifo_in ), rc );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Data is coming or timeout, kfifo_in size: %u, rc: %d.", kfifo_len( &isp_dev_ctx.isp_kfifo_in ), rc );
 
         /* After wake up, we need to re-gain the mutex. */
         mutex_lock( &isp_dev_ctx.fops_lock );
@@ -329,7 +329,7 @@ int system_chardev_write( const char *data, int size )
     int rc;
 
     if ( !isp_dev_ctx.dev_inited ) {
-        LOG( LOG_ERR, "Dev is not initialized, failed to write." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Dev is not initialized, failed to write." );
         return -1;
     }
 
@@ -339,7 +339,7 @@ int system_chardev_write( const char *data, int size )
 
     /* Awake any reader. */
     wake_up_interruptible( &isp_dev_ctx.kfifo_out_queue );
-    LOG( LOG_DEBUG, "Wake up reader waiting on kfifo out." );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Wake up reader waiting on kfifo out." );
 
     mutex_unlock( &isp_dev_ctx.fops_lock );
     return rc;
@@ -354,9 +354,9 @@ int system_chardev_destroy( void )
 
         misc_deregister( &isp_dev_ctx.isp_dev );
 
-        LOG( LOG_DEBUG, "misc_deregister dev: %s.", isp_dev_ctx.dev_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "misc_deregister dev: %s.", isp_dev_ctx.dev_name );
     } else {
-        LOG( LOG_INFO, "Dev not initialized, do nothing." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Dev not initialized, do nothing." );
     }
 
     return 0;

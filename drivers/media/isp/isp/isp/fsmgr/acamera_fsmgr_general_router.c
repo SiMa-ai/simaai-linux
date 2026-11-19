@@ -32,12 +32,12 @@
 static acamera_cmd_result general_raw_scaler_ratio( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -54,12 +54,12 @@ static acamera_cmd_result general_raw_scaler_ratio( acamera_isp_ctx_ptr_t p_ictx
 static acamera_cmd_result general_ae_info( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -80,13 +80,13 @@ static acamera_cmd_result general_ae_info( acamera_isp_ctx_ptr_t p_ictx, acamera
 static acamera_cmd_result general_hist_info( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
     // parameter check
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -106,7 +106,7 @@ static acamera_cmd_result general_hist_info( acamera_isp_ctx_ptr_t p_ictx, acame
 static acamera_cmd_result general_cmos_current_exposure_log2( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
@@ -123,7 +123,7 @@ static acamera_cmd_result general_cmos_current_exposure_log2( acamera_isp_ctx_pt
 static acamera_cmd_result general_cmos_exposure_ratio( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
@@ -140,7 +140,7 @@ static acamera_cmd_result general_cmos_exposure_ratio( acamera_isp_ctx_ptr_t p_i
 static acamera_cmd_result general_cmos_max_exposure_log2( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
@@ -163,7 +163,7 @@ static acamera_cmd_result general_cmos_max_exposure_log2( acamera_isp_ctx_ptr_t 
 static acamera_cmd_result general_cmos_history_size_get( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
@@ -179,7 +179,7 @@ static acamera_cmd_result general_cmos_history_size_get( acamera_isp_ctx_ptr_t p
 static acamera_cmd_result general_exposure_target( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_GET == dir ) {
-        LOG( LOG_NOTICE, "GET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "GET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
@@ -188,13 +188,13 @@ static acamera_cmd_result general_exposure_target( acamera_isp_ctx_ptr_t p_ictx,
     acamera_fsmgr_t *p_fsmgr = &p_ictx->fsmgr;
     acamera_cmd_exposure_target *p_exp_target = (acamera_cmd_exposure_target *)value;
 
-    LOG( LOG_DEBUG, "exp_target: exp_log2: %d, exp_ratio: %u.", (int)p_exp_target->exposure_log2, (unsigned int)p_exp_target->exposure_ratio );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "exp_target: exp_log2: %d, exp_ratio: %u.", (int)p_exp_target->exposure_log2, (unsigned int)p_exp_target->exposure_ratio );
     cmos_set_exposure_target( &( p_fsmgr->cmos_fsm ), p_exp_target->exposure_log2, p_exp_target->exposure_ratio );
 
 #if !USER_MODULE
     /* check whether the apply is succeed */
     if ( ( p_fsmgr->cmos_fsm.exposure_log2 != p_exp_target->exposure_log2 ) ) {
-        LOG( LOG_INFO, "new AE failed, expected: exp_log2: %d, exp_ratio: %u, cmos_values: exp_log2: %d, exp_ratio: %u.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "new AE failed, expected: exp_log2: %d, exp_ratio: %u, cmos_values: exp_log2: %d, exp_ratio: %u.",
              (int)p_exp_target->exposure_log2,
              (unsigned int)p_exp_target->exposure_ratio,
              (int)p_fsmgr->cmos_fsm.exposure_log2,
@@ -219,19 +219,19 @@ static acamera_cmd_result general_exposure_target( acamera_isp_ctx_ptr_t p_ictx,
 static acamera_cmd_result general_frame_exposure_set( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
     // parameter check
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
 #if defined( ISP_HAS_CMOS_FSM )
     if ( NULL == value ) {
-        LOG( LOG_ERR, "Invalid param: value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
     exposure_set_t *p_set_get = NULL;
@@ -251,7 +251,7 @@ static acamera_cmd_result general_frame_exposure_set( acamera_isp_ctx_ptr_t p_ic
 static acamera_cmd_result general_cmos_total_gain( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
@@ -271,7 +271,7 @@ static acamera_cmd_result general_cmos_total_gain( acamera_isp_ctx_ptr_t p_ictx,
 static acamera_cmd_result general_cmos_analog_gain( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
@@ -295,7 +295,7 @@ static acamera_cmd_result general_cmos_analog_gain( acamera_isp_ctx_ptr_t p_ictx
 static acamera_cmd_result general_cmos_digital_gain( acamera_isp_ctx_ptr_t p_ictx, acamera_cmd_direction dir, const uint32_t *value, uint32_t *ret_value )
 {
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
@@ -320,12 +320,12 @@ static acamera_cmd_result general_ccm_info( acamera_isp_ctx_ptr_t p_ictx, acamer
 {
     // parameter check
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     if ( ( CMD_DIRECTION_SET == dir ) && ( NULL == value ) ) {
-        LOG( LOG_ERR, "Invalid param: value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -376,13 +376,13 @@ static acamera_cmd_result general_wb_info( acamera_isp_ctx_ptr_t p_ictx, acamera
 {
     // parameter check
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     // right now only support GET
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_ERR, "Invalid param: set is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: set is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -405,12 +405,12 @@ static acamera_cmd_result general_wb_frame_quantity( acamera_isp_ctx_ptr_t p_ict
 {
     // right now only support SET
     if ( CMD_DIRECTION_GET == dir ) {
-        LOG( LOG_ERR, "Invalid param: get is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: get is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     if ( ( CMD_DIRECTION_SET == dir ) && ( NULL == value ) ) {
-        LOG( LOG_ERR, "Invalid param: value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -432,13 +432,13 @@ static acamera_cmd_result general_sensor_info( acamera_isp_ctx_ptr_t p_ictx, aca
 {
     // parameter check
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     // right now only support SET
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_ERR, "Invalid param: set is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: set is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -469,13 +469,13 @@ static acamera_cmd_result general_sensor_preset_info( acamera_isp_ctx_ptr_t p_ic
 {
     // parameter check
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     // right now only support GET
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_ERR, "Invalid param: set is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: set is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -503,15 +503,13 @@ static acamera_cmd_result general_sensor_alloc_analog_gain( acamera_isp_ctx_ptr_
 {
     // right now only support GET
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_ERR, "Invalid param: Set is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: Set is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
 #if defined( ISP_HAS_SENSOR_FSM )
-    acamera_fsmgr_t *p_fsmgr = &p_ictx->fsmgr;
-    int32_t gain = *( (int32_t *)value );
-
-    *( (int32_t *)ret_value ) = p_fsmgr->sensor_fsm.ctrl.alloc_analog_gain( p_fsmgr->sensor_fsm.drv_priv, gain );
+    // IPA computes the gain; the kernel passes it through.
+    *( (int32_t *)ret_value ) = *( (int32_t *)value );
 
 #elif defined( ISP_HAS_USER2KERNEL_FSM )
     // Get sensor analog gain allocated by the kernel CMOS code
@@ -527,15 +525,13 @@ static acamera_cmd_result general_sensor_alloc_digital_gain( acamera_isp_ctx_ptr
 {
     // right now only support GET
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_ERR, "Invalid param: Set is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: Set is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
 #if defined( ISP_HAS_SENSOR_FSM )
-    acamera_fsmgr_t *p_fsmgr = &p_ictx->fsmgr;
-    int32_t gain = *( (int32_t *)value );
-
-    *( (int32_t *)ret_value ) = p_fsmgr->sensor_fsm.ctrl.alloc_digital_gain( p_fsmgr->sensor_fsm.drv_priv, gain );
+    // IPA computes the gain; the kernel passes it through.
+    *( (int32_t *)ret_value ) = *( (int32_t *)value );
 
 #elif defined( ISP_HAS_USER2KERNEL_FSM )
     // Get sensor digital gain allocated by the kernel CMOS code
@@ -551,15 +547,12 @@ static acamera_cmd_result general_sensor_update( acamera_isp_ctx_ptr_t p_ictx, a
 {
     // right now only support SET
     if ( CMD_DIRECTION_GET == dir ) {
-        LOG( LOG_ERR, "Invalid param: Get is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: Get is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
 #if defined( ISP_HAS_SENSOR_FSM )
-    acamera_fsmgr_t *p_fsmgr = &p_ictx->fsmgr;
-
-    p_fsmgr->sensor_fsm.ctrl.sensor_update( p_fsmgr->sensor_fsm.drv_priv );
-
+    // IPA drives the sensor over V4L2; nothing to push from the kernel.
 #elif defined( ISP_HAS_USER2KERNEL_FSM )
 // No-operation in linux-user driver
 #else
@@ -573,28 +566,13 @@ static acamera_cmd_result general_sensor_alloc_integration_time( acamera_isp_ctx
 {
     // right now only support SET
     if ( CMD_DIRECTION_GET == dir ) {
-        LOG( LOG_ERR, "Invalid param: Get is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: Get is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
 #if defined( ISP_HAS_SENSOR_FSM )
-    acamera_fsmgr_t *p_fsmgr = &p_ictx->fsmgr;
-    integration_times_t int_time;
-
-    acamera_cmd_sensor_integration_time *p_time = (acamera_cmd_sensor_integration_time *)value;
-    acamera_cmd_sensor_integration_time *p_time_out = (acamera_cmd_sensor_integration_time *)ret_value;
-
-    int_time.int_time = p_time->int_time;
-    int_time.int_time_M = p_time->int_time_M;
-    int_time.int_time_M2 = p_time->int_time_M2;
-    int_time.int_time_L = p_time->int_time_L;
-
-    p_fsmgr->sensor_fsm.ctrl.alloc_integration_time( p_fsmgr->sensor_fsm.drv_priv, &int_time );
-
-    p_time_out->int_time = int_time.int_time;
-    p_time_out->int_time_M = int_time.int_time_M;
-    p_time_out->int_time_M2 = int_time.int_time_M2;
-    p_time_out->int_time_L = int_time.int_time_L;
+    // IPA allocates the integration time; the kernel passes it through.
+    system_memcpy( ret_value, value, sizeof( acamera_cmd_sensor_integration_time ) );
 
 #elif defined( ISP_HAS_USER2KERNEL_FSM )
     // cmos FSM expects the times to be written out to ret_value.
@@ -610,7 +588,7 @@ static acamera_cmd_result general_sensor_set_wdr_mode( acamera_isp_ctx_ptr_t p_i
 {
     // right now only support SET
     if ( CMD_DIRECTION_GET == dir ) {
-        LOG( LOG_ERR, "Invalid param: Get is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: Get is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -622,14 +600,12 @@ static acamera_cmd_result general_sensor_alloc_channel_dgains( acamera_isp_ctx_p
 #if defined( ISP_HAS_SENSOR_FSM )
     // right now only support SET
     if ( CMD_DIRECTION_GET == dir ) {
-        LOG( LOG_ERR, "Invalid param: Get is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: Get is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
-    acamera_fsmgr_t *p_fsmgr = &p_ictx->fsmgr;
-
-    if ( p_fsmgr->sensor_fsm.ctrl.alloc_white_balance_gains )
-        p_fsmgr->sensor_fsm.ctrl.alloc_white_balance_gains( p_fsmgr->sensor_fsm.drv_priv, (int32_t *)value );
+    // IPA applies WB gains over V4L2; no-op in the kernel.
+    (void)value;
 
 #elif defined( ISP_HAS_USER2KERNEL_FSM )
 // No-operation in linux-user driver
@@ -646,13 +622,13 @@ static acamera_cmd_result general_defect_pixel_info( acamera_isp_ctx_ptr_t p_ict
 {
     // parameter check
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     // right now only support GET
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_ERR, "Invalid param: set is not supported" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: set is not supported" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -678,12 +654,12 @@ static acamera_cmd_result general_output_formatter_data( acamera_isp_ctx_ptr_t p
 {
     // parameter check
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -704,12 +680,12 @@ static acamera_cmd_result general_mcfe_get_slot_avail_inputs( acamera_isp_ctx_pt
 {
     // parameter check
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -730,12 +706,12 @@ static acamera_cmd_result general_hist_is_on_sqrt( acamera_isp_ctx_ptr_t p_ictx,
 {
     // parameter check
     if ( CMD_DIRECTION_SET == dir ) {
-        LOG( LOG_NOTICE, "SET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
     if ( ( CMD_DIRECTION_GET == dir ) && ( NULL == ret_value ) ) {
-        LOG( LOG_ERR, "Invalid param: ret_value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: ret_value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -756,12 +732,12 @@ static acamera_cmd_result general_buffer_address_translation( acamera_isp_ctx_pt
 {
     // parameter check
     if ( CMD_DIRECTION_GET == dir ) {
-        LOG( LOG_NOTICE, "GET is not supported." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "GET is not supported." );
         return CMD_RESULT_NOT_SUPPORTED;
     }
 
     if ( ( CMD_DIRECTION_SET == dir ) && ( NULL == value ) ) {
-        LOG( LOG_ERR, "Invalid param: value is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: value is NULL." );
         return CMD_RESULT_INVALID_PARAM;
     }
 
@@ -838,17 +814,17 @@ static P_HANDLE handle_arr[CMD_ID_MAX] = {
 acamera_cmd_result general_handle_cmd( void *p_ictx, acamera_cmd_id cmd_id, acamera_cmd_direction dir, const void *value, void *ret_value )
 {
     if ( p_ictx == NULL ) {
-        LOG( LOG_ERR, "Invalid param: p_ictx is NULL" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: p_ictx is NULL" );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     if ( cmd_id >= CMD_ID_MAX ) {
-        LOG( LOG_ERR, "Invalid param: cmd_id: %d, max: %d", cmd_id, CMD_ID_MAX );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid param: cmd_id: %d, max: %d", cmd_id, CMD_ID_MAX );
         return CMD_RESULT_INVALID_PARAM;
     }
 
     if ( ( dir != CMD_DIRECTION_SET ) && ( dir != CMD_DIRECTION_GET ) ) {
-        LOG( LOG_ERR, "Invalid cmd_direction: %d., cmd_id: %d.", dir, cmd_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid cmd_direction: %d., cmd_id: %d.", dir, cmd_id );
         return CMD_RESULT_INVALID_PARAM;
     }
 

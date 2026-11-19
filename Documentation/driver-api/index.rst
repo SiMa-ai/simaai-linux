@@ -40,6 +40,7 @@ of interest to most developers working on device drivers.
    device-io
    devfreq
    dma-buf
+   simaai-mla-reusable-memory
    component
    io-mapping
    io_ordering

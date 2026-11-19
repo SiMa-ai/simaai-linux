@@ -162,7 +162,7 @@ void mcfe_hwif_slot_cfg_CDMA_config( uint8_t slot_id, uint32_t cdma_addr, uint8_
     if ( hist_position_is_be ) {
         slot_reads |= CDMA_UNIT_METERING_HIST_1 | CDMA_UNIT_METERING_HIST_2 | CDMA_UNIT_METERING_HIST_3 | CDMA_UNIT_METERING_HIST_4;
         slot_writes |= CDMA_UNIT_METERING_HIST_1 | CDMA_UNIT_METERING_HIST_2 | CDMA_UNIT_METERING_HIST_3 | CDMA_UNIT_METERING_HIST_4;
-        LOG( LOG_DEBUG, "hist_position_is_be %d -> BE stats on slot", hist_position_is_be );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "hist_position_is_be %d -> BE stats on slot", hist_position_is_be );
     }
 
     acamera_frontend_mcfe_slot_cfg_valid_write( PHY_ADDR_ISP, slot_id, 0 );
@@ -187,7 +187,7 @@ void mcfe_hwif_slot_stat_CDMA_config( uint8_t input_id, uint32_t cdma_addr, uint
 
     uint32_t input_reads = 0x0;
     if ( !hist_position_is_be ) {
-        LOG( LOG_ERR, "hist_position_is_be %d -> FE stats on input", hist_position_is_be );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "hist_position_is_be %d -> FE stats on input", hist_position_is_be );
         input_reads |= ( 1 << input_id );
     }
 
@@ -220,7 +220,7 @@ static ISP_BUFFER_T *mcfe_hwif_buff_get_ptr( const mcfe_hwif_buf_type_t bftype, 
         break;
     }
 
-    LOG( LOG_ERR, "Invalid buffer type (%d) or index (%d).", bftype, idx );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid buffer type (%d) or index (%d).", bftype, idx );
     return NULL;
 }
 
@@ -251,7 +251,7 @@ void mcfe_hwif_buff_config( const mcfe_hwif_buf_type_t bftype,
     ISP_BUFFER_T *ptr = mcfe_hwif_buff_get_ptr( bftype, idx );
 
     if ( ptr == NULL ) {
-        LOG( LOG_ERR, "No valid buffer pointer." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No valid buffer pointer." );
         return;
     }
 
@@ -284,7 +284,7 @@ void mcfe_hwif_buff_addr_set( const mcfe_hwif_buf_type_t bftype, const uint8_t i
     if ( ptr ) {
         acamera_buffers_base_address_write( ptr, ADDR_SYSPHY2ISPAS( base_address ) );
     } else {
-        LOG( LOG_ERR, "No valid buffer pointer." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No valid buffer pointer." );
     }
 }
 
@@ -302,7 +302,7 @@ uint32_t mcfe_hwif_buff_addr_get( const mcfe_hwif_buf_type_t bftype, const uint8
     if ( ptr ) {
         return ( acamera_buffers_base_address_read( ptr ) );
     } else {
-        LOG( LOG_ERR, "No valid buffer pointer." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No valid buffer pointer." );
         return 0;
     }
 }
@@ -321,7 +321,7 @@ uint32_t mcfe_hwif_buff_line_offset_get( const mcfe_hwif_buf_type_t bftype, cons
     if ( ptr ) {
         return ( acamera_buffers_line_offset_read( ptr ) );
     } else {
-        LOG( LOG_ERR, "No valid buffer pointer." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No valid buffer pointer." );
         return 0;
     }
 }
@@ -341,7 +341,7 @@ void mcfe_hwif_buff_enable( const mcfe_hwif_buf_type_t bftype, const uint8_t idx
     if ( ptr ) {
         acamera_buffers_valid_write( ptr, onoff );
     } else {
-        LOG( LOG_ERR, "No valid buffer pointer." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No valid buffer pointer." );
     }
 }
 
@@ -361,7 +361,7 @@ void mcfe_hwif_buff_status_set( const mcfe_hwif_buf_type_t bftype, const uint8_t
     if ( ptr ) {
         acamera_buffers_status_write( ptr, status );
     } else {
-        LOG( LOG_ERR, "No valid buffer pointer." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No valid buffer pointer." );
     }
 }
 
@@ -381,7 +381,7 @@ uint8_t mcfe_hwif_buff_status_get( mcfe_hwif_buf_type_t bftype, const uint8_t id
     if ( ptr ) {
         return acamera_buffers_status_read( ptr );
     } else {
-        LOG( LOG_ERR, "No valid buffer pointer." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No valid buffer pointer." );
         return 0;
     }
 }
@@ -402,7 +402,7 @@ uint32_t mcfe_hwif_buff_crc_get( mcfe_hwif_buf_type_t bftype, const uint8_t idx 
     if ( ptr ) {
         return acamera_buffers_buffer_crc_read( ptr );
     } else {
-        LOG( LOG_ERR, "No valid buffer pointer." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No valid buffer pointer." );
         return 0;
     }
 }

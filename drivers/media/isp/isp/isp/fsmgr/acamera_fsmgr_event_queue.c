@@ -31,7 +31,7 @@ void acamera_event_queue_push( acamera_event_queue_ptr_t p_queue, int event, uns
 
     if ( p_queue->head < 0 || p_queue->head >= p_queue->data_buf_size ||
          p_queue->tail < 0 || p_queue->tail >= p_queue->data_buf_size ) {
-        LOG( LOG_ERR, "Event Queue Corrupted" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Event Queue Corrupted" );
     }
 
     if ( ( p_queue->filter == 0 ) || ( p_queue->filter & event_flags ) ) {
@@ -45,7 +45,7 @@ void acamera_event_queue_push( acamera_event_queue_ptr_t p_queue, int event, uns
             // Check if current flags don't exceed maximum size
             if ( ( p_queue->filter_max & event_flags ) != event_flags ) {
 
-                LOG( LOG_ERR, "Event flags exceed maximum value and will be truncated (event id: %d, flags: 0x%x, flags_max: 0x%x).",
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Event flags exceed maximum value and will be truncated (event id: %d, flags: 0x%x, flags_max: 0x%x).",
                      event,
                      event_flags,
                      p_queue->filter_max );
@@ -71,7 +71,7 @@ void acamera_event_queue_push( acamera_event_queue_ptr_t p_queue, int event, uns
         if ( pos != p_queue->tail ) {
             p_queue->head = pos;
         } else {
-            LOG( LOG_CRIT, "Event Queue overflow" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Event Queue overflow" );
         }
     }
 
@@ -90,7 +90,7 @@ int acamera_event_queue_pop( acamera_event_queue_ptr_t p_queue )
 
     if ( p_queue->head < 0 || p_queue->head >= p_queue->data_buf_size ||
          p_queue->tail < 0 || p_queue->tail >= p_queue->data_buf_size ) {
-        LOG( LOG_ERR, "Event Queue Corrupted" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Event Queue Corrupted" );
     }
 
     uint16_t sample = acamera_loop_buffer_read( p_queue, 0 );
@@ -109,7 +109,7 @@ int acamera_event_queue_pop( acamera_event_queue_ptr_t p_queue )
             // Check if current flags don't exceed maximum size
             if ( ( p_queue->filter_max & event_flags ) != event_flags ) {
 
-                LOG( LOG_ERR, "Event flags exceed maximum value and will be truncated (event id: %d, flags: 0x%x, flags_max: 0x%x).",
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Event flags exceed maximum value and will be truncated (event id: %d, flags: 0x%x, flags_max: 0x%x).",
                      event,
                      event_flags,
                      p_queue->filter_max );

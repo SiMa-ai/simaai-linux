@@ -71,7 +71,7 @@ static sfs_stream_t *get_stream( const uint32_t context_id, const aframe_type_t 
 {
 
     if ( context_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0;%d].",
              context_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? FIRMWARE_CONTEXT_NUMBER - 1 : 0 ) );
         return NULL;
     }
@@ -87,7 +87,7 @@ static sfs_stream_t *get_stream( const uint32_t context_id, const aframe_type_t 
         return &( sfs_contexts[context_id].meta );
 
     default:
-        LOG( LOG_ERR, "Invalid parameter. Incorrect frame type value (%d).", type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Incorrect frame type value (%d).", type );
         return NULL;
     }
 }
@@ -135,7 +135,7 @@ static int alloc_frame( const frame_stream_cfg_t *stream_cfg, aframe_t *frame )
 
         const uint32_t data_size = plane_cfg->line_offset * plane_cfg->height;
         if ( data_size == 0 ) {
-            LOG( LOG_ERR, "Failed to allocate frame. Incorrect plane parameters (line offset: %u, height: %u)",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to allocate frame. Incorrect plane parameters (line offset: %u, height: %u)",
                  plane_cfg->line_offset, plane_cfg->height );
             goto frame_alloc_failed;
         }
@@ -144,7 +144,7 @@ static int alloc_frame( const frame_stream_cfg_t *stream_cfg, aframe_t *frame )
         plane->address.high = 0;
 
         if ( system_cma_alloc( &( plane->virt_addr ), &( plane->address.low ), data_size ) ) {
-            LOG( LOG_ERR, "Failed to allocate frame (plane: %d, plane data size: %u)", i, data_size );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to allocate frame (plane: %d, plane data size: %u)", i, data_size );
             plane->virt_addr = NULL;
             plane->address.low = 0;
             goto frame_alloc_failed;
@@ -176,14 +176,14 @@ frame_alloc_failed:
 int sfs_streamer_create_stream( const frame_stream_cfg_t *stream_cfg )
 {
     if ( stream_cfg == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame stream configuration pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame stream configuration pointer is NULL." );
         return -1;
     } else if ( ( stream_cfg->num_frames == 0 ) || ( stream_cfg->num_frames > SFS_STREAM_MAX_FRAMES ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Requested number of frames (%u) is out of range [1;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Requested number of frames (%u) is out of range [1;%d].",
              stream_cfg->num_frames, SFS_STREAM_MAX_FRAMES );
         return -1;
     } else if ( ( stream_cfg->num_planes == 0 ) || ( stream_cfg->num_planes > AFRAME_MAX_PLANES ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Requested number of planes (%u) is out of range [1;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Requested number of planes (%u) is out of range [1;%d].",
              stream_cfg->num_planes, AFRAME_MAX_PLANES );
         return -1;
     }
@@ -195,12 +195,12 @@ int sfs_streamer_create_stream( const frame_stream_cfg_t *stream_cfg )
     }
 
     if ( stream->initialised ) {
-        LOG( LOG_ERR, "Failed to create a stream. Stream has been already created." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create a stream. Stream has been already created." );
         return -1;
     }
 
     if ( system_mutex_init( &( stream->frame_pool.lock ) ) ) {
-        LOG( LOG_ERR, "Failed to create a stream. Failed to initialise stream mutex." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create a stream. Failed to initialise stream mutex." );
         return -1;
     }
 
@@ -216,7 +216,7 @@ int sfs_streamer_create_stream( const frame_stream_cfg_t *stream_cfg )
         system_memset( frame, 0, sizeof( *frame ) );
 
         if ( alloc_frame( stream_cfg, frame ) ) {
-            LOG( LOG_ERR, "Failed to create a stream. Frame allocation failed." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create a stream. Frame allocation failed." );
 
             // Update stream num frames so deallocate function
             // could clean up partially allocated frames ( with plane allocation failed )
@@ -287,12 +287,12 @@ int sfs_streamer_destroy_stream( const unsigned int ctx_id, const aframe_type_t 
 int sfs_streamer_put_frame( aframe_t *frame )
 {
     if ( frame == NULL ) {
-        LOG( LOG_ERR, "Incorrect parameter. Frame pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Incorrect parameter. Frame pointer is NULL." );
         return -1;
     }
 
     if ( frame->source != AFRAME_SOURCE_SIMPLE_FRAME_STORAGE ) {
-        LOG( LOG_ERR, "Incorrect parameter. Frame (context id: %u, type: %d, source: %d) doesn't belong to SFS.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Incorrect parameter. Frame (context id: %u, type: %d, source: %d) doesn't belong to SFS.",
              frame->context_id, frame->type, frame->source );
         return -1;
     }
@@ -304,7 +304,7 @@ int sfs_streamer_put_frame( aframe_t *frame )
     }
 
     if ( !stream->initialised ) {
-        LOG( LOG_ERR, "Failed to put frame. Stream is not initialised." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to put frame. Stream is not initialised." );
         return -1;
     }
 
@@ -318,7 +318,7 @@ int sfs_streamer_put_frame( aframe_t *frame )
 int sfs_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type, const aframe_state_t state, aframe_t **frame )
 {
     if ( frame == NULL ) {
-        LOG( LOG_ERR, "Incorrect parameter. Frame pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Incorrect parameter. Frame pointer is NULL." );
         return -1;
     }
 
@@ -329,7 +329,7 @@ int sfs_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type,
     }
 
     if ( !stream->initialised ) {
-        LOG( LOG_ERR, "Failed to get frame. Stream is not initialised." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get frame. Stream is not initialised." );
         return -1;
     }
 
@@ -338,7 +338,7 @@ int sfs_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type,
     system_mutex_unlock( stream->frame_pool.lock );
 
     if ( *frame == NULL ) {
-        LOG( LOG_ERR, "Failed to get frame from SSF (context id: %u, type: %d). No frames available.", ctx_id, type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get frame from SSF (context id: %u, type: %d). No frames available.", ctx_id, type );
         return -1;
     }
 

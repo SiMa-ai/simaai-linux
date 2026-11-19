@@ -345,4 +345,13 @@ config POWER_MLXBF
 	help
 	  This driver supports reset or low power mode handling for Mellanox BlueField.
 
+config POWER_RESET_SIMAAI
+	tristate "SiMa.ai Modalix power-off driver"
+	depends on SIMAAI_HPI
+	depends on OF
+	help
+	  Power-off support for the SiMa.ai Modalix SoC. On
+	  shutdown the A65 kicks of poweroff sequence over the
+	  HPI mailbox to the secure processor. Without it the
+	  board reboots due to watchdog reset.
 endif

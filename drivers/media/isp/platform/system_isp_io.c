@@ -24,7 +24,10 @@
 #include <asm/io.h>
 
 
-#define ISP_PHYS_ADDRESS_SPACE_SIZE (0x1FFFF)
+/* A size, not a last offset: the aperture is 128 KiB. Must match
+ * ACAMERA_ISP_REG_APERTURE_SIZE, which bounds the custom-setting writes
+ * against this mapping. */
+#define ISP_PHYS_ADDRESS_SPACE_SIZE (0x20000)
 #define ISP_CDMA_ADDRESS_SPACE_SIZE	(128*1024*1024)
 
 extern struct simaai_stu *stu;
@@ -79,7 +82,7 @@ int32_t system_isp_init( void )
 
 	isp_mem.reg_addr = ioremap(isp_mem.reg_phys_addr, isp_mem.reg_size);
 	if (!isp_mem.reg_addr) {
-		LOG( LOG_CRIT, "Failed to map register address space %#llx, size : %#x",
+		LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to map register address space %#llx, size : %#x",
 								isp_mem.reg_phys_addr, isp_mem.reg_size);
 		return -1;
 	}
@@ -98,7 +101,7 @@ int32_t system_isp_init( void )
 
 	isp_mem.cdma_addr = ioremap(isp_mem.cdma_phys_addr, isp_mem.cdma_size);
 	if (!isp_mem.cdma_addr) {
-		LOG( LOG_CRIT, "Failed to map cdma address space %#llx, size : %#x",
+		LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to map cdma address space %#llx, size : %#x",
 								isp_mem.cdma_phys_addr, isp_mem.cdma_size);
 		return -1;
 	}
@@ -246,7 +249,7 @@ void system_isp_write_32( uint32_t addr, uint32_t data )
 	} else if ((addr >= isp_mem.cdma_bus_addr) && (addr < (isp_mem.cdma_bus_addr + isp_mem.cdma_size))) {
 		writel(data, isp_mem.cdma_addr + (addr - isp_mem.cdma_bus_addr));
 	} else {
-		LOG( LOG_ERR, "No match for %#lx", addr);
+		LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No match for %#lx", addr);
 		dma_addr_t dma_addr;
 
 		if (!stu) {

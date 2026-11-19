@@ -28,6 +28,11 @@
 	};
 };
 
+&cpu0 {
+	/delete-property/ clocks;
+	/delete-property/ operating-points-v2;
+};
+
 &dms0_reserved {
 	reg = <0x00000011 0x20000000 0x00000000 0xA0000000>;
 };

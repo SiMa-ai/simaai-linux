@@ -33,6 +33,7 @@
 #include <linux/media/simaai/modalix_isp_v4l2.h>
 
 #include "acamera_configuration.h"
+#include "isp-sensor-subdev.h"
 #include "acamera_fsmgr_general_router.h"  /* for sizeof(acamera_cmd_sensor_info) */
 #include "acamera_ctrl_channel.h"          /* modalix_isp_install_user_calibrations */
 #include "isp-v4l2-meta-stats.h"
@@ -274,6 +275,9 @@ static int modalix_meta_stats_s_ctrl( struct v4l2_ctrl *ctrl )
 	case MODALIX_ISP_V4L2_CID_ISP_BYPASS_CONFIG:
 		return modalix_isp_apply_pipeline_bypass( dev->ctx_id,
 		                                          (uint32_t)ctrl->val );
+	case MODALIX_ISP_V4L2_CID_SENSOR_SET_EXPOSURES:
+		return isp_sensor_subdev_set_exposures( dev->ctx_id,
+		                                        (uint32_t)ctrl->val );
 	}
 	return -EINVAL;
 }
@@ -364,6 +368,21 @@ static const struct v4l2_ctrl_config modalix_meta_stats_ctrl_calibration_blob = 
 	.dims     = { MODALIX_ISP_V4L2_CALIBRATION_BLOB_MAX },
 };
 
+/* IPA -> sensor exposure count, brokered by the ISP. EXECUTE_ON_WRITE so a
+ * write always reaches the sensor even when the value is unchanged; not
+ * volatile, because the authoritative reading is the sensor-info blob. */
+static const struct v4l2_ctrl_config modalix_meta_stats_ctrl_set_exposures = {
+	.ops   = &modalix_meta_stats_ctrl_ops,
+	.id    = MODALIX_ISP_V4L2_CID_SENSOR_SET_EXPOSURES,
+	.name  = "Modalix sensor exposures per frame",
+	.type  = V4L2_CTRL_TYPE_INTEGER,
+	.flags = V4L2_CTRL_FLAG_WRITE_ONLY | V4L2_CTRL_FLAG_EXECUTE_ON_WRITE,
+	.min   = 1,
+	.max   = MODALIX_SENSOR_EXPOSURES_MAX,
+	.step  = 1,
+	.def   = 1,
+};
+
 /* IPA → kernel ISP pipeline bypass word (Mali reg 0xE040). Full s32
  * range so any bit pattern (incl. bit 31) round-trips. VOLATILE so
  * G_EXT_CTRLS reads the live register; EXECUTE_ON_WRITE so every
@@ -385,7 +404,7 @@ static int modalix_meta_stats_init_ctrls( struct modalix_meta_stats_dev *dev )
 	struct v4l2_ctrl *c;
 	int               rc;
 
-	rc = v4l2_ctrl_handler_init( &dev->ctrl_hdl, 6 );
+	rc = v4l2_ctrl_handler_init( &dev->ctrl_hdl, 7 );
 	if ( rc ) {
 		return rc;
 	}
@@ -408,9 +427,15 @@ static int modalix_meta_stats_init_ctrls( struct modalix_meta_stats_dev *dev )
 	c = v4l2_ctrl_new_custom( &dev->ctrl_hdl,
 	                          &modalix_meta_stats_ctrl_isp_bypass, NULL );
 	if ( !c ) { goto fail; }
+	c = v4l2_ctrl_new_custom( &dev->ctrl_hdl,
+	                          &modalix_meta_stats_ctrl_set_exposures, NULL );
+	if ( !c ) { goto fail; }
 
 	if ( dev->ctrl_hdl.error ) {
 		rc = dev->ctrl_hdl.error;
+		LOG_CAT( ALOG_CAT_V4L2, LOG_ERR,
+		     "ctx %u: meta-stats control handler failed (%d); the IPA cannot push calibrations",
+		     dev->ctx_id, rc );
 		goto fail;
 	}
 
@@ -471,7 +496,7 @@ int modalix_meta_stats_init( uint32_t ctx_id,
 
 	rc = modalix_meta_stats_init_ctrls( dev );
 	if ( rc ) {
-		LOG( LOG_ERR, "ctx %u: ctrls init failed, rc=%d", ctx_id, rc );
+		LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "ctx %u: ctrls init failed, rc=%d", ctx_id, rc );
 		vb2_queue_release( &dev->q );
 		mutex_destroy( &dev->queue_lock );
 		kfree( dev );
@@ -493,7 +518,7 @@ int modalix_meta_stats_init( uint32_t ctx_id,
 
 	rc = video_register_device( vdev, VFL_TYPE_VIDEO, -1 );
 	if ( rc ) {
-		LOG( LOG_ERR, "ctx %u: video_register_device failed, rc=%d",
+		LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "ctx %u: video_register_device failed, rc=%d",
 		     ctx_id, rc );
 		v4l2_ctrl_handler_free( &dev->ctrl_hdl );
 		vb2_queue_release( &dev->q );
@@ -506,7 +531,7 @@ int modalix_meta_stats_init( uint32_t ctx_id,
 		g_meta_devs[ctx_id] = dev;
 	}
 	*out = dev;
-	LOG( LOG_INFO, "ctx %u: /dev/video%d registered (%s)",
+	LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "ctx %u: /dev/video%d registered (%s)",
 	     ctx_id, vdev->num, vdev->name );
 	return 0;
 }
@@ -526,7 +551,7 @@ void modalix_meta_stats_exit( struct modalix_meta_stats_dev *dev )
 	v4l2_ctrl_handler_free( &dev->ctrl_hdl );
 	vb2_queue_release( &dev->q );
 	mutex_destroy( &dev->queue_lock );
-	LOG( LOG_INFO, "meta-stats ctx %u released", dev->ctx_id );
+	LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "meta-stats ctx %u released", dev->ctx_id );
 	kfree( dev );
 }
 
@@ -540,10 +565,14 @@ struct modalix_meta_stats_dev *modalix_meta_stats_lookup( uint32_t ctx_id )
 
 void modalix_meta_stats_publish_ae( uint32_t        ctx_id,
                                     const uint32_t *histogram,
-                                    uint32_t        sum )
+                                    uint32_t        sum,
+                                    const void     *zone_bins,
+                                    uint32_t        zones_h,
+                                    uint32_t        zones_v )
 {
 	struct modalix_meta_stats_dev   *dev;
 	struct modalix_isp_stats_buffer *p;
+	uint32_t                         zones = zones_h * zones_v;
 
 	dev = modalix_meta_stats_lookup( ctx_id );
 	if ( !dev || !histogram ) {
@@ -560,6 +589,14 @@ void modalix_meta_stats_publish_ae( uint32_t        ctx_id,
 	p->timestamp_ns     = ktime_get_ns();
 	memcpy( p->ae.histogram, histogram, sizeof( p->ae.histogram ) );
 	p->ae.histogram_sum = sum;
+
+	if ( zone_bins && zones && zones <= MODALIX_ISP_AE_MAX_ZONES ) {
+		memcpy( p->ae_zones.zones, zone_bins,
+		        zones * sizeof( struct modalix_isp_ae_zone ) );
+		p->ae_zones.zones_h = (uint16_t)zones_h;
+		p->ae_zones.zones_v = (uint16_t)zones_v;
+		p->valid_mask      |= MODALIX_ISP_STATS_VALID_AE_ZONES;
+	}
 
 	(void)modalix_meta_stats_publish( dev, p );
 	kfree( p );

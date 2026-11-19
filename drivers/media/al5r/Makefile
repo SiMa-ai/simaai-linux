@@ -1,6 +1,7 @@
 # real (hardware) driver
 obj-$(CONFIG_ALLEGRO_CODEC_DRIVER) += al5r.o
-al5r-objs := al_main.o al_ip.o al_alloc.o al_alloc_ioctl.o
+al5r-objs := al_main.o al_ip.o al_cmd.o al_alloc.o al_alloc_ioctl.o
+al5r-$(CONFIG_ALLEGRO_CODEC_KUNIT) += al5r_kunit.o
 
 ifeq ($(CONFIG_ALLEGRO_NO_DMABUF),1)
   al5r-objs += al_no_dmabuf.o

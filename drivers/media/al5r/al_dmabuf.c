@@ -5,6 +5,7 @@
 ******************************************************************************/
 
 #include "al_dmabuf.h"
+#include "al_ip.h"
 
 #include <linux/uaccess.h>
 #include <linux/dma-buf.h>
@@ -241,6 +242,7 @@ static void al5_dmabuf_release(struct dma_buf *buf)
 	struct al5_dmabuf_priv *dinfo = buf->priv;
 	struct al5_dma_buffer *buffer = dinfo->buffer;
 
+
 	if (dinfo->sgt_base) {
 		sg_free_table(dinfo->sgt_base);
 		kfree(dinfo->sgt_base);
@@ -428,6 +430,127 @@ int al5_allocate_dmabuf_cached(struct device *dev, size_t size, u32 *fd)
         return 0;
 }
 
+
+/* One retained import: the buffer, its attachment and its mapping stay
+ * alive together, because the bus address handed to userspace is only
+ * meaningful while the mapping exists.
+ */
+struct al5_import {
+	struct list_head node;
+	struct dma_buf *dbuf;
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
+	dma_addr_t addr;
+	unsigned int refs;
+};
+
+struct al5_import_set {
+	struct list_head imports;
+	struct mutex lock;
+	refcount_t refs;
+};
+
+struct al5_import_set *al5_dmabuf_alloc_import_set(struct device *dev)
+{
+	struct al5_import_set *set = kzalloc(sizeof(*set), GFP_KERNEL);
+
+	if (!set)
+		return NULL;
+	INIT_LIST_HEAD(&set->imports);
+	mutex_init(&set->lock);
+	refcount_set(&set->refs, 1);
+	return set;
+}
+
+struct al5_import_set *al5_dmabuf_get_import_set(struct al5r_codec_chan *chan)
+{
+	struct al5_import_set *set = chan->import_set;
+
+	if (set)
+		refcount_inc(&set->refs);
+	return set;
+}
+
+void al5_dmabuf_put_import_set(struct al5_import_set *set)
+{
+	struct al5_import *imp, *tmp;
+
+	if (!set || !refcount_dec_and_test(&set->refs))
+		return;
+
+	list_for_each_entry_safe(imp, tmp, &set->imports, node) {
+		list_del(&imp->node);
+		dma_buf_unmap_attachment(imp->attach, imp->sgt,
+					 DMA_BIDIRECTIONAL);
+		dma_buf_detach(imp->dbuf, imp->attach);
+		dma_buf_put(imp->dbuf);
+		kfree(imp);
+	}
+	mutex_destroy(&set->lock);
+	kfree(set);
+}
+
+int al5_dmabuf_import_address(struct al5r_codec_chan *chan, struct device *dev,
+			      u32 fd, dma_addr_t *bus_address)
+{
+	struct al5_import_set *set = chan->import_set;
+	struct al5_import *imp;
+	struct dma_buf *dbuf;
+	int err = 0;
+
+	if (!set)
+		return -ENOMEM;
+
+	dbuf = dma_buf_get(fd);
+	if (IS_ERR(dbuf))
+		return -EINVAL;
+
+	mutex_lock(&set->lock);
+	list_for_each_entry(imp, &set->imports, node) {
+		if (imp->dbuf != dbuf)
+			continue;
+		/* already mapped for this channel: share it */
+		++imp->refs;
+		*bus_address = imp->addr;
+		mutex_unlock(&set->lock);
+		dma_buf_put(dbuf);
+		return 0;
+	}
+
+	imp = kzalloc(sizeof(*imp), GFP_KERNEL);
+	if (!imp) {
+		err = -ENOMEM;
+		goto fail_alloc;
+	}
+	imp->dbuf = dbuf;
+	imp->attach = dma_buf_attach(dbuf, dev);
+	if (IS_ERR(imp->attach)) {
+		err = -EINVAL;
+		goto fail_attach;
+	}
+
+	imp->sgt = dma_buf_map_attachment(imp->attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(imp->sgt)) {
+		err = -EINVAL;
+		goto fail_map;
+	}
+	imp->addr = sg_dma_address(imp->sgt->sgl);
+	imp->refs = 1;
+
+	list_add_tail(&imp->node, &set->imports);
+	*bus_address = imp->addr;
+	mutex_unlock(&set->lock);
+	return 0;
+
+fail_map:
+	dma_buf_detach(dbuf, imp->attach);
+fail_attach:
+	kfree(imp);
+fail_alloc:
+	mutex_unlock(&set->lock);
+	dma_buf_put(dbuf);
+	return err;
+}
 
 int al5_dmabuf_get_address(struct device *dev, u32 fd, dma_addr_t *bus_address)
 {

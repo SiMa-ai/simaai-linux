@@ -140,6 +140,10 @@
 #define IMX219_DEFAULT_LINK_FREQ_4LANE_UNSUPPORTED	363000000
 #define IMX219_DEFAULT_LINK_FREQ_4LANE	364000000
 
+/* Reduced two-lane link, for receivers that cannot take the full rate */
+#define IMX219_LINK_FREQ_2LANE_LOW	296000000
+#define IMX219_PIXEL_RATE_2LANE_LOW	118400000
+
 /* IMX219 native and active pixel array size. */
 #define IMX219_NATIVE_WIDTH		3296U
 #define IMX219_NATIVE_HEIGHT		2480U
@@ -155,8 +159,8 @@ struct imx219_mode {
 	/* Frame height */
 	unsigned int height;
 
-	/* V-timing */
-	unsigned int fll_def;
+	/* Frame-rate target, indexed [0] = two lanes, [1] = four lanes. */
+	unsigned int fps_target[2];
 };
 
 static const struct cci_reg_sequence imx219_common_regs[] = {
@@ -199,9 +203,7 @@ static const struct cci_reg_sequence imx219_2lane_regs[] = {
 	{ IMX219_REG_VTSYCK_DIV, 1 },
 	{ IMX219_REG_PREPLLCK_VT_DIV, 3 },	/* 0x03 = AUTO set */
 	{ IMX219_REG_PREPLLCK_OP_DIV, 3 },	/* 0x03 = AUTO set */
-	{ IMX219_REG_PLL_VT_MPY, 57 },
 	{ IMX219_REG_OPSYCK_DIV, 1 },
-	{ IMX219_REG_PLL_OP_MPY, 114 },
 
 	/* 2-Lane CSI Mode */
 	{ IMX219_REG_CSI_LANE_MODE, IMX219_CSI_2_LANE_MODE },
@@ -213,9 +215,7 @@ static const struct cci_reg_sequence imx219_4lane_regs[] = {
 	{ IMX219_REG_VTSYCK_DIV, 1 },
 	{ IMX219_REG_PREPLLCK_VT_DIV, 3 },	/* 0x03 = AUTO set */
 	{ IMX219_REG_PREPLLCK_OP_DIV, 3 },	/* 0x03 = AUTO set */
-	{ IMX219_REG_PLL_VT_MPY, 88 },
 	{ IMX219_REG_OPSYCK_DIV, 1 },
-	{ IMX219_REG_PLL_OP_MPY, 91 },
 
 	/* 4-Lane CSI Mode */
 	{ IMX219_REG_CSI_LANE_MODE, IMX219_CSI_4_LANE_MODE },
@@ -223,6 +223,7 @@ static const struct cci_reg_sequence imx219_4lane_regs[] = {
 
 static const s64 imx219_link_freq_menu[] = {
 	IMX219_DEFAULT_LINK_FREQ,
+	IMX219_LINK_FREQ_2LANE_LOW,
 };
 
 static const s64 imx219_link_freq_4lane_menu[] = {
@@ -232,6 +233,30 @@ static const s64 imx219_link_freq_4lane_menu[] = {
 	 * v4l2_link_freq_to_bitmap
 	 */
 	IMX219_DEFAULT_LINK_FREQ_4LANE_UNSUPPORTED,
+};
+
+/*
+ * PLL per link frequency: op_mpy sets the link to INCK / 3 * op_mpy / 2, and
+ * vt_mpy tracks it so pixel_rate * bpp still fits lanes * 2 * link frequency.
+ */
+struct imx219_pll_cfg {
+	u16 vt_mpy;
+	u16 op_mpy;
+	u32 pixel_rate;
+};
+
+/* Indexed by imx219_link_freq_menu[] */
+static const struct imx219_pll_cfg imx219_pll_cfgs[] = {
+	/* 456 MHz, 912 Mbps/lane */
+	{ .vt_mpy = 57, .op_mpy = 114, .pixel_rate = IMX219_PIXEL_RATE },
+	/* 296 MHz, 592 Mbps/lane */
+	{ .vt_mpy = 37, .op_mpy = 74, .pixel_rate = IMX219_PIXEL_RATE_2LANE_LOW },
+};
+
+/* Both entries are the same 364 MHz link, the second menu entry being an alias */
+static const struct imx219_pll_cfg imx219_pll_cfgs_4lane[] = {
+	{ .vt_mpy = 88, .op_mpy = 91, .pixel_rate = IMX219_PIXEL_RATE_4LANE },
+	{ .vt_mpy = 88, .op_mpy = 91, .pixel_rate = IMX219_PIXEL_RATE_4LANE },
 };
 
 static const char * const imx219_test_pattern_menu[] = {
@@ -314,27 +339,30 @@ static const struct imx219_mode supported_modes[] = {
 		/* 8MPix 15fps mode */
 		.width = 3280,
 		.height = 2464,
-		.fll_def = 3526,
+		.fps_target = { 15, 15 },
 	},
 	{
 		/* 1080P 30fps cropped */
 		.width = 1920,
 		.height = 1080,
-		.fll_def = 1763,
+		.fps_target = { 30, 30 },
 	},
 	{
 		/* 2x2 binned 60fps mode */
 		.width = 1640,
 		.height = 1232,
-		.fll_def = 1707,
+		.fps_target = { 30, 30 },
 	},
 	{
 		/* 640x480 60fps mode */
 		.width = 640,
 		.height = 480,
-		.fll_def = 1707,
+		.fps_target = { 30, 30 },
 	},
 };
+
+/* Index into supported_modes[] used for the initial format. */
+#define IMX219_DEFAULT_MODE		1
 
 struct imx219 {
 	struct v4l2_subdev sd;
@@ -357,8 +385,14 @@ struct imx219 {
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *hblank;
 
+	/* PLL settings of the lane count, indexed by the link frequency */
+	const struct imx219_pll_cfg *pll_cfgs;
+
 	/* Two or Four lanes */
 	u8 lanes;
+
+	/* Index into the lane count's link frequency menu */
+	u8 link_freq_idx;
 
 	/* Virtual channel ID */
 	u8 vc_id;
@@ -552,17 +586,40 @@ static const struct v4l2_ctrl_ops imx219_ctrl_ops = {
 
 static unsigned long imx219_get_pixel_rate(struct imx219 *imx219)
 {
-	return (imx219->lanes == 2) ? IMX219_PIXEL_RATE : IMX219_PIXEL_RATE_4LANE;
+	return imx219->pll_cfgs[imx219->link_freq_idx].pixel_rate;
+}
+
+/*
+ * Hold the frame-rate target with the line length, so the frame length and
+ * the line burst stay minimal. Never go under the mode's line minimum.
+ */
+static unsigned int imx219_get_llp_def(struct imx219 *imx219,
+				       const struct imx219_mode *mode,
+				       unsigned int llp_min)
+{
+	unsigned int fps = mode->fps_target[imx219->lanes == 2 ? 0 : 1];
+	unsigned int llp;
+
+	if (!fps)
+		return llp_min;
+
+	/* Round down: a short line overshoots the target, a long one misses. */
+	llp = imx219_get_pixel_rate(imx219) /
+	      ((mode->height + IMX219_VBLANK_MIN) * fps);
+
+	return max(llp, llp_min);
 }
 
 /* Initialize control handlers */
 static int imx219_init_controls(struct imx219 *imx219)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&imx219->sd);
-	const struct imx219_mode *mode = &supported_modes[0];
+	const struct imx219_mode *mode = &supported_modes[IMX219_DEFAULT_MODE];
 	struct v4l2_ctrl_handler *ctrl_hdlr;
 	struct v4l2_fwnode_device_properties props;
 	int exposure_max, exposure_def;
+	unsigned int link_freq_max;
+	unsigned int llp_def;
 	int i, ret;
 
 	ctrl_hdlr = &imx219->ctrl_handler;
@@ -577,26 +634,34 @@ static int imx219_init_controls(struct imx219 *imx219)
 					       imx219_get_pixel_rate(imx219), 1,
 					       imx219_get_pixel_rate(imx219));
 
+	/*
+	 * Only the two-lane menu advertises more than one entry, the extra
+	 * four-lane one existing solely for v4l2_link_freq_to_bitmap().
+	 */
+	link_freq_max = (imx219->lanes == 2) ?
+			ARRAY_SIZE(imx219_link_freq_menu) - 1 : 0;
+
 	imx219->link_freq =
 		v4l2_ctrl_new_int_menu(ctrl_hdlr, &imx219_ctrl_ops,
-				       V4L2_CID_LINK_FREQ,
-				       ARRAY_SIZE(imx219_link_freq_menu) - 1, 0,
+				       V4L2_CID_LINK_FREQ, link_freq_max,
+				       imx219->link_freq_idx,
 				       (imx219->lanes == 2) ? imx219_link_freq_menu :
 				       imx219_link_freq_4lane_menu);
 	if (imx219->link_freq)
 		imx219->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	/* Initial blanking and exposure. Limits are updated during set_fmt */
+	llp_def = imx219_get_llp_def(imx219, mode, IMX219_LLP_MIN);
 	imx219->vblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx219_ctrl_ops,
 					   V4L2_CID_VBLANK, IMX219_VBLANK_MIN,
 					   IMX219_FLL_MAX - mode->height, 1,
-					   mode->fll_def - mode->height);
+					   IMX219_VBLANK_MIN);
 	imx219->hblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx219_ctrl_ops,
 					   V4L2_CID_HBLANK,
 					   IMX219_LLP_MIN - mode->width,
 					   IMX219_LLP_MAX - mode->width, 1,
-					   IMX219_LLP_MIN - mode->width);
-	exposure_max = mode->fll_def - 4;
+					   llp_def - mode->width);
+	exposure_max = mode->height + IMX219_VBLANK_MIN - 4;
 	exposure_def = (exposure_max < IMX219_EXPOSURE_DEFAULT) ?
 		exposure_max : IMX219_EXPOSURE_DEFAULT;
 	imx219->exposure = v4l2_ctrl_new_std(ctrl_hdlr, &imx219_ctrl_ops,
@@ -722,11 +787,21 @@ static int imx219_set_framefmt(struct imx219 *imx219,
 
 static int imx219_configure_lanes(struct imx219 *imx219)
 {
+	const struct imx219_pll_cfg *pll;
+	int ret = 0;
+
 	/* Write the appropriate PLL settings for the number of MIPI lanes */
-	return cci_multi_reg_write(imx219->regmap,
-				  imx219->lanes == 2 ? imx219_2lane_regs : imx219_4lane_regs,
-				  imx219->lanes == 2 ? ARRAY_SIZE(imx219_2lane_regs) :
-				  ARRAY_SIZE(imx219_4lane_regs), NULL);
+	cci_multi_reg_write(imx219->regmap,
+			    imx219->lanes == 2 ? imx219_2lane_regs : imx219_4lane_regs,
+			    imx219->lanes == 2 ? ARRAY_SIZE(imx219_2lane_regs) :
+			    ARRAY_SIZE(imx219_4lane_regs), &ret);
+
+	/* ... and the multipliers of the selected link frequency */
+	pll = &imx219->pll_cfgs[imx219->link_freq_idx];
+	cci_write(imx219->regmap, IMX219_REG_PLL_VT_MPY, pll->vt_mpy, &ret);
+	cci_write(imx219->regmap, IMX219_REG_PLL_OP_MPY, pll->op_mpy, &ret);
+
+	return ret;
 };
 
 static int imx219_enable_streams(struct v4l2_subdev *sd,
@@ -873,10 +948,8 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *format;
 	struct v4l2_rect *crop;
 	u8 bin_h, bin_v;
-	u32 prev_line_len;
 
 	format = v4l2_subdev_state_get_format(state, 0);
-	prev_line_len = format->width + imx219->hblank->val;
 
 	mode = v4l2_find_nearest_size(supported_modes,
 				      ARRAY_SIZE(supported_modes),
@@ -900,25 +973,10 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 	crop->top = (IMX219_NATIVE_HEIGHT - crop->height) / 2;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+		unsigned int llp_def, llp_min;
 		int exposure_max;
 		int exposure_def;
-		int hblank, llp_min;
 		int pixel_rate;
-
-		/* Update limits and set FPS to default */
-		__v4l2_ctrl_modify_range(imx219->vblank, IMX219_VBLANK_MIN,
-					 IMX219_FLL_MAX - mode->height, 1,
-					 mode->fll_def - mode->height);
-		__v4l2_ctrl_s_ctrl(imx219->vblank,
-				   mode->fll_def - mode->height);
-		/* Update max exposure while meeting expected vblanking */
-		exposure_max = mode->fll_def - 4;
-		exposure_def = (exposure_max < IMX219_EXPOSURE_DEFAULT) ?
-			exposure_max : IMX219_EXPOSURE_DEFAULT;
-		__v4l2_ctrl_modify_range(imx219->exposure,
-					 imx219->exposure->minimum,
-					 exposure_max, imx219->exposure->step,
-					 exposure_def);
 
 		/*
 		 * With analog binning the default minimum line length of 3448
@@ -929,18 +987,27 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 		imx219_get_binning(state, &bin_h, &bin_v);
 		llp_min = (bin_h & bin_v) == IMX219_BINNING_X2_ANALOG ?
 				  IMX219_BINNED_LLP_MIN : IMX219_LLP_MIN;
+		llp_def = imx219_get_llp_def(imx219, mode, llp_min);
+
+		/* Update limits and set FPS to default */
+		__v4l2_ctrl_modify_range(imx219->vblank, IMX219_VBLANK_MIN,
+					 IMX219_FLL_MAX - mode->height, 1,
+					 IMX219_VBLANK_MIN);
+		__v4l2_ctrl_s_ctrl(imx219->vblank, IMX219_VBLANK_MIN);
+		/* Update max exposure while meeting expected vblanking */
+		exposure_max = mode->height + IMX219_VBLANK_MIN - 4;
+		exposure_def = (exposure_max < IMX219_EXPOSURE_DEFAULT) ?
+			exposure_max : IMX219_EXPOSURE_DEFAULT;
+		__v4l2_ctrl_modify_range(imx219->exposure,
+					 imx219->exposure->minimum,
+					 exposure_max, imx219->exposure->step,
+					 exposure_def);
+
+		/* The line carries the frame rate, so it follows the mode. */
 		__v4l2_ctrl_modify_range(imx219->hblank, llp_min - mode->width,
 					 IMX219_LLP_MAX - mode->width, 1,
-					 llp_min - mode->width);
-		/*
-		 * Retain PPL setting from previous mode so that the
-		 * line time does not change on a mode change.
-		 * Limits have to be recomputed as the controls define
-		 * the blanking only, so PPL values need to have the
-		 * mode width subtracted.
-		 */
-		hblank = prev_line_len - mode->width;
-		__v4l2_ctrl_s_ctrl(imx219->hblank, hblank);
+					 llp_def - mode->width);
+		__v4l2_ctrl_s_ctrl(imx219->hblank, llp_def - mode->width);
 
 		/* Scale the pixel rate based on the mode specific factor */
 		pixel_rate = imx219_get_pixel_rate(imx219) *
@@ -990,8 +1057,8 @@ static int imx219_init_state(struct v4l2_subdev *sd,
 		.pad = 0,
 		.format = {
 			.code = MEDIA_BUS_FMT_SRGGB10_1X10,
-			.width = supported_modes[0].width,
-			.height = supported_modes[0].height,
+			.width = supported_modes[IMX219_DEFAULT_MODE].width,
+			.height = supported_modes[IMX219_DEFAULT_MODE].height,
 		},
 	};
 
@@ -1170,6 +1237,8 @@ static int imx219_check_hwcfg(struct device *dev, struct imx219 *imx219)
 		goto error_out;
 	}
 	imx219->lanes = ep_cfg.bus.mipi_csi2.num_data_lanes;
+	imx219->pll_cfgs = (imx219->lanes == 2) ? imx219_pll_cfgs :
+			   imx219_pll_cfgs_4lane;
 
 	/* Check the link frequency set in device tree */
 	switch (imx219->lanes) {
@@ -1199,12 +1268,14 @@ static int imx219_check_hwcfg(struct device *dev, struct imx219 *imx219)
 		break;
 	}
 
-	if (ret || !(link_freq_bitmap & BIT(0))) {
+	if (ret || !link_freq_bitmap) {
 		ret = -EINVAL;
 		dev_err_probe(dev, -EINVAL,
 			      "Link frequency not supported: %lld\n",
 			      ep_cfg.link_frequencies[0]);
+		goto error_out;
 	}
+	imx219->link_freq_idx = __ffs(link_freq_bitmap);
 
 	if (ep_cfg.bus.mipi_csi2.num_vc_ids > 1) {
 		dev_err_probe(dev, -EINVAL,

@@ -50,4 +50,14 @@ struct vdma_channel *get_vdma_channel(struct v4l2_subdev *sd, unsigned int pad);
 u64 get_vdma_channel_mask(struct vdma_channel *channel);
 void vdma_buffer_queue(struct vb2_buffer *vb);
 
+/* Provided by dwc-mipi-csi2 (the upstream CSI subdev) for the IPI-overflow
+ * recovery and the start check: vdma registers the DMA quiesce/resume
+ * callbacks at stream-on, the frame watchdog triggers the recovery for silent
+ * stalls, and every frame the DMA completed is reported, good or flagged bad. */
+int dwc_csi_register_overflow_recovery(struct v4l2_subdev *sd, unsigned int pad,
+				       int (*quiesce)(void *data),
+				       int (*resume)(void *data), void *data);
+void dwc_csi_trigger_overflow_recovery(struct v4l2_subdev *sd, unsigned int pad);
+void dwc_csi_frame_delivered(struct v4l2_subdev *sd, unsigned int pad, bool good);
+
 #endif

@@ -141,7 +141,7 @@ void ml_bist_frame_end( ml_bist_fsm_ptr_t p_fsm )
      * NOTE 2: Bypassed modules will not generate a crc mismatch
      */
     if ( get_context_param( p_ictx, ISP_MODULES_FORCE_BIST_MISMATCH_PARAM ) != 0 ) {
-        LOG( LOG_ERR, " ############### FORCING BIST CRC MISMATCH  ############## " );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, " ############### FORCING BIST CRC MISMATCH  ############## " );
         test_mode_data.sinter = BIT( 0 );
         test_mode_data.frame_stitch = BIT( 0 );
         test_mode_data.raw_frontend = BIT( 0 );
@@ -461,7 +461,7 @@ static void ml_bist_process_blocks( const ml_bist_test_t current_test_number, co
         if ( TEST_ERROR_MAP( error_map.test_crc_mismatch_error, block ) )
             errors |= 0x04;
         if ( errors > 0 )
-            LOG( LOG_ERR, "ML_BIST fail collision=%d timeout=%d crc_mismatch=%d block %d test %d ", errors & 0x01, ( errors & 0x02 ) >> 1, ( errors & 0x04 ) >> 2, block, current_test_number );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST fail collision=%d timeout=%d crc_mismatch=%d block %d test %d ", errors & 0x01, ( errors & 0x02 ) >> 1, ( errors & 0x04 ) >> 2, block, current_test_number );
     }
 }
 
@@ -601,39 +601,39 @@ static void ml_bist_check_for_faults( const ml_bist_test_t test )
     const uint32_t err_out_fmt2 = BF_GET( reg70, 0, 2 );       //out formatter error, register 0x70, 2 bits, starting at offset 0
 
     if ( err_fe ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x) in Raw FrontEnd, test: %s", err_fe, test_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x) in Raw FrontEnd, test: %s", err_fe, test_name );
     }
 
     if ( err_frame_stich ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x) Frame Stich, test: %s", err_frame_stich, test_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x) Frame Stich, test: %s", err_frame_stich, test_name );
     }
 
     if ( err_sinter ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x) in Sinter, test: %s", err_sinter, test_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x) in Sinter, test: %s", err_sinter, test_name );
     }
 
     if ( err_radial ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x) in Radial Shading, test: %s", err_radial, test_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x) in Radial Shading, test: %s", err_radial, test_name );
     }
 
     if ( err_iridix ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x) in Iridix, test: %s", err_iridix, test_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x) in Iridix, test: %s", err_iridix, test_name );
     }
 
     if ( err_demosaic_rccc ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x) in Demosaic RCCC, test: %s", err_demosaic_rccc, test_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x) in Demosaic RCCC, test: %s", err_demosaic_rccc, test_name );
     }
 
     if ( err_demosaic1 || err_demosaic2 ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x, 0x%x) in Demosaic, test: %s", err_demosaic1, err_demosaic2, test_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x, 0x%x) in Demosaic, test: %s", err_demosaic1, err_demosaic2, test_name );
     }
 
     if ( err_demo_rgbir ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x) in Demosaic RGBIr, test: %s", err_demo_rgbir, test_name );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x) in Demosaic RGBIr, test: %s", err_demo_rgbir, test_name );
     }
 
     if ( err_out_fmt1 || err_out_fmt2 ) {
-        LOG( LOG_ERR, "ML_BIST Error(0x%x, 0x%x) in Out Format, test: %s", err_out_fmt1,
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "ML_BIST Error(0x%x, 0x%x) in Out Format, test: %s", err_out_fmt1,
              err_out_fmt2, test_name );
     }
 }

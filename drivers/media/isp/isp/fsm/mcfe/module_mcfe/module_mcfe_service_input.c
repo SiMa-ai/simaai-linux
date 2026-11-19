@@ -115,7 +115,7 @@ int module_mcfe_input_add_video( int video_input_idx, module_mcfe_input_port_ids
 
     // Error handler
     if ( input_port_ids == NULL ) {
-        LOG( LOG_ERR, "Error. Input port pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Input port pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -124,13 +124,13 @@ int module_mcfe_input_add_video( int video_input_idx, module_mcfe_input_port_ids
 
     // Error handler
     if ( input_cfg == NULL ) {
-        LOG( LOG_ERR, "Error. Input configuration pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Input configuration pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     } else if ( ( video_input_idx < 0 ) || ( video_input_idx >= MODULE_MCFE_INPUT_PORT_MAX ) ) {
-        LOG( LOG_ERR, "Error. Video input index is out of range. (video_input_idx = %d)", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Video input index is out of range. (video_input_idx = %d)", video_input_idx );
         return MCFE_ERR_INV_PARM;
     } else if ( input_cfg->num_channel > MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error. Number of input channels is out of range. (num_channel = %d)", input_cfg->num_channel );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Number of input channels is out of range. (num_channel = %d)", input_cfg->num_channel );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -147,7 +147,7 @@ int module_mcfe_input_add_video( int video_input_idx, module_mcfe_input_port_ids
         // Adjusting input port count to number of channels
         input_port_ids->count = input_cfg->num_channel;
     } else {
-        LOG( LOG_ERR, "Error. Out of free input ports (requested = %d, available = %d).", input_cfg->num_channel, input_port_ids->count );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Out of free input ports (requested = %d, available = %d).", input_cfg->num_channel, input_port_ids->count );
         input_port_ids->count = 0;
         return MCFE_ERR_NO_RES;
     }
@@ -194,16 +194,16 @@ int module_mcfe_input_remove_video( int video_input_idx, module_mcfe_input_port_
 
     // Error handler
     if ( input_port_ids == NULL ) {
-        LOG( LOG_ERR, "Error. Input port pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Input port pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     } else if ( input_cfg == NULL ) {
-        LOG( LOG_ERR, "Error. Input configuration pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Input configuration pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     } else if ( ( video_input_idx < 0 ) || ( video_input_idx >= MODULE_MCFE_INPUT_PORT_MAX ) ) {
-        LOG( LOG_ERR, "Error. Video input index is out of range. (video_input_idx = %d)", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Video input index is out of range. (video_input_idx = %d)", video_input_idx );
         return MCFE_ERR_INV_PARM;
     } else if ( input_cfg->num_channel > MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error. Number of input channels is out of range. (num_channel = %d)", input_cfg->num_channel );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Number of input channels is out of range. (num_channel = %d)", input_cfg->num_channel );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -241,7 +241,7 @@ int module_mcfe_input_mode_manual( module_mcfe_input_cfg_t *input_cfg )
     int i;
 
     if ( input_cfg->num_channel > MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error, invalid param! (num_channel = %d), expected [1;%d]", input_cfg->num_channel, MODULE_MCFE_INPUT_PORT_MAX );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid param! (num_channel = %d), expected [1;%d]", input_cfg->num_channel, MODULE_MCFE_INPUT_PORT_MAX );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -263,20 +263,20 @@ int module_mcfe_input_get_input_cfg( int input_port_id, module_mcfe_input_cfg_t 
 
     // Error handler
     if ( input_port_id >= MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error, input_port_id (%d) is too big.", input_port_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, input_port_id (%d) is too big.", input_port_id );
         return MCFE_ERR_INV_PARM;
     } else if ( input_cfg == NULL ) {
-        LOG( LOG_ERR, "Error, NULL param passed." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, NULL param passed." );
         return MCFE_ERR_INV_PARM;
     } else if ( mcfe_input_port[input_port_id].enabled != 1 ) {
-        LOG( LOG_ERR, "Error, input_port[%d] is not initialized.", input_port_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, input_port[%d] is not initialized.", input_port_id );
         return MCFE_ERR_NOT_INIT;
     }
 
     video_input_idx = mcfe_input_port[input_port_id].video_input_idx;
 
     if ( mcfe_video_input[video_input_idx].enabled != 1 ) {
-        LOG( LOG_ERR, "Error, video_input[%d] is not configured.", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, video_input[%d] is not configured.", video_input_idx );
         return MCFE_ERR_NOT_INIT;
     }
 
@@ -292,20 +292,20 @@ int module_mcfe_input_config_buffer( const module_mcfe_input_port_ids_t *const i
 
     // Error handler
     if ( input_port_ids == NULL ) {
-        LOG( LOG_ERR, "input_port_ids pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "input_port_ids pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     } else if ( input_port_ids->count > MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error, input_port_id count (%d) is out of range (0-%d).",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, input_port_id count (%d) is out of range (0-%d).",
              input_port_ids->count, ( MODULE_MCFE_INPUT_PORT_MAX ) ? ( MODULE_MCFE_INPUT_PORT_MAX - 1 ) : 0 );
         return MCFE_ERR_INV_PARM;
     } else if ( input_bufset == NULL ) {
-        LOG( LOG_ERR, "Buffer set pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Buffer set pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
     for ( i = 0; i < input_port_ids->count; i++ ) {
         if ( input_port_ids->ids[i] > MODULE_MCFE_INPUT_PORT_MAX ) {
-            LOG( LOG_ERR, "Error, input_port_id (id = %d, index = %lu) is out of range (0-%d).",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, input_port_id (id = %d, index = %lu) is out of range (0-%d).",
                  input_port_ids->ids[i],
                  i,
                  ( MODULE_MCFE_INPUT_PORT_MAX ) ? ( MODULE_MCFE_INPUT_PORT_MAX - 1 ) : 0 );
@@ -322,11 +322,11 @@ int module_mcfe_input_config_buffer( const module_mcfe_input_port_ids_t *const i
 
         for ( frame_index = 0; frame_index < MIN( input_bufset->frames.num_frames, ARRAY_2D_COLUMNS( input_buffers ) ); frame_index++ ) {
             if ( module_mcfe_bufset_get_buf_id( input_bufset, frame_index, i, MCFE_BUFSET_STATUS_EMPTY, &input_buffers[i][frame_index] ) != MCFE_ERR_NONE ) {
-                LOG( LOG_ERR, "Failed to get empty buffer index from bufset (type: %d, index: %d, plane: %lu).",
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get empty buffer index from bufset (type: %d, index: %d, plane: %lu).",
                      input_bufset->type, input_bufset->index, i );
                 return MCFE_ERR_NO_RES;
             }
-            LOG( LOG_INFO, "Got empty input buffer index: (buf_idx[%lu] = %d)", frame_index, input_buffers[i][frame_index] );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Got empty input buffer index: (buf_idx[%lu] = %d)", frame_index, input_buffers[i][frame_index] );
         }
     }
 
@@ -339,7 +339,7 @@ int module_mcfe_input_config_buffer( const module_mcfe_input_port_ids_t *const i
         mcfe_input_port[input_port_id].input_bufset = input_bufset;
 
         // Update hardware registers.
-        LOG( LOG_INFO, "Config input %d - write buffer1 = %d, write buffer2 = %d.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Config input %d - write buffer1 = %d, write buffer2 = %d.",
              input_port_id,
              input_buffers[i][0],
              input_buffers[i][1] );
@@ -354,13 +354,13 @@ int module_mcfe_input_get_input_bufset( int input_port_id, const module_mcfe_buf
 {
     // Error handler
     if ( input_port_id >= MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error, input_port_id (%d) is too big.", input_port_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, input_port_id (%d) is too big.", input_port_id );
         return MCFE_ERR_INV_PARM;
     } else if ( mcfe_input_port[input_port_id].enabled != 1 ) {
-        LOG( LOG_ERR, "Error, input_port[%d] is not initialized.", input_port_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, input_port[%d] is not initialized.", input_port_id );
         return MCFE_ERR_NOT_INIT;
     } else if ( input_bufset == NULL ) {
-        LOG( LOG_ERR, "Buffer set pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Buffer set pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -376,13 +376,13 @@ int module_mcfe_input_start_video( int video_input_idx )
 
     // Error handler
     if ( video_input_idx >= MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error, invalid video_input_idx. (id = %d)", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid video_input_idx. (id = %d)", video_input_idx );
         return MCFE_ERR_INV_PARM;
     } else if ( mcfe_video_input[video_input_idx].enabled == 0 ) {
-        LOG( LOG_ERR, "Error, video input %d is not enabled.", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, video input %d is not enabled.", video_input_idx );
         return MCFE_ERR_NOT_INIT;
     } else if ( mcfe_video_input[video_input_idx].started == 1 ) {
-        LOG( LOG_ERR, "Error, video input %d is already started.", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, video input %d is already started.", video_input_idx );
         return MCFE_ERR_BUSY;
     }
 
@@ -391,7 +391,7 @@ int module_mcfe_input_start_video( int video_input_idx )
     for ( i = 0; i < mcfe_video_input[video_input_idx].input_port_ids.count; i++ ) {
         mcfe_hwif_input_port_set_mode( mcfe_video_input[video_input_idx].input_port_ids.ids[i], MODULE_MCFE_HWIF_VIDEOINPUT_MODE_SAFE_START );
         input_port_status[i] = 0;
-        LOG( LOG_INFO, "Turning input port %d on.", mcfe_video_input[video_input_idx].input_port_ids.ids[i] );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Turning input port %d on.", mcfe_video_input[video_input_idx].input_port_ids.ids[i] );
     }
 
     // Wait until all input ports actually turned on
@@ -405,7 +405,7 @@ int module_mcfe_input_start_video( int video_input_idx )
                 continue;
             }
             if ( ( input_port_status[i] = mcfe_hwif_input_port_get_status( mcfe_video_input[video_input_idx].input_port_ids.ids[i] ) ) ) {
-                LOG( LOG_INFO, "Input port %d turned on after %d ms.", mcfe_video_input[video_input_idx].input_port_ids.ids[i], iterations );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Input port %d turned on after %d ms.", mcfe_video_input[video_input_idx].input_port_ids.ids[i], iterations );
             }
 
             ports_status &= input_port_status[i];
@@ -423,7 +423,7 @@ int module_mcfe_input_start_video( int video_input_idx )
     if ( iterations >= 100 ) {
         for ( i = 0; i < mcfe_video_input[video_input_idx].input_port_ids.count; i++ ) {
             if ( !input_port_status[i] ) {
-                LOG( LOG_ERR, "Failed to turn on input port %d after %d ms.", mcfe_video_input[video_input_idx].input_port_ids.ids[i], iterations );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to turn on input port %d after %d ms.", mcfe_video_input[video_input_idx].input_port_ids.ids[i], iterations );
             }
         }
 
@@ -442,13 +442,13 @@ int module_mcfe_input_stop_video( int video_input_idx )
 
     // Error handling
     if ( video_input_idx >= MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error, invalid video_input_idx. (id = %d)", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid video_input_idx. (id = %d)", video_input_idx );
         return MCFE_ERR_INV_PARM;
     } else if ( mcfe_video_input[video_input_idx].enabled == 0 ) {
-        LOG( LOG_ERR, "Error, video input %d is not enabled.", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, video input %d is not enabled.", video_input_idx );
         return MCFE_ERR_NOT_INIT;
     } else if ( mcfe_video_input[video_input_idx].started == 0 ) {
-        LOG( LOG_ERR, "Error, video input %d is not started.", video_input_idx );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, video input %d is not started.", video_input_idx );
         return MCFE_ERR_NOT_RUN;
     }
 
@@ -457,7 +457,7 @@ int module_mcfe_input_stop_video( int video_input_idx )
     for ( i = 0; i < mcfe_video_input[video_input_idx].input_port_ids.count; i++ ) {
         mcfe_hwif_input_port_set_mode( mcfe_video_input[video_input_idx].input_port_ids.ids[i], MODULE_MCFE_HWIF_VIDEOINPUT_MODE_SAFE_STOP );
         input_port_status[i] = 1;
-        LOG( LOG_INFO, "Turning input port %d off.", mcfe_video_input[video_input_idx].input_port_ids.ids[i] );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Turning input port %d off.", mcfe_video_input[video_input_idx].input_port_ids.ids[i] );
     }
 
     // Wait until all input ports actually turned off
@@ -471,7 +471,7 @@ int module_mcfe_input_stop_video( int video_input_idx )
                 continue;
             }
             if ( !( input_port_status[i] = mcfe_hwif_input_port_get_status( mcfe_video_input[video_input_idx].input_port_ids.ids[i] ) ) ) {
-                LOG( LOG_INFO, "Input port %d turned off after %d ms.", mcfe_video_input[video_input_idx].input_port_ids.ids[i], iterations );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Input port %d turned off after %d ms.", mcfe_video_input[video_input_idx].input_port_ids.ids[i], iterations );
             }
 
             ports_status |= input_port_status[i];
@@ -489,7 +489,7 @@ int module_mcfe_input_stop_video( int video_input_idx )
     if ( iterations >= 100 ) {
         for ( i = 0; i < mcfe_video_input[video_input_idx].input_port_ids.count; i++ ) {
             if ( input_port_status[i] ) {
-                LOG( LOG_ERR, "Failed to turn off input port %d after %d ms.", mcfe_video_input[video_input_idx].input_port_ids.ids[i], iterations );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to turn off input port %d after %d ms.", mcfe_video_input[video_input_idx].input_port_ids.ids[i], iterations );
             }
         }
 

@@ -18,6 +18,11 @@
 */
 
 #include "acamera_logger.h"
+#include <linux/fs.h>
+#include <linux/kernel.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
 
 /* If the kernel is not used then simply define these strings to empty string.
  * This way we can have a single LUT definition */
@@ -73,11 +78,15 @@ static struct {
     alog_lock_fn log_lock_fn; /**< User provided locking function, NULL by default. */
     alog_level_t level;       /**< Current log level. */
     alog_mask_t mask;         /**< current log mask*/
+    uint32_t categories;      /**< runtime category bitmask (alog_category_t) */
+    uint32_t throttle;        /**< sampled-log interval; 1 = every frame, 100 default */
 
 } g_alog = {.lock = NULL,
             .log_lock_fn = NULL,
             .level = LOG_DEFAULT_VALUE,
-            .mask = ( alog_mask_t )( ( 1u << LOG_LEVEL_MAX ) - 1u )};
+            .mask = ( alog_mask_t )( ( 1u << LOG_LEVEL_MAX ) - 1u ),
+            .categories = ALOG_CAT_ALL,
+            .throttle = 100};
 
 
 void alog_lock( void )
@@ -133,4 +142,76 @@ bool alog_check_level( const alog_level_t level )
 const char *alog_level_string( const alog_level_t level )
 {
     return m_level_names[level % LOG_LEVEL_MAX];
+}
+
+
+void alog_set_categories( const uint32_t categories )
+{
+    alog_lock();
+    g_alog.categories = categories;
+    alog_unlock();
+}
+
+uint32_t alog_get_categories( void ) { return g_alog.categories; }
+
+bool alog_check_cat( const uint32_t cat ) { return ( g_alog.categories & cat ) != 0; }
+
+void alog_set_throttle( const uint32_t n ) { g_alog.throttle = n ? n : 1; }
+
+uint32_t alog_throttle( void ) { return g_alog.throttle ? g_alog.throttle : 1; }
+
+
+/* Parse "key = value" for level/categories out of the config text buffer.
+ * Unknown keys are ignored; absent keys keep their compiled defaults. */
+static void alog_parse_config( const char *buf )
+{
+    const char *p = buf;
+
+    while ( p && *p ) {
+        unsigned long v;
+
+        while ( *p == ' ' || *p == '\t' ) p++;
+        if ( *p == '#' ) {
+            /* comment: skip to end of line */
+        } else if ( !strncmp( p, "level", 5 ) ) {
+            const char *e = strchr( p, '=' );
+            if ( e && !kstrtoul( skip_spaces( e + 1 ), 0, &v ) )
+                alog_set_level( ( alog_level_t )v );
+        } else if ( !strncmp( p, "categories", 10 ) ) {
+            const char *e = strchr( p, '=' );
+            if ( e && !kstrtoul( skip_spaces( e + 1 ), 0, &v ) )
+                alog_set_categories( ( uint32_t )v );
+        } else if ( !strncmp( p, "throttle", 8 ) ) {
+            const char *e = strchr( p, '=' );
+            if ( e && !kstrtoul( skip_spaces( e + 1 ), 0, &v ) )
+                alog_set_throttle( ( uint32_t )v );
+        }
+        p = strchr( p, '\n' );
+        if ( p ) p++;
+    }
+}
+
+void alog_load_config( void )
+{
+    struct file *f;
+    char *buf;
+    loff_t pos = 0;
+    ssize_t n;
+
+    f = filp_open( ISP3A_LOG_CONF_PATH, O_RDONLY, 0 );
+    if ( IS_ERR( f ) )
+        return; /* absent -> keep compiled defaults */
+
+    buf = kzalloc( 1024, GFP_KERNEL );
+    if ( buf ) {
+        n = kernel_read( f, buf, 1023, &pos );
+        if ( n > 0 ) {
+            buf[n] = '\0';
+            alog_parse_config( buf );
+            LOG( LOG_NOTICE, "isp3a log config loaded: level=%d categories=0x%x",
+                 alog_get_level(), alog_get_categories() );
+        }
+        kfree( buf );
+    }
+    filp_close( f, NULL );
 }

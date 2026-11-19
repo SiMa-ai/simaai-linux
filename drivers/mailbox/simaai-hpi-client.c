@@ -351,6 +351,12 @@ put:
 }
 EXPORT_SYMBOL_GPL(simaai_hpi_xfer);
 
+int simaai_hpi_send(u32 p0, u32 p1)
+{
+	return hpi_post(g_hpi_client, p0, p1);
+}
+EXPORT_SYMBOL(simaai_hpi_send);
+
 static long hpi_client_ioctl(struct file *filp, unsigned int cmd,
 			     unsigned long arg)
 {

@@ -49,22 +49,44 @@ static dev_t dma_heap_devt;
 static struct class *dma_heap_class;
 static DEFINE_XARRAY_ALLOC(dma_heap_minors);
 
-static int dma_heap_buffer_alloc(struct dma_heap *heap, size_t len,
-				 u32 fd_flags,
-				 u64 heap_flags)
+/**
+ * dma_heap_buffer_alloc - allocate a dma-buf from a heap
+ * @heap: heap to allocate from
+ * @len: requested length, page-aligned by this function
+ * @fd_flags: flags to pass through to dma_buf_export (e.g. O_CLOEXEC)
+ * @heap_flags: heap-specific allocation flags
+ *
+ * In-kernel counterpart of DMA_HEAP_IOCTL_ALLOC for drivers that
+ * consume heap memory directly instead of receiving an fd from
+ * userspace.
+ *
+ * Returns:
+ * A dma_buf pointer with one reference held on success, ERR_PTR
+ * otherwise.
+ */
+struct dma_buf *dma_heap_buffer_alloc(struct dma_heap *heap, size_t len,
+				      u32 fd_flags, u64 heap_flags)
 {
-	struct dma_buf *dmabuf;
-	int fd;
-
 	/*
 	 * Allocations from all heaps have to begin
 	 * and end on page boundaries.
 	 */
 	len = PAGE_ALIGN(len);
 	if (!len)
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
 
-	dmabuf = heap->ops->allocate(heap, len, fd_flags, heap_flags);
+	return heap->ops->allocate(heap, len, fd_flags, heap_flags);
+}
+EXPORT_SYMBOL_NS_GPL(dma_heap_buffer_alloc, "DMA_BUF_HEAP");
+
+static int dma_heap_bufferfd_alloc(struct dma_heap *heap, size_t len,
+				   u32 fd_flags,
+				   u64 heap_flags)
+{
+	struct dma_buf *dmabuf;
+	int fd;
+
+	dmabuf = dma_heap_buffer_alloc(heap, len, fd_flags, heap_flags);
 	if (IS_ERR(dmabuf))
 		return PTR_ERR(dmabuf);
 
@@ -108,9 +130,9 @@ static long dma_heap_ioctl_allocate(struct file *file, void *data)
 	if (heap_allocation->heap_flags & ~DMA_HEAP_VALID_HEAP_FLAGS)
 		return -EINVAL;
 
-	fd = dma_heap_buffer_alloc(heap, heap_allocation->len,
-				   heap_allocation->fd_flags,
-				   heap_allocation->heap_flags);
+	fd = dma_heap_bufferfd_alloc(heap, heap_allocation->len,
+				     heap_allocation->fd_flags,
+				     heap_allocation->heap_flags);
 	if (fd < 0)
 		return fd;
 
@@ -217,6 +239,50 @@ const char *dma_heap_get_name(struct dma_heap *heap)
 	return heap->name;
 }
 EXPORT_SYMBOL_NS_GPL(dma_heap_get_name, "DMA_BUF_HEAP");
+
+/**
+ * dma_heap_allocated_bytes - bytes currently allocated from a heap
+ * @heap: DMA-Heap to query
+ *
+ * Returns:
+ * Bytes allocated from @heap, or 0 when the heap implements no such op.
+ */
+u64 dma_heap_allocated_bytes(struct dma_heap *heap)
+{
+	if (!heap || !heap->ops->allocated_bytes)
+		return 0;
+	return heap->ops->allocated_bytes(heap);
+}
+EXPORT_SYMBOL_NS_GPL(dma_heap_allocated_bytes, "DMA_BUF_HEAP");
+
+/**
+ * dma_heap_find - get the heap registered under the given name
+ * @name: name of the heap to find
+ *
+ * Heaps are never unregistered (there is no dma_heap remove API), so
+ * the returned pointer stays valid for the lifetime of the kernel and
+ * no reference counting is needed.
+ *
+ * Returns:
+ * The heap, or NULL if no heap with that name has been registered
+ * (yet) — callers resolving a heap at probe time can treat NULL as
+ * -EPROBE_DEFER.
+ */
+struct dma_heap *dma_heap_find(const char *name)
+{
+	struct dma_heap *h;
+
+	mutex_lock(&heap_list_lock);
+	list_for_each_entry(h, &heap_list, list) {
+		if (!strcmp(h->name, name)) {
+			mutex_unlock(&heap_list_lock);
+			return h;
+		}
+	}
+	mutex_unlock(&heap_list_lock);
+	return NULL;
+}
+EXPORT_SYMBOL_NS_GPL(dma_heap_find, "DMA_BUF_HEAP");
 
 /**
  * dma_heap_add - adds a heap to dmabuf heaps

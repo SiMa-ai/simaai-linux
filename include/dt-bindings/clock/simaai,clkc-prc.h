@@ -10,6 +10,7 @@
 #define SIMAAI_PRC_CLK_ISP_PLL	1
 #define SIMAAI_PRC_CLK_MLA_GATE	2
 #define SIMAAI_PRC_CLK_ISP_GATE	3
+#define SIMAAI_PRC_CLK_APU_PLL	4
 
 #endif
 

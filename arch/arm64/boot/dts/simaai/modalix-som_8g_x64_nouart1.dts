@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+
+#include "modalix.dtsi"
+#include "modalix-som-common.dtsi"
+
+/ {
+	model = "SiMa.ai Modalix SoM 8Gig No UART1 Board";
+
+	/*
+	 * Headless variant: board "UART1" (uart12, ttyS0) is repurposed
+	 * as a device UART.  It stays enabled, but nothing may claim it
+	 * as a console, so no console= in bootargs and no console alias.
+	 */
+	chosen {
+		bootargs = "root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
+	};
+
+	aliases {
+		/delete-property/ console;
+	};
+
+	memory@1000000000 {
+		device_type = "memory";
+		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
+				0x00000010 0x75000000 0x00000001 0x4B000000>;
+	};
+};
+
+&dms0_reserved {
+	/* Opt-in reusable: CMA may lend unallocated MLA DMA pages back to Linux.
+	 * Switch the heap ABI from the carveout default to the reusable SiMa DMS
+	 * pool and drop no-map; the memory node above is extended to cover this
+	 * range. mla-rt still matches the "dms@" child by name, so the inherited
+	 * node name is left unchanged.
+	 */
+	compatible = "simaai,mla-cma", "shared-dma-pool";
+	/delete-property/ no-map;
+	reusable;
+	/* DMS sits ABOVE the secure window: [0x11_2000_0000, 0x11_7000_0000)
+	 * stays ordinary RAM so it can hold BL31/OP-TEE/FIP (@0x11_6000_0000)
+	 * when secure-boot.dtbo adds its no-map nodes. A reusable pool spanning
+	 * that window would be freed to the buddy allocator at boot, no-map and
+	 * all. 16+ GiB boards keep their DMS above the window already, so only
+	 * the 8 GiB boards move.
+	 */
+	reg = <0x00000011 0x70000000 0x00000000 0x50000000>;
+};
+
+&dms2_0 {
+	status = "disabled";
+};
+
+&dms2_1 {
+	status = "disabled";
+};
+
+&dms3_0 {
+	status = "disabled";
+};
+
+&dms3_1 {
+	status = "disabled";
+};
+
+/*
+ * Drive SIO1 GPIO2 (the usb_uart12 line) low to enable USB on the USB-C
+ * connector; the board's pull-up muxes that connector to UART, and the
+ * shared SoM default hogs the line high.
+ */
+&port1 {
+	usb-hog {
+		/delete-property/ output-high;
+		output-low;
+	};
+};

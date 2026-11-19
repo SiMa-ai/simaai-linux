@@ -19245,6 +19245,14 @@ L:	linux-mips@vger.kernel.org
 S:	Maintained
 F:	arch/mips/boot/dts/ralink/omega2p.dts
 
+ONSEMI AR0234 CAMERA DRIVER
+M:	Punit Singh <punit.singh@sima.ai>
+L:	linux-media@vger.kernel.org
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/i2c/onsemi,ar0234.yaml
+F:	drivers/media/i2c/ar0234.c
+F:	drivers/media/i2c/ar0234.h
+
 ONSEMI ETHERNET PHY DRIVERS
 M:	Piergiorgio Beruto <piergiorgio.beruto@gmail.com>
 L:	netdev@vger.kernel.org
@@ -23605,6 +23613,11 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/i3c/silvaco,i3c-master.yaml
 F:	drivers/i3c/master/svc-i3c-master.c
 
+SIMAAI MODALIX SoC support
+M:	Bharanidharan Ramalingam <bharanidharan.ramalingam@sima.ai>
+S:	Supported
+F:	Documentation/devicetree/bindings/arm/simaai.yaml
+
 SIMAAI SIO CLOCK DIVIDER DRIVER
 M:	Yurii Konovalenko <orientua@gmail.com>
 S:	Supported
@@ -23627,6 +23640,13 @@ SIMAAI SIO RESET DRIVER
 M:	Yurii Konovalenko <orientua@gmail.com>
 S:	Supported
 F:	Documentation/devicetree/bindings/reset/simaai,sio-reset.yaml
+
+SIMAAI CVU/EV74 JOB SUBMISSION DRIVER
+M:	Nilesh Raghuvanshi <nilesh.r@sima.ai>
+S:	Supported
+F:	Documentation/misc-devices/simaai-cvu.rst
+F:	drivers/rpmsg/simaai-cvu.c
+F:	include/uapi/linux/simaai/simaai_cvu.h
 
 SIMAAI STU DRIVER
 M:	Nilesh Raghuvanshi <nilesh.r@sima.ai>
@@ -23658,6 +23678,23 @@ F:	drivers/mailbox/simaai-hpi-client.c
 F:	drivers/mailbox/simaai-hpi.c
 F:	include/linux/simaai-hpi.h
 F:	include/uapi/linux/simaai/simaai-hpi.h
+
+SIMAAI MLA ACCELERATOR DRIVER
+M:	Vimal Nakum <vimal.nakum@sima.ai>
+S:	Supported
+F:	Documentation/devicetree/bindings/npu/simaai,mla-modalix.yaml
+F:	Documentation/devicetree/bindings/reserved-memory/simaai,mla-cma.yaml
+F:	Documentation/driver-api/simaai-mla-reusable-memory.rst
+F:	arch/arm64/boot/dts/simaai/modalix-som_mla-reusable.dts
+F:	drivers/accel/simaaimla/
+F:	include/uapi/linux/simaai/mla.h
+F:	tools/testing/selftests/dmabuf-heaps/mla-heap.c
+
+SIMAAI MODALIX POWEROFF DRIVER
+M:	Bharanidharan Ramalingam <bharanidharan.ramalingam@sima.ai>
+S:	Supported
+F:	Documentation/devicetree/bindings/power/reset/simaai,modalix-poweroff.yaml
+F:	drivers/power/reset/simaai-poweroff.c
 
 SIMPLEFB FB DRIVER
 M:	Hans de Goede <hansg@kernel.org>
@@ -24077,16 +24114,31 @@ T:	git git://linuxtv.org/media.git
 F:	Documentation/devicetree/bindings/media/i2c/sony,imx415.yaml
 F:	drivers/media/i2c/imx415.c
 
-SONY IMX568 GMSL CAMERA DRIVER
+SONY IMX568 E-CON GMSL CAMERA DRIVERS
 M:	Kishore Kumar <kishore.kumar@e-consystems.com>
 M:	Nileshkumar Raghuvanshi <nilesh.r@sima.ai>
 L:	linux-media@vger.kernel.org
 S:	Maintained
 T:	git git://linuxtv.org/media.git
-F:	Documentation/devicetree/bindings/media/i2c/sony,imx568-gmsl.yaml
+F:	Documentation/devicetree/bindings/media/i2c/econ,imx568-gmsl-8C.yaml
+F:	Documentation/devicetree/bindings/media/i2c/econ,imx568-gmsl.yaml
+F:	drivers/media/i2c/econ_imx568.*
+F:	drivers/media/i2c/econ_imx568_drv.*
 F:	drivers/media/i2c/econ_imx568_gmsl.c
 F:	drivers/media/i2c/econ_imx568_gmsl.h
 F:	drivers/media/i2c/econ_imx568_serdes.h
+F:	drivers/media/i2c/imx568-timing.h
+
+SONY IMX568 SENSOR DRIVER
+M:	Punit Singh <punit.singh@sima.ai>
+L:	linux-media@vger.kernel.org
+S:	Maintained
+T:	git git://linuxtv.org/media.git
+F:	Documentation/devicetree/bindings/media/i2c/sony,imx568.yaml
+F:	arch/arm64/boot/dts/simaai/overlays/*LI-IMX568*.dtso
+F:	arch/arm64/boot/dts/simaai/overlays/modalix-som-waveshare-LI-ECON-IMX568-DUAL.dtso
+F:	drivers/media/i2c/imx568-timing.h
+F:	drivers/media/i2c/imx568.c
 
 SONY MEMORYSTICK SUBSYSTEM
 M:	Maxim Levitsky <maximlevitsky@gmail.com>

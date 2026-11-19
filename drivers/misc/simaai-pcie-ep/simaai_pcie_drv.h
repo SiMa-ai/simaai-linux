@@ -9,7 +9,7 @@
 #ifndef _SIMA_DRV_COMMON_H_
 #define _SIMA_DRV_COMMON_H_
 
-#include <linux/simaai_pcie_api.h>
+#include <uapi/linux/simaai/simaai_pcie_api.h>
 #include <linux/types.h>
 #include <linux/ktime.h>
 
@@ -45,7 +45,34 @@
 #define SI_DCQ_MSI_START	1
 #define SI_SMCMD_DONE_MSI	(SI_DCQ_MSI_START + SI_MAX_DQS)
 #define SI_ALERT_MSI		(SI_SMCMD_DONE_MSI + 1)
-#define SI_HOST_MSI_MAX		(SI_ALERT_MSI + 1)
+#define SI_NET_MSI		(SI_ALERT_MSI + 1)
+#define SI_HOST_MSI_MAX		(SI_NET_MSI + 1)
+
+/*
+ * Optional behaviour of the virtual ethernet link.
+ *
+ * The host offers what it can live with in SI_MCMD_SET_NETHWADDR and the SoC
+ * answers with what it will use. A side that says nothing gets nothing, which
+ * is how a peer older than this negotiation behaves, so either end can be
+ * updated on its own.
+ *
+ * SI_NET_F_PARTIAL_CSUM: the host takes packets whose L4 checksum is not
+ * filled in yet. The SoC may leave one that way and say so in the packet
+ * descriptor (SI_PKT_F_CSUM_PARTIAL, csum_start, csum_offset). Nothing
+ * computes it for a packet the host consumes; one the host sends on through
+ * another interface has it finished there.
+ *
+ * SI_NET_F_RXMSI: the SoC raises SI_NET_MSI for a packet it has queued
+ * whenever the host has its receive interrupt enabled (enum si_net_val_types
+ * host_rxint), which lets the host stop polling the head on a timer.
+ *
+ * SI_NET_F_HOST_PARTIAL_CSUM: the same as SI_NET_F_PARTIAL_CSUM in the other
+ * direction. The SoC takes packets whose L4 checksum the host has left to be
+ * filled in, described the same way in the host's transmit descriptor.
+ */
+#define SI_NET_F_PARTIAL_CSUM		BIT(0)
+#define SI_NET_F_RXMSI			BIT(1)
+#define SI_NET_F_HOST_PARTIAL_CSUM	BIT(2)
 
 /*
  * Queue status definitions
@@ -202,7 +229,8 @@ enum si_net_val_types {
         rx_head,
         rx_tail,
         tx_head,
-        tx_tail
+        tx_tail,
+        host_rxint
 };
 
 /*
@@ -249,6 +277,11 @@ struct si_alert {
 struct si_mcmd_set_nethw_addr_params {
 	u32 nethw_addr_low;
 	u32 nethw_addr_high;
+	u32 features;	/* SI_NET_F_* on offer. Not sent by older hosts */
+} __aligned(4);
+
+struct si_mcmd_set_nethw_addr_res {
+	u32 features;	/* SI_NET_F_* the SoC will use */
 } __aligned(4);
 
 struct si_mcmd_set_ipaddr_params {

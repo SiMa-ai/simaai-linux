@@ -24,7 +24,7 @@
 static uint32_t isp_io_read_sample( acamera_sbus_t *p_bus, uint32_t addr, uint8_t sample_size )
 {
     if ( ( sample_size == 2 && ( addr & 1 ) ) || ( sample_size == 4 && ( addr & 3 ) ) ) {
-        LOG( LOG_CRIT, "Missaligned access to IPS" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Missaligned access to IPS" );
         return 0xFFFFFFFF;
     }
     switch ( sample_size ) {
@@ -40,7 +40,7 @@ static uint32_t isp_io_read_sample( acamera_sbus_t *p_bus, uint32_t addr, uint8_
 static void isp_io_write_sample( acamera_sbus_t *p_bus, uint32_t addr, uint32_t sample, uint8_t sample_size )
 {
     if ( ( sample_size == 2 && ( addr & 1 ) ) || ( sample_size == 4 && ( addr & 3 ) ) ) {
-        LOG( LOG_CRIT, "Missaligned access to IPS" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Missaligned access to IPS" );
         return;
     }
     switch ( sample_size ) {

@@ -23,8 +23,6 @@
 void sensor_fsm_clear( sensor_fsm_t *p_fsm )
 {
     p_fsm->sensor_pos = ( 0xff );
-    p_fsm->drv_priv = NULL;
-    p_fsm->s_param = NULL;
 }
 
 void sensor_request_interrupt( sensor_fsm_ptr_t p_fsm, system_fw_interrupt_mask_t mask )

@@ -472,7 +472,7 @@ static void count_frame_end( const uint32_t slot )
 
         last_stamps[slot] = this_stamp;
 
-        LOG( LOG_NOTICE, "frame end irq, slot %d, count %zu, ftime %zums, fps: %zu",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "frame end irq, slot %d, count %zu, ftime %zums, fps: %zu",
              slot,
              counters[slot],
              average_frame_time,
@@ -540,7 +540,7 @@ void acamera_interrupt_handler( void *param )
 #endif
 
 #if 0
-    LOG(LOG_INFO,"mask stats %x, mcfe %x, eof %x, sof %x , scheduler status %d, curr_slot %d",
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO,"mask stats %x, mcfe %x, eof %x, sof %x , scheduler status %d, curr_slot %d",
             mask.stats, mask.mcfe, mask.eof, mask.sof, 
 	    acamera_frontend_mcfe_scheduler_status_read(PHY_ADDR_ISP),
 	    curr_slot);
@@ -566,7 +566,7 @@ void acamera_interrupt_handler( void *param )
             const uint32_t mcfe_slot_mask = mask.mcfe >> ACAMERA_FRONTEND_INTERRUPTS_SLOT_1_FIELD_OFFSET;
 
             if ( !is_power_of_two( mcfe_slot_mask ) ) {
-                LOG( LOG_DEBUG, "More than one MCFE slot done, failed to proccess previous slot (MCFE:0x%x).", mcfe_slot_mask );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "More than one MCFE slot done, failed to proccess previous slot (MCFE:0x%x).", mcfe_slot_mask );
             }
 
             uint8_t slot;
@@ -574,7 +574,7 @@ void acamera_interrupt_handler( void *param )
             for ( slot = 0; slot < MIN( ISP_MCFE_MAX_SLOT, FIRMWARE_CONTEXT_NUMBER ); ++slot ) {
                 if ( mcfe_slot_mask & ( 1u << slot ) ) {
                     if ( slot != last_isp_slot ) {
-                        LOG( LOG_DEBUG, "FS slot %u doesn't match CDMA out slot %u!!!", last_isp_slot, slot );
+                        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "FS slot %u doesn't match CDMA out slot %u!!!", last_isp_slot, slot );
                     }
                     // No need for range check, it has to be correct due to
                     // loop constraint.
@@ -594,7 +594,7 @@ void acamera_interrupt_handler( void *param )
             if ( last_isp_slot < ISP_MCFE_MAX_SLOT ) {
                 irq_masks[last_isp_slot] |= BIT( ACAMERA_IRQ_BE_FRAME_END );
             } else {
-                LOG( LOG_DEBUG, "Frame end received before frame start on first processing!!!" );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Frame end received before frame start on first processing!!!" );
             }
         }
     }

@@ -759,7 +759,7 @@ static int32_t output_formatter_config_format( output_formatter_fsm_ptr_t p_fsm 
             acamera_isp_out_format_mux_a3_mode_width_write( isp_base, cfg->plane[i].axi_cfg.data_width);	    
             break;
         default:
-            LOG( LOG_ERR, "Unsupported AXI %d for plane %d", cfg->plane[i].axi, i );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Unsupported AXI %d for plane %d", cfg->plane[i].axi, i );
             break;
         }
     }
@@ -775,6 +775,17 @@ static void output_formatter_rgb_lut_reload( output_formatter_fsm_ptr_t p_fsm )
     const uint32_t gamma_lut_len = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA );
 
     uint32_t i;
+
+    /* The loop below indexes the hardware array by the LUT's own length, so
+     * a longer LUT writes past the array into the registers after it. The
+     * gamma back-end path already checks this; do the same here. */
+    if ( gamma_lut_len != ISP_OUT_FORMAT_LUT_RGB_SIZE_REGS ) {
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+             "Wrong elements number in gamma lut: expected %d got %d.",
+             ISP_OUT_FORMAT_LUT_RGB_SIZE_REGS, gamma_lut_len );
+        return;
+    }
+
     for ( i = 0; i < ( gamma_lut_len - 1 ); i++ ) {
         acamera_out_format_lut_rgb_array_data_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, gamma_lut[i] );
     }

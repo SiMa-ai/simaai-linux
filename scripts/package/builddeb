@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
 #
 # builddeb 1.3
 # Copyright 2003 Wichert Akkerman <wichert@wiggy.net>
@@ -73,6 +74,22 @@ install_linux_image () {
                 echo "Injecting encrypted kernel into Debian package..."
                 cp "arch/arm64/boot/Image.enc.gz" "${pdir}/boot/vmlinuz-${KERNELRELEASE}.enc"
         fi
+
+	# sima.ai: build (and sign) the kernel FIT that U-Boot boots via `bootm`.
+	# FIT_* arrive as command-line make vars from linux.yaml's extra_makeflags,
+	# so they are exported into this recipe's environment.
+	if [ "${SRCARCH}" = "arm64" ] && [ -x "${srctree}/scripts/sima/make-kernel-fit.sh" ]; then
+		sh "${srctree}/scripts/sima/make-kernel-fit.sh" \
+			--image "arch/arm64/boot/Image" \
+			--out "${pdir}/boot/fitImage-${KERNELRELEASE}" \
+			--load "${FIT_KERNEL_LOAD_ADDR:-0x1075000000}" \
+			${FIT_SIGN_KEYDIR:+--keydir "${FIT_SIGN_KEYDIR}" --keyname "${FIT_SIGN_KEYNAME}" --algo "${FIT_SIGN_ALGO}"}
+		# Ship it as /boot/fitImage, the name U-Boot loads; the FIT embeds
+		# the Image, so the vmlinuz copy goes.
+		mv "${pdir}/boot/fitImage-${KERNELRELEASE}" "${pdir}/boot/fitImage"
+		rm -f "${pdir}/boot/vmlinuz-${KERNELRELEASE}"
+		installed_image_path="boot/fitImage"
+	fi
 
 	if [ "${ARCH}" != um ]; then
 		install_maint_scripts "${pdir}"

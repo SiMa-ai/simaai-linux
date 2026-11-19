@@ -94,7 +94,7 @@ void acamera_buffer_manager_init( acamera_buffer_manager_t *p_ctrl, uint32_t bas
     set_value( p_ctrl->tx_base + OFFSET_WRITE_INX, 0 ); // reset index
     p_ctrl->rx_ack = 0;
     p_ctrl->tx_ack = 0;
-    LOG( LOG_INFO, "FW bus channel is reset" );
+    LOG_CAT( ALOG_CAT_CONTROL, LOG_INFO, "FW bus channel is reset" );
 }
 
 int acamera_buffer_manager_read( acamera_buffer_manager_t *p_ctrl, uint8_t *data, int size )
@@ -107,7 +107,7 @@ int acamera_buffer_manager_read( acamera_buffer_manager_t *p_ctrl, uint8_t *data
     case ERROR_VALUE:
         return 0;
     case CHANNEL_REQUESTED:
-        LOG( LOG_INFO, "Accepted channel request on RX part. Reset receiver" );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_INFO, "Accepted channel request on RX part. Reset receiver" );
         set_value( p_ctrl->rx_base + OFFSET_READ_INX, 0 );                // reset index
         set_value( p_ctrl->rx_base + OFFSET_STATE, CHANNEL_ACKNOWLEDGE ); // notify sender that we accept chanel
         p_ctrl->rx_ack = 1;
@@ -135,15 +135,15 @@ int acamera_buffer_manager_read( acamera_buffer_manager_t *p_ctrl, uint8_t *data
             }
             set_value( p_ctrl->rx_base + OFFSET_READ_INX, rd_inx );             // set new index
             set_value( p_ctrl->rx_base + OFFSET_STATE, READ_REGISTER_UPDATED ); // set flag
-            LOG( LOG_DEBUG, "Received portion of data size %u", read_size );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_DEBUG, "Received portion of data size %u", read_size );
             return read_size;
         } else {
             set_value( p_ctrl->rx_base + OFFSET_STATE, FW_IS_RESET ); // notify sender that we are in reset
-            LOG( LOG_WARNING, "Request on non-established channel" );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Request on non-established channel" );
             return 0;
         }
     }
-    LOG( LOG_ERR, "Wrong channel state %u", state );
+    LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Wrong channel state %u", state );
     p_ctrl->rx_ack = 0;
     return BUS_ERROR_FATAL;
 }
@@ -162,7 +162,7 @@ int acamera_buffer_manager_write( acamera_buffer_manager_t *p_ctrl, const uint8_
     case ERROR_VALUE:
         return 0;
     case CHANNEL_REQUESTED:
-        LOG( LOG_INFO, "Accepted channel request on TX part. Reset tramsmitter" );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_INFO, "Accepted channel request on TX part. Reset tramsmitter" );
         set_value( p_ctrl->tx_base + OFFSET_WRITE_INX, 0 );               // reset index
         set_value( p_ctrl->tx_base + OFFSET_STATE, CHANNEL_ACKNOWLEDGE ); // notify sender that we accept chanel
         p_ctrl->tx_ack = 1;                                               // first acknowlege, just return 0
@@ -190,15 +190,15 @@ int acamera_buffer_manager_write( acamera_buffer_manager_t *p_ctrl, const uint8_
             }
             set_value( p_ctrl->tx_base + OFFSET_WRITE_INX, wr_inx );             // set new index
             set_value( p_ctrl->tx_base + OFFSET_STATE, WRITE_REGISTER_UPDATED ); // set flag
-            LOG( LOG_DEBUG, "Written portion of data size %u, new wr_inx %u", write_size, wr_inx );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_DEBUG, "Written portion of data size %u, new wr_inx %u", write_size, wr_inx );
             return write_size;
         } else {
             set_value( p_ctrl->tx_base + OFFSET_STATE, FW_IS_RESET ); // notify sender that we are in reset
-            LOG( LOG_WARNING, "Request on non-established channel" );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Request on non-established channel" );
             return 0;
         }
     }
-    LOG( LOG_ERR, "Wrong channel state %u", state );
+    LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Wrong channel state %u", state );
     p_ctrl->tx_ack = 0;
     return BUS_ERROR_FATAL;
 }

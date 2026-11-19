@@ -27,6 +27,7 @@
 #include <linux/media/simaai/modalix_isp_calib.h>
 
 #include "acamera_calib_mgr_settings.h"
+#include "acamera_isp_core_settings.h"
 #include "acamera_math.h"
 
 /* Kernel-internal aliases for the UAPI types. struct
@@ -42,6 +43,8 @@ typedef struct _acamera_calib_mgr_entry_t {
     int32_t initialized;
     int32_t ( *get_calibrations )( uint32_t wdr_mode, void *param );
     ACameraCalibrations c;
+    /* Refreshed by acamera_calib_mgr_update(); see the getter below. */
+    uint32_t calibration_bit_depth;
 } acamera_calib_mgr_entry_t;
 
 /**
@@ -96,6 +99,24 @@ int32_t calib_mgr_lut_exists( acamera_calib_mgr_entry_t *entry, uint32_t idx );
  */
 const void *calib_mgr_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx );
 
+/**
+ *   Get a LUT the caller will read as a fixed byte extent - a struct, or an
+ *   array of them - rather than through one of the typed element getters.
+ *
+ *   The typed getters check the element width the tuning declared against
+ *   the width the call site reads. A caller that casts the data to a struct
+ *   reads sizeof(struct) bytes whatever the descriptor says, so it has to
+ *   state the extent instead and be told no when the tuning is smaller.
+ *
+ *   @param entry - pointer to calibration manager entry.
+ *   @param idx   - LUT index
+ *   @param bytes - how many bytes the caller will read
+ *
+ *   @return pointer to the LUT data, or NULL if it is absent or too small
+ */
+const void *calib_mgr_lut_get_sized( acamera_calib_mgr_entry_t *entry,
+                                     uint32_t idx, uint32_t bytes );
+
 const uint8_t *calib_mgr_u8_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx );
 
 const uint16_t *calib_mgr_u16_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx );
@@ -131,6 +152,23 @@ uint32_t calib_mgr_lut_cols( acamera_calib_mgr_entry_t *entry, uint32_t idx );
 uint32_t calib_mgr_lut_len( acamera_calib_mgr_entry_t *entry, uint32_t idx );
 
 uint32_t calib_mgr_lut_width( acamera_calib_mgr_entry_t *entry, uint32_t idx );
+
+/* Bit depth the black-level / stats calibration values were authored at
+ * (MODALIX_ISP_CALIB_CALIBRATION_BIT_DEPTH); default 12 when the tuning omits
+ * it. The slot is optional, so probe with lut_exists first — the getters
+ * assert on absent slots. */
+/*
+ * A value, not a pointer into the calibration set. The sensor-info path reads
+ * this from an ioctl thread while the manager may be installing a replacement
+ * set, and the set the slots pointed at is freed once the replacement is in.
+ * The entry outlives every update, so a scalar cached in it is always safe to
+ * read; the worst case is one update stale. Zero means no update has landed.
+ */
+static inline uint32_t calib_mgr_calibration_bit_depth( acamera_calib_mgr_entry_t *entry )
+{
+	return ( entry && entry->calibration_bit_depth ) ? entry->calibration_bit_depth
+							 : 12u;
+}
 
 uint32_t calib_mgr_lut_size( acamera_calib_mgr_entry_t *entry, uint32_t idx );
 

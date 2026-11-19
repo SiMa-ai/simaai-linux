@@ -32,22 +32,23 @@ static void module_mcfe_usecase_create_sensor_config( mcfe_fsm_ptr_t p_fsm, modu
     acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
     const uint32_t ctx_id = p_ictx->context_id;
 
-    // Get sensor config.
-    const sensor_param_t *s_param = ACAMERA_FSM2FSMGR_PTR( p_fsm )->sensor_fsm.ctrl.get_parameters( ACAMERA_FSM2FSMGR_PTR( p_fsm )->sensor_fsm.drv_priv );
+    // Get sensor config from the firmware's general_sensor_info (V4L2-sourced;
+    // no longer via the per-sensor driver's get_parameters).
+    const acamera_cmd_sensor_info *s_info = &ACAMERA_FSM2FSMGR_PTR( p_fsm )->sensor_fsm.general_sensor_info;
 
-    sensor_config->h_start = s_param->h_start;
-    sensor_config->v_start = s_param->v_start;
-    sensor_config->is_remote = s_param->is_remote;
-    sensor_config->num_channel = s_param->num_channel;
-    sensor_config->video_port_id = s_param->video_port_id;
-    sensor_config->data_width = s_param->data_width;
-    sensor_config->width = s_param->active.width;
-    sensor_config->height = s_param->active.height;
-    sensor_config->rggb_start = s_param->rggb_start;
-    sensor_config->cfa_pattern = s_param->cfa_pattern;
+    sensor_config->h_start = s_info->h_start;
+    sensor_config->v_start = s_info->v_start;
+    sensor_config->is_remote = s_info->is_remote;
+    sensor_config->num_channel = s_info->current_sensor_mode.num_channels;
+    sensor_config->video_port_id = s_info->video_port_id;
+    sensor_config->data_width = s_info->sensor_output_bits;
+    sensor_config->width = s_info->active_width;
+    sensor_config->height = s_info->active_height;
+    sensor_config->rggb_start = s_info->rggb_start;
+    sensor_config->cfa_pattern = s_info->cfa_pattern;
     sensor_config->cdma_addr = p_ictx->settings.isp_base;
 
-    LOG(LOG_INFO,"CTX %d [Sensor configuration] - remote=%d, vid=%d, ch=%d, dw=%d, hs=%d, vs=%d, w=%d, h=%d, rgb=%d, cfa=%d, cdmaOff=0x%x.",
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO,"CTX %d [Sensor configuration] - remote=%d, vid=%d, ch=%d, dw=%d, hs=%d, vs=%d, w=%d, h=%d, rgb=%d, cfa=%d, cdmaOff=0x%x.",
          ctx_id,
          sensor_config->is_remote,
          sensor_config->video_port_id,
@@ -97,7 +98,7 @@ static void module_mcfe_usecase_create_output_config( mcfe_fsm_ptr_t p_fsm, modu
         output_config->plane[i].v_subsampling = output_formatter_config.plane[i].axi_cfg.v_subsampling;
     }
 
-    LOG( LOG_INFO, "CTX %d [Output configuration] - format=%d, planes=%d, axi1=%d, axi2=%d, axi3=%d.",
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CTX %d [Output configuration] - format=%d, planes=%d, axi1=%d, axi2=%d, axi3=%d.",
          ctx_id,
          output_config->format,
          output_config->num_planes,
@@ -200,7 +201,7 @@ void mcfe_config( mcfe_fsm_ptr_t p_fsm )
 
     case V4L2_INTERFACE_MODE_M2M:
         if ( sensor_config.is_remote ) {
-            LOG( LOG_ERR, "Failed to configure use-case (context id: %d). Remote sensor is not compatible with V4L2 inteface.", ctx_id );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to configure use-case (context id: %d). Remote sensor is not compatible with V4L2 inteface.", ctx_id );
         } else {
             usecase_type = MODULE_MCFE_USECASE_M2M;
         }
@@ -213,7 +214,7 @@ void mcfe_config( mcfe_fsm_ptr_t p_fsm )
 
     int rc = module_mcfe_usecase_init( &( p_fsm->usecase_cfg ), usecase_type, ctx_id, ISP_HISTOGRAM_POSITION_IS_BE );
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Failed to configure use-case (context id: %d, type: %d), error code: (%d).",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to configure use-case (context id: %d, type: %d), error code: (%d).",
              ctx_id,
              p_fsm->usecase_cfg.type,
              rc );
@@ -228,7 +229,7 @@ void mcfe_config( mcfe_fsm_ptr_t p_fsm )
     // Error handler
     if ( rc != MCFE_ERR_NONE ) {
         p_fsm->usecase_cfg.functions.release_resources( &( p_fsm->usecase_cfg ) );
-        LOG( LOG_ERR, "Failed to configure use-case (context id: %d, type: %d), error code: (%d).",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to configure use-case (context id: %d, type: %d), error code: (%d).",
              ctx_id,
              p_fsm->usecase_cfg.type,
              rc );
@@ -237,7 +238,7 @@ void mcfe_config( mcfe_fsm_ptr_t p_fsm )
 
         rc = module_mcfe_update_inputs();
         if ( rc != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Failed to update MCFE inputs in use" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to update MCFE inputs in use" );
         }
     }
 }
@@ -282,7 +283,7 @@ void mcfe_raw_buffer_ready( mcfe_fsm_ptr_t p_fsm )
 
 #if defined( MCFE_DEBUG_FRAME_COUNTER )
     static int raw_buffer_counter = 0;
-    LOG( LOG_INFO, "isphw_frame_end_fe event occurred! (cnt = %d, ctx_id = [%u])",
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isphw_frame_end_fe event occurred! (cnt = %d, ctx_id = [%u])",
          raw_buffer_counter++, ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id );
 #endif
 
@@ -307,7 +308,7 @@ void mcfe_out_buffer_ready( mcfe_fsm_ptr_t p_fsm )
 
 #if defined( MCFE_DEBUG_FRAME_COUNTER )
     static int out_buffer_counter = 0;
-    LOG( LOG_INFO, "isphw_frame_end event occurred! (cnt = %d, ctx_id = [%u])",
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isphw_frame_end event occurred! (cnt = %d, ctx_id = [%u])",
          out_buffer_counter++, ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id );
 #endif
 

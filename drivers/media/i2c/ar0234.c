@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
-* A V4L2 driver for OnSemi AR0234 cameras.
-* Copyright (C) 2021, Raspberry Pi (Trading) Ltd
-*
-* Based on Sony imx219 camera driver
-* Copyright (C) 2019, Raspberry Pi (Trading) Ltd
-*
-*/
+ * A V4L2 driver for onsemi AR0234 cameras.
+ * Copyright (C) 2021, Raspberry Pi (Trading) Ltd
+ * Copyright 2026 SiMa Technologies, Inc.
+ *
+ * Based on Sony imx219 camera driver
+ * Copyright (C) 2019, Raspberry Pi (Trading) Ltd
+ */
 
+#include <linux/bitfield.h>
+#include <linux/build_bug.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
+#include <linux/math64.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
@@ -24,228 +27,62 @@
 #include <media/v4l2-mediabus.h>
 #include <media/mipi-csi2.h>
 
-/* Chip ID */
-#define AR0234_REG_CHIP_ID		0x3000
-#define AR0234_CHIP_ID			0x0a56
-#define AR0234_CHIP_ID_MONO		0x1a56
-
-#define AR0234_REG_RESET          0x301A
-/* Bit 0 is reset */
-/* Bit 2 is stream on/off */
-#define AR0234_REG_RESET_RESET       0x00D9
-#define AR0234_REG_RESET_STREAM_OFF  0x2058
-#define AR0234_REG_RESET_STREAM_ON   0x205C
-
-/* External clock frequency is 24.0M */
-#define AR0234_XCLK_FREQ		27000000ULL
-
-/* Pixel rate is fixed at 180M for all the modes */
-#define AR0234_PIXEL_RATE		550000000ULL
-
-#define AR0234_DEFAULT_LINK_FREQ	270000000ULL
-
-#define LINE_LENGTH_PCK			0x300C
-
-/* V_TIMING internal */
-#define AR0234_REG_VTS			0x300a
-#define AR0234_VTS_30FPS		0x04c4
-#define AR0234_VTS_60FPS		0x0dc6 //fixme
-#define AR0234_VTS_MAX			0xffff
-
-#define AR0234_VBLANK_MIN		16
-
-/*Frame Length Line*/
-#define AR0234_FLL_MIN			0x08a6
-#define AR0234_FLL_MAX			0xffff
-#define AR0234_FLL_STEP			1
-#define AR0234_FLL_DEFAULT		0x0c98
-
-/* HBLANK control - read only */
-#define AR0234_PPL_DEFAULT		2448
-
-/* Exposure control */
-#define AR0234_REG_EXPOSURE_COARSE	0x3012
-#define AR0234_REG_EXPOSURE_FINE	0x3014
-#define AR0234_EXPOSURE_MIN		4
-#define AR0234_EXPOSURE_STEP		1
-#define AR0234_EXPOSURE_DEFAULT		0x640
-#define AR0234_EXPOSURE_MAX		65535
-
-/* Analog gain control (R0x3060: coarse[6:4]=2^s s=0..4, fine[3:0]; 7-bit
- * context-A field). 0x40 = s4 = 16x; reg is monotonic 1x..16x over 0..0x40. */
-#define AR0234_REG_ANALOG_GAIN		0x3060
-#define AR0234_ANA_GAIN_MIN		0
-#define AR0234_ANA_GAIN_MAX		0x40
-#define AR0234_ANA_GAIN_STEP		1
-#define AR0234_ANA_GAIN_DEFAULT		0x0
-
-/* Digital gain control (R0x305E: 11-bit xxxx.yyyyyyy Q7; 0x080 = 1.0x,
- * 0x7FF = 15.99x). */
-#define AR0234_REG_DIGITAL_GAIN		0x305e
-#define AR0234_DGTL_GAIN_MIN		0x0080
-#define AR0234_DGTL_GAIN_MAX		0x07ff
-#define AR0234_DGTL_GAIN_DEFAULT	0x0080
-#define AR0234_DGTL_GAIN_STEP		1
-
-#define AR0234_REG_ORIENTATION		0x3040
-#define AR0234_REG_ORIENTATION_HFLIP	BIT(14)
-#define AR0234_REG_ORIENTATION_VFLIP	BIT(15)
-
-/* SMIA_TEST: bit 8 enables the 2 embedded-data lines; clear to disable */
-#define AR0234_REG_SMIA_TEST		0x3064
-#define AR0234_SMIA_TEST_EMB_DATA	BIT(8)
-
-#define AR0234_REG_OUTPUT_DEPTH		0x31AC
-
-/* Test Pattern Control */
-#define AR0234_REG_TEST_PATTERN		0x0600
-#define AR0234_TEST_PATTERN_DISABLE	0
-#define AR0234_TEST_PATTERN_SOLID_COLOR	1
-#define AR0234_TEST_PATTERN_COLOR_BARS	2
-#define AR0234_TEST_PATTERN_GREY_COLOR	3
-#define AR0234_TEST_PATTERN_PN9		4
-
-/* Test pattern colour components */
-#define AR0234_REG_TESTP_RED		0x0602
-#define AR0234_REG_TESTP_GREENR		0x0604
-#define AR0234_REG_TESTP_BLUE		0x0606
-#define AR0234_REG_TESTP_GREENB		0x0608
-#define AR0234_TESTP_COLOUR_MIN		0
-#define AR0234_TESTP_COLOUR_MAX		0x03ff
-#define AR0234_TESTP_COLOUR_STEP	1
-#define AR0234_TESTP_RED_DEFAULT	AR0234_TESTP_COLOUR_MAX
-#define AR0234_TESTP_GREENR_DEFAULT	0
-#define AR0234_TESTP_BLUE_DEFAULT	0
-#define AR0234_TESTP_GREENB_DEFAULT	0
+#include "ar0234.h"
 
 enum pad_types {
 	IMAGE_PAD,
 	NUM_PADS
 };
 
-/* AR0234 native and active pixel array size. */
-#define AR0234_NATIVE_WIDTH		1484U
-#define AR0234_NATIVE_HEIGHT		856U
-#define AR0234_PIXEL_ARRAY_LEFT		6U
-#define AR0234_PIXEL_ARRAY_TOP		10U
-#define AR0234_PIXEL_ARRAY_WIDTH	1920U
-#define AR0234_PIXEL_ARRAY_HEIGHT	1080U
-
-struct ar0234_reg {
-	u16 address;
-	u16 val;
+/* Identical for every mode, depth and link rate; written in standby. */
+static const struct cci_reg_sequence ar0234_common_regs[] = {
+	{ AR0234_DATAPATH_SELECT,	AR0234_DATAPATH_SELECT_VAL },
+	{ AR0234_X_ODD_INC,		AR0234_ODD_INC_NO_SKIP },
+	{ AR0234_Y_ODD_INC,		AR0234_ODD_INC_NO_SKIP },
+	{ AR0234_OPERATION_MODE_CTRL,	AR0234_OPERATION_MODE_LINEAR },
+	{ AR0234_READ_MODE,		0 },
+	{ AR0234_COMPANDING,		0 },
 };
 
-struct ar0234_reg_list {
-	unsigned int num_of_regs;
-	const struct ar0234_reg *regs;
+static const struct ar0234_depth ar0234_depths[] = {
+	/* 10-bit leads: the default format and the fallback. */
+	{ .code = MEDIA_BUS_FMT_SGRBG10_1X10, .vt_pix_clk_div = 5,
+	  .op_pix_clk_div = 10, .data_format_bits = AR0234_DATA_FORMAT(10, 10),
+	  .data_type = MIPI_CSI2_DT_RAW10 },
+	/* The LI 12-bit setting; AND9812 lists only 8 and 10 for the output. */
+	{ .code = MEDIA_BUS_FMT_SGRBG12_1X12, .vt_pix_clk_div = 6,
+	  .op_pix_clk_div = 12, .data_format_bits = AR0234_DATA_FORMAT(12, 12),
+	  .data_type = MIPI_CSI2_DT_RAW12 },
+	/* 8-bit truncates the 10-bit pixel. */
+	{ .code = MEDIA_BUS_FMT_SGRBG8_1X8, .vt_pix_clk_div = 4,
+	  .op_pix_clk_div = 8, .data_format_bits = AR0234_DATA_FORMAT(10, 8),
+	  .data_type = MIPI_CSI2_DT_RAW8 },
 };
 
-/* Mode : resolution and related config&values */
-struct ar0234_mode {
-	/* Frame width */
-	unsigned int width;
-	/* Frame height */
-	unsigned int height;
-
-	/* Analog crop rectangle. */
-	struct v4l2_rect crop;
-
-	/* V-timing */
-	unsigned int vts_def;
-
-	/* Default register values */
-	struct ar0234_reg_list reg_list;
+/* The monochrome part, same timing under grey codes. */
+static const struct ar0234_depth ar0234_depths_mono[] = {
+	{ .code = MEDIA_BUS_FMT_Y10_1X10, .vt_pix_clk_div = 5,
+	  .op_pix_clk_div = 10, .data_format_bits = AR0234_DATA_FORMAT(10, 10),
+	  .data_type = MIPI_CSI2_DT_RAW10 },
+	{ .code = MEDIA_BUS_FMT_Y12_1X12, .vt_pix_clk_div = 6,
+	  .op_pix_clk_div = 12, .data_format_bits = AR0234_DATA_FORMAT(12, 12),
+	  .data_type = MIPI_CSI2_DT_RAW12 },
+	{ .code = MEDIA_BUS_FMT_Y8_1X8, .vt_pix_clk_div = 4,
+	  .op_pix_clk_div = 8, .data_format_bits = AR0234_DATA_FORMAT(10, 8),
+	  .data_type = MIPI_CSI2_DT_RAW8 },
 };
 
-#define VT_PIX_CLK_DIV     0x302A
-#define VT_SYS_CLK_DIV     0x302C
-#define PRE_PLL_CLK_DIV    0x302E
-#define PLL_MULTIPLIER     0x3030
-#define OP_PIX_CLK_DIV     0x3036
-#define OP_SYS_CLK_DIV     0x3038
-#define DIGITAL_TEST       0x30B0
+#define AR0234_NUM_DEPTHS ARRAY_SIZE(ar0234_depths)
+static_assert(ARRAY_SIZE(ar0234_depths_mono) == AR0234_NUM_DEPTHS,
+	      "the mono table must mirror the colour table");
 
-#define DELAY 0xffff	/* Delay for specified number of ms */
-
-static const struct ar0234_reg mode_1920x1080_regs[] = {
-	// [1920x1080]
-	{0x302A, 0x0006},		//VT_PIX_CLK_DIV = 6
-	{0x302C, 0x0002},		//VT_SYS_CLK_DIV = 2
-	{0x302E, 0x0002},		//PRE_PLL_CLK_DIV = 2
-	{0x3030, 0x0028},		//PLL_MULTIPLIER = 40
-	{0x3036, 0x000C},		//OP_PIX_CLK_DIV = 12
-	{0x3038, 0x0002},		//OP_SYS_CLK_DIV = 2
-	{0x31B0, 0x0059},		//FRAME_PREAMBLE = 89
-	{0x31B2, 0x003B},		//LINE_PREAMBLE = 59
-	{0x31B4, 0x31C5},		//MIPI_TIMING_0 = 12741
-	{0x31B6, 0x214C},		//MIPI_TIMING_1 = 8524
-	{0x31B8, 0x5048},		//MIPI_TIMING_2 = 20552
-	{0x31BA, 0x0186},		//MIPI_TIMING_3 = 390
-	{0x31BC, 0x8805},		//MIPI_TIMING_4 = 2053
-	{0x3354, 0x002C},		//MIPI_CNTRL = 44
-
-
-	//[Timing_settings]
-	{0x301A, 0x2058},		//RESET_REGISTER = 8280
-	{0x31AE, 0x0202},		//SERIAL_FORMAT = 514
-	{0x3002, 0x0008},		//Y_ADDR_START = 8
-	{0x3004, 0x0008},		//X_ADDR_START = 8
-	{0x3006, 0x043F},		//Y_ADDR_END = 1087
-	{0x3008, 0x0787},		//X_ADDR_END = 1927
-	{0x300A, 0x04C4},		//FRAME_LENGTH_LINES = 1220
-	{0x300C, 0x0264},		//LINE_LENGTH_PCK = 612
-	{0x3012, 0x016F},		//COARSE_INTEGRATION_TIME = 367
-	{0x31AC, 0x0C0C},		//DATA_FORMAT_BITS = 3084
-	{0x306E, 0x9010},		//DATAPATH_SELECT = 36880
-	{0x30A2, 0x0001},		//X_ODD_INC = 1
-	{0x30A6, 0x0001},		//Y_ODD_INC = 1
-	{0x3082, 0x0003},		//OPERATION_MODE_CTRL = 3
-	{0x3040, 0x0000},		//READ_MODE = 0
-	{0x31D0, 0x0000},		//COMPANDING = 0
-	{0x301A, 0x205C},		//RESET_REGISTER = 8284
-};
-
-static const struct ar0234_reg mode_1920x1200_60_regs[] = {
-	// [1920x1200 60fps]
-	/* Cropping / output size */
-	{0x302A, 0x0006},		//VT_PIX_CLK_DIV = 6
-	{0x302C, 0x0002},		//VT_SYS_CLK_DIV = 2
-	{0x302E, 0x0002},		//PRE_PLL_CLK_DIV = 2
-	{0x3030, 0x0028},		//PLL_MULTIPLIER = 40
-	{0x3036, 0x000C},		//OP_PIX_CLK_DIV = 12
-	{0x3038, 0x0002},		//OP_SYS_CLK_DIV = 2
-//BITFIELD = 0x30B0, 0x4000, 0x0000	//DIGITAL_TEST, bits 0x4000 = 0
-	{0x31B0, 0x0059},		//FRAME_PREAMBLE = 89
-	{0x31B2, 0x003B},		//LINE_PREAMBLE = 59
-	{0x31B4, 0x31C5},		//MIPI_TIMING_0 = 12741
-	{0x31B6, 0x214C},		//MIPI_TIMING_1 = 8524
-	{0x31B8, 0x5048},		//MIPI_TIMING_2 = 20552
-	{0x31BA, 0x0186},		//MIPI_TIMING_3 = 390
-	{0x31BC, 0x8805},		//MIPI_TIMING_4 = 2053
-	{0x3354, 0x002C},		//MIPI_CNTRL = 44
-
-
-//[Timing_settings]
-	{0x301A, 0x2058},		//RESET_REGISTER = 8280
-	{0x31AE, 0x0202},		//SERIAL_FORMAT = 514
-	{0x3002, 0x0008},		//Y_ADDR_START = 8
-	{0x3004, 0x0008},		//X_ADDR_START = 8
-	{0x3006, 0x04B7},		//Y_ADDR_END = 1207
-	{0x3008, 0x0787},		//X_ADDR_END = 1927
-	{0x300A, 0x04C4},		//FRAME_LENGTH_LINES = 1220
-	{0x300C, 0x0264},		//LINE_LENGTH_PCK = 612
-	{0x3012, 0x016F},		//COARSE_INTEGRATION_TIME = 367
-	{0x31AC, 0x0C0C},		//DATA_FORMAT_BITS = 3084
-	{0x306E, 0x9010},		//DATAPATH_SELECT = 36880
-	{0x30A2, 0x0001},		//X_ODD_INC = 1
-	{0x30A6, 0x0001},		//Y_ODD_INC = 1
-	{0x3082, 0x0003},		//OPERATION_MODE_CTRL = 3
-	{0x3040, 0x0000},		//READ_MODE = 0
-	{0x31D0, 0x0000},		//COMPANDING = 0
-	{0x301A, 0x205C},		//RESET_REGISTER = 8284
-
-//	{0x3028, 0x0010}, //ROW_SPEED
+/* D-PHY timing counts at the reference OP_CLK (LI values 0x31c5/0x214c/0x5048/0x0186/0x8805). */
+static const struct ar0234_dphy_timing ar0234_dphy_timing_ref = {
+	.hs_prepare = 3, .hs_trail = 7, .clk_trail = 5,
+	.clk_prepare = 2, .hs_exit = 5, .hs_zero = 12,
+	.bgap = 5, .clk_pre = 1, .clk_post = 8,
+	.lpx = 3, .ulpm_recover = 6,
+	.t_init = 5,
 };
 
 static const char * const ar0234_test_pattern_menu[] = {
@@ -253,15 +90,15 @@ static const char * const ar0234_test_pattern_menu[] = {
 	"Color Bars",
 	"Solid Color",
 	"Grey Color Bars",
-	"PN9"
+	"Walking 1s"
 };
 
 static const int ar0234_test_pattern_val[] = {
-	AR0234_TEST_PATTERN_DISABLE,
-	AR0234_TEST_PATTERN_COLOR_BARS,
+	AR0234_TEST_PATTERN_NONE,
+	AR0234_TEST_PATTERN_COLOR_BAR,
 	AR0234_TEST_PATTERN_SOLID_COLOR,
-	AR0234_TEST_PATTERN_GREY_COLOR,
-	AR0234_TEST_PATTERN_PN9,
+	AR0234_TEST_PATTERN_FADE_TO_GRAY,
+	AR0234_TEST_PATTERN_WALKING_1,
 };
 
 /* regulator supplies */
@@ -274,57 +111,21 @@ static const char * const ar0234_supply_name[] = {
 
 #define AR0234_NUM_SUPPLIES ARRAY_SIZE(ar0234_supply_name)
 
-#define AR0234_XCLR_MIN_DELAY_US	6200
-#define AR0234_XCLR_DELAY_RANGE_US	1000
-
-static const u32 bayer_codes[] = {
-	/* 12-bit modes. */
-	MEDIA_BUS_FMT_SGRBG12_1X12,
-};
-
-static const s64 link_freq[] = {
-	AR0234_DEFAULT_LINK_FREQ,
-};
-
-/*
-* There is an inherent assumption that there will be the same number of codes
-* for the Bayer and monochrome sensors
-*/
-#define NUM_CODES ARRAY_SIZE(bayer_codes)
-
-/* Mode configs */
+/* 1080p reads the top 1080 rows of the readable area. */
 static const struct ar0234_mode supported_modes[] = {
 	{
-		/* 1920x1080 mode */
 		.width = 1920,
 		.height = 1080,
-		.crop = {
-			.left = AR0234_PIXEL_ARRAY_LEFT,
-			.top = AR0234_PIXEL_ARRAY_TOP,
-			.width = 1920,
-			.height = 1080
-		},
-		.vts_def = AR0234_VTS_30FPS,
-		.reg_list = {
-			.num_of_regs = ARRAY_SIZE(mode_1920x1080_regs),
-			.regs = mode_1920x1080_regs,
-		},
+		.crop = { .left = AR0234_PIXEL_ARRAY_LEFT, .top = AR0234_PIXEL_ARRAY_TOP,
+			  .width = 1920, .height = 1080 },
+		.fll_def = AR0234_FRAME_LENGTH_LINES_DEF,
 	},
 	{
-		/* 1280x800 60fps mode */
 		.width = 1920,
 		.height = 1200,
-		.crop = {
-			.left = AR0234_PIXEL_ARRAY_LEFT,
-			.top = AR0234_PIXEL_ARRAY_TOP,
-			.width = 1920,
-			.height = 1200
-		},
-		.vts_def = AR0234_VTS_30FPS,
-		.reg_list = {
-			.num_of_regs = ARRAY_SIZE(mode_1920x1200_60_regs),
-			.regs = mode_1920x1200_60_regs,
-		},
+		.crop = { .left = AR0234_PIXEL_ARRAY_LEFT, .top = AR0234_PIXEL_ARRAY_TOP,
+			  .width = 1920, .height = 1200 },
+		.fll_def = AR0234_FRAME_LENGTH_LINES_DEF,
 	},
 };
 
@@ -334,10 +135,15 @@ struct ar0234 {
 
 	struct regmap *regmap;
 
-	struct v4l2_mbus_framefmt fmt;
-
 	struct clk *xclk; /* system clock to AR0234 */
 	u32 xclk_freq;
+
+	/* PLLs for the DT link frequencies; each depth adds its pixel dividers */
+	struct ar0234_pll plls[AR0234_LINK_FREQS_MAX];
+	s64 link_freq_menu[AR0234_LINK_FREQS_MAX];
+	unsigned int num_link_freqs;
+	/* CSI-2 data lanes from the endpoint (2 or 4) */
+	u32 num_data_lanes;
 
 	struct gpio_desc *reset_gpio;
 	struct regulator_bulk_data supplies[AR0234_NUM_SUPPLIES];
@@ -346,6 +152,7 @@ struct ar0234 {
 
 	struct v4l2_ctrl_handler ctrl_handler;
 	/* V4L2 Controls */
+	struct v4l2_ctrl *link_freq;
 	struct v4l2_ctrl *pixel_rate;
 	struct v4l2_ctrl *exposure;
 	struct v4l2_ctrl *vflip;
@@ -353,17 +160,10 @@ struct ar0234 {
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *hblank;
 
-	/* Current mode */
-	const struct ar0234_mode *mode;
-
-	/*
-	* Mutex for serialized access:
-	* Protect sensor module set pad format and start/stop streaming safely.
-	*/
-	struct mutex mutex;
-
-	/* Streaming on/off */
-	bool streaming;
+	/* Frame length on the sensor, the one before it, and the coarse value written */
+	u32 fll;
+	u32 fll_prev;
+	u32 coarse;
 };
 
 static inline struct ar0234 *to_ar0234(struct v4l2_subdev *_sd)
@@ -371,93 +171,166 @@ static inline struct ar0234 *to_ar0234(struct v4l2_subdev *_sd)
 	return container_of(_sd, struct ar0234, sd);
 }
 
-/* Read a 16-bit register */
-static int ar0234_read_reg(struct ar0234 *ar0234, u16 reg, u64 *val)
+static const struct ar0234_depth *ar0234_depths_of(const struct ar0234 *ar0234)
 {
-	int ret = 0;
-
-	cci_read(ar0234->regmap, CCI_REG16(reg), val, &ret);
-
-	return ret;
+	return ar0234->monochrome ? ar0234_depths_mono : ar0234_depths;
 }
 
-/* Write a 16-bit register */
-static int ar0234_write_reg(struct ar0234 *ar0234, u16 reg, u64 val)
+/* The depth carrying @code, the table's first when none does. */
+static const struct ar0234_depth *ar0234_depth_of(const struct ar0234 *ar0234,
+						  u32 code)
 {
-	int ret = 0;
-
-	cci_write(ar0234->regmap, CCI_REG16(reg), val, &ret);
-
-	return ret;
-}
-
-/* Write a list of registers */
-static int ar0234_write_regs(struct ar0234 *ar0234,
-				const struct ar0234_reg *regs, u32 len)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&ar0234->sd);
+	const struct ar0234_depth *depths = ar0234_depths_of(ar0234);
 	unsigned int i;
-	int ret;
 
-	for (i = 0; i < len; i++) {
-		if (regs[i].address == DELAY) {
-			usleep_range(regs[i].val * 1000,
-					(regs[i].val + 1) * 1000);
+	for (i = 0; i < AR0234_NUM_DEPTHS; i++)
+		if (depths[i].code == code)
+			return &depths[i];
+
+	return &depths[0];
+}
+
+/*
+ * Row time is LINE_LENGTH_PCK / PIXCLK and a shallower pixel raises PIXCLK: the shortest line at
+ * every depth turns that into frame rate. The array reads four pixels per LINE_LENGTH_PCK clock.
+ */
+#define AR0234_PIXELS_PER_LINE			(4 * AR0234_LINE_LENGTH_PCK_MIN)
+
+/* Pixel-array readout clock; the array emits four pixels per clock. */
+static u64 ar0234_vt_pix_clk(const struct ar0234_pll *pll)
+{
+	return div_u64((u64)AR0234_XCLK_FREQ * pll->pll_multiplier,
+		       pll->pre_pll_clk_div * pll->vt_sys_clk_div *
+		       pll->vt_pix_clk_div);
+}
+
+/* Per-lane output clock in pixels/s; the serial link is DDR, hence the 2. */
+static u64 ar0234_op_clk(const struct ar0234_pll *pll)
+{
+	return div_u64(2 * (u64)AR0234_XCLK_FREQ * pll->pll_multiplier,
+		       pll->pre_pll_clk_div * pll->op_sys_clk_div *
+		       pll->op_pix_clk_div);
+}
+
+/*
+ * A shallower pixel raises OP_CLK, so each depth runs on the fastest listed link that keeps it in
+ * range. -1 when none does.
+ */
+static int ar0234_link_index(const struct ar0234 *ar0234,
+			     const struct ar0234_depth *depth)
+{
+	unsigned int i;
+	int best = -1;
+
+	for (i = 0; i < ar0234->num_link_freqs; i++) {
+		struct ar0234_pll pll = ar0234->plls[i];
+
+		pll.op_pix_clk_div = depth->op_pix_clk_div;
+		if (ar0234_op_clk(&pll) > AR0234_OP_CLK_MAX_HZ)
 			continue;
-		}
-
-		ret = ar0234_write_reg(ar0234, regs[i].address, regs[i].val);
-		if (ret) {
-			dev_err_ratelimited(&client->dev,
-						"Failed to write reg 0x%4.4x. error = %d\n",
-						regs[i].address, ret);
-
-			return ret;
-		}
+		if (best < 0 ||
+		    ar0234->link_freq_menu[i] > ar0234->link_freq_menu[best])
+			best = i;
 	}
 
-	return 0;
+	return best;
 }
 
-static const u32 *ar0234_get_codes(struct ar0234 *ar0234)
+static void ar0234_pll_for(const struct ar0234 *ar0234,
+			   const struct ar0234_depth *depth,
+			   struct ar0234_pll *pll)
 {
-		return bayer_codes;
+	*pll = ar0234->plls[max(ar0234_link_index(ar0234, depth), 0)];
+	pll->vt_pix_clk_div = depth->vt_pix_clk_div;
+	pll->op_pix_clk_div = depth->op_pix_clk_div;
 }
 
-/* Get bayer order based on flip setting. */
-static u32 ar0234_get_format_code(struct ar0234 *ar0234, u32 code)
+/* The code is offered where some listed link carries it. */
+static bool ar0234_code_ok(const struct ar0234 *ar0234, u32 code)
 {
-	const u32 *codes = ar0234_get_codes(ar0234);
+	const struct ar0234_depth *depth = ar0234_depth_of(ar0234, code);
+
+	return depth->code == code && ar0234_link_index(ar0234, depth) >= 0;
+}
+
+/* AND9820 Table 14: the array reads 4 * PIXCLK, the link lanes * OP_CLK; the smaller wins. */
+static u64 ar0234_pixel_rate(const struct ar0234 *ar0234,
+			     const struct ar0234_depth *depth)
+{
+	struct ar0234_pll pll;
+
+	ar0234_pll_for(ar0234, depth, &pll);
+
+	return min(4 * ar0234_vt_pix_clk(&pll),
+		   ar0234->num_data_lanes * ar0234_op_clk(&pll));
+}
+
+/*
+ * Counts are op_pix_clk periods, scaled with OP_CLK and rounded up. The depth gate keeps OP_CLK
+ * within twice the reference, so none saturates; inlined for a constant bitfield mask.
+ */
+static __always_inline u64 ar0234_dphy_field(const struct ar0234_pll *pll,
+					     u64 mask, u8 ref, u64 ref_hz)
+{
+	u64 count = DIV64_U64_ROUND_UP(ref * ar0234_op_clk(pll), ref_hz);
+
+	return u64_encode_bits(min_t(u64, count, field_max(mask)), mask);
+}
+
+static void ar0234_write_dphy_timing(struct ar0234 *ar0234,
+				     const struct ar0234_depth *depth, int *err)
+{
+	const struct ar0234_dphy_timing *t = &ar0234_dphy_timing_ref;
+	struct ar0234_pll pll;
+
+	ar0234_pll_for(ar0234, depth, &pll);
+#define F(_mask, _member) \
+	ar0234_dphy_field(&pll, (_mask), t->_member, AR0234_DPHY_REF_OP_CLK_HZ)
+
+	cci_write(ar0234->regmap, AR0234_FRAME_PREAMBLE,
+		  ar0234_dphy_field(&pll, AR0234_PREAMBLE_MASK, AR0234_FRAME_PREAMBLE_DEF,
+				    AR0234_PREAMBLE_REF_OP_CLK_HZ), err);
+	cci_write(ar0234->regmap, AR0234_LINE_PREAMBLE,
+		  ar0234_dphy_field(&pll, AR0234_PREAMBLE_MASK, AR0234_LINE_PREAMBLE_DEF,
+				    AR0234_PREAMBLE_REF_OP_CLK_HZ), err);
+	cci_write(ar0234->regmap, AR0234_MIPI_TIMING_0,
+		  F(AR0234_T0_HS_PREPARE_MASK, hs_prepare) |
+		  F(AR0234_T0_HS_TRAIL_MASK, hs_trail) |
+		  F(AR0234_T0_CLK_TRAIL_MASK, clk_trail), err);
+	cci_write(ar0234->regmap, AR0234_MIPI_TIMING_1,
+		  F(AR0234_T1_CLK_PREPARE_MASK, clk_prepare) |
+		  F(AR0234_T1_HS_EXIT_MASK, hs_exit) |
+		  F(AR0234_T1_HS_ZERO_MASK, hs_zero), err);
+	cci_write(ar0234->regmap, AR0234_MIPI_TIMING_2,
+		  F(AR0234_T2_BGAP_MASK, bgap) |
+		  F(AR0234_T2_CLK_PRE_MASK, clk_pre) |
+		  F(AR0234_T2_CLK_POST_MASK, clk_post), err);
+	cci_write(ar0234->regmap, AR0234_MIPI_TIMING_3,
+		  F(AR0234_T3_LPX_MASK, lpx) |
+		  F(AR0234_T3_ULPM_RECOVER_MASK, ulpm_recover), err);
+	cci_write(ar0234->regmap, AR0234_MIPI_TIMING_4,
+		  AR0234_T4_CONT_TX_CLK | FIELD_PREP(AR0234_T4_RSVD_MASK, AR0234_T4_RSVD_VAL) |
+		  F(AR0234_T4_T_INIT_MASK, t_init), err);
+#undef F
+}
+
+/* The first code a listed link allows; 12-bit always is. */
+static u32 ar0234_first_code(struct ar0234 *ar0234)
+{
+	const struct ar0234_depth *depths = ar0234_depths_of(ar0234);
 	unsigned int i;
 
-	lockdep_assert_held(&ar0234->mutex);
+	for (i = 0; i < AR0234_NUM_DEPTHS; i++)
+		if (ar0234_code_ok(ar0234, depths[i].code))
+			return depths[i].code;
 
-	for (i = 0; i < NUM_CODES; i++)
-		if (codes[i] == code)
-			break;
-
-	if (i >= NUM_CODES)
-		i = 0;
-
-	return codes[i];
+	return depths[0].code;
 }
 
-static void ar0234_set_default_format(struct ar0234 *ar0234)
+/* AND9820: mirror and flip keep the Bayer phase, so the code does not follow them. */
+static u32 ar0234_get_format_code(struct ar0234 *ar0234, u32 code)
 {
-	struct v4l2_mbus_framefmt *fmt;
-
-	fmt = &ar0234->fmt;
-	fmt->code = ar0234_get_codes(ar0234)[0];
-
-	fmt->colorspace = V4L2_COLORSPACE_SRGB;
-	fmt->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(fmt->colorspace);
-	fmt->quantization = V4L2_MAP_QUANTIZATION_DEFAULT(true,
-							fmt->colorspace,
-							fmt->ycbcr_enc);
-	fmt->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(fmt->colorspace);
-	fmt->width = supported_modes[0].width;
-	fmt->height = supported_modes[0].height;
-	fmt->field = V4L2_FIELD_NONE;
+	return ar0234_code_ok(ar0234, code) ? code : ar0234_first_code(ar0234);
 }
 
 static int ar0234_set_pad_format(struct v4l2_subdev *sd,
@@ -468,15 +341,85 @@ static int ar0234_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state)
 {
 	struct v4l2_subdev_format format = {
+		.which = V4L2_SUBDEV_FORMAT_TRY,
 		.format = {
 			.width = supported_modes[0].width,
 			.height = supported_modes[0].height,
 		},
 	};
 
-	ar0234_set_pad_format(sd, state, &format);
+	return ar0234_set_pad_format(sd, state, &format);
+}
+
+static bool ar0234_coarse_banned(u32 coarse, u32 fll)
+{
+	return coarse + AR0234_COARSE_BAND_FIRST >= fll &&
+	       coarse + AR0234_COARSE_BAND_LAST <= fll;
+}
+
+/* Clear of both bands; the previous length's stays excluded until VBLANK changes again. */
+static bool ar0234_coarse_is_clear(const struct ar0234 *ar0234, u32 coarse)
+{
+	return !ar0234_coarse_banned(coarse, ar0234->fll) &&
+	       !ar0234_coarse_banned(coarse, ar0234->fll_prev);
+}
+
+/* Nearest clear value, the shorter on a tie; the merged bands span at most 2 * BAND_ROWS. */
+static u32 ar0234_coarse_for(const struct ar0234 *ar0234, u32 want)
+{
+	u32 d;
+
+	lockdep_assert_held(ar0234->sd.ctrl_handler->lock);
+
+	for (d = 0; d <= 2 * AR0234_COARSE_BAND_ROWS; d++) {
+		if (want >= d + AR0234_EXPOSURE_MIN &&
+		    ar0234_coarse_is_clear(ar0234, want - d))
+			return want - d;
+		if (want + d <= ar0234->exposure->maximum &&
+		    ar0234_coarse_is_clear(ar0234, want + d))
+			return want + d;
+	}
+
+	return want;
+}
+
+/* Writes the nearest clear value and returns it, so the control can report it. */
+static int ar0234_write_coarse(struct ar0234 *ar0234, u32 want, u32 *applied)
+{
+	u32 coarse = ar0234_coarse_for(ar0234, want);
+	int ret = 0;
+
+	if (coarse != ar0234->coarse) {
+		ret = cci_write(ar0234->regmap, AR0234_COARSE_INTEGRATION_TIME,
+				coarse, NULL);
+		if (!ret)
+			ar0234->coarse = coarse;
+	}
+	*applied = coarse;
+
+	return ret;
+}
+
+/* The nearest clear coarse value is committed with the control, on every path. */
+static int ar0234_try_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct ar0234 *ar0234 =
+		container_of(ctrl->handler, struct ar0234, ctrl_handler);
+
+	if (ctrl->id == V4L2_CID_EXPOSURE)
+		ctrl->val = ar0234_coarse_for(ar0234, ctrl->val);
 
 	return 0;
+}
+
+/* The exposure range a frame length allows, the default kept inside it. */
+static void ar0234_set_exposure_range(struct ar0234 *ar0234, u32 fll)
+{
+	int exposure_max = AR0234_EXPOSURE_MAX_FOR(fll);
+
+	__v4l2_ctrl_modify_range(ar0234->exposure, ar0234->exposure->minimum,
+				 exposure_max, ar0234->exposure->step,
+				 min(exposure_max, AR0234_EXPOSURE_DEFAULT));
 }
 
 static int ar0234_set_ctrl(struct v4l2_ctrl *ctrl)
@@ -484,100 +427,121 @@ static int ar0234_set_ctrl(struct v4l2_ctrl *ctrl)
 	struct ar0234 *ar0234 =
 		container_of(ctrl->handler, struct ar0234, ctrl_handler);
 	struct i2c_client *client = v4l2_get_subdevdata(&ar0234->sd);
+	struct v4l2_subdev_state *state;
+	const struct v4l2_mbus_framefmt *fmt;
+	u32 fll_prev = ar0234->fll_prev;
+	u32 fll = ar0234->fll;
+	u32 coarse;
+	int pm;
 	int ret;
 
-	if (ctrl->id == V4L2_CID_VBLANK) {
-		int exposure_max, exposure_def;
+	/* The handler lock is the state lock. */
+	state = v4l2_subdev_get_locked_active_state(&ar0234->sd);
+	fmt = v4l2_subdev_state_get_format(state, IMAGE_PAD);
 
-		/* Update max exposure while meeting expected vblanking */
-		exposure_max = ar0234->mode->height + ctrl->val - 4;
-		exposure_def = (exposure_max < AR0234_EXPOSURE_DEFAULT) ?
-			exposure_max : AR0234_EXPOSURE_DEFAULT;
-		__v4l2_ctrl_modify_range(ar0234->exposure,
-					ar0234->exposure->minimum,
-					exposure_max, ar0234->exposure->step,
-					exposure_def);
+	if (ctrl->id == V4L2_CID_VBLANK) {
+		/* Control state the band follows; the registers catch up while powered. */
+		ar0234->fll_prev = ar0234->fll;
+		ar0234->fll = fmt->height + ctrl->val;
+		ar0234_set_exposure_range(ar0234, ar0234->fll);
 	}
 
-	/*
-	* Applying V4L2 control value only happens
-	* when power is up for streaming
-	*/
-	if (pm_runtime_get_if_in_use(&client->dev) == 0)
+	/* The PLL follows the link at stream start. */
+	if (ctrl->id == V4L2_CID_LINK_FREQ)
+		return 0;
+
+	/* Needs power; a negative result means runtime PM is off and the part is powered. */
+	pm = pm_runtime_get_if_in_use(&client->dev);
+	if (!pm)
 		return 0;
 
 	switch (ctrl->id) {
 	case V4L2_CID_ANALOGUE_GAIN:
-		dev_dbg(&client->dev, "DBG: ar0234 analogue gain = %d\n", ctrl->val);
-		ret = ar0234_write_reg(ar0234, AR0234_REG_ANALOG_GAIN,
-					ctrl->val);
+		ret = cci_write(ar0234->regmap, AR0234_ANALOG_GAIN, ctrl->val,
+				NULL);
 		break;
 	case V4L2_CID_EXPOSURE:
-		ret = ar0234_write_reg(ar0234, AR0234_REG_EXPOSURE_COARSE,
-					ctrl->val);
+		/* Clear already: try_ctrl, or the commits around stream start. */
+		ret = ar0234_write_coarse(ar0234, ctrl->val, &coarse);
 		break;
 	case V4L2_CID_DIGITAL_GAIN:
-		dev_dbg(&client->dev, "DBG: ar0234 digital gain = %d\n", ctrl->val);
-		ret = ar0234_write_reg(ar0234, AR0234_REG_DIGITAL_GAIN,
-				       ctrl->val);
+		ret = cci_write(ar0234->regmap, AR0234_GLOBAL_GAIN, ctrl->val,
+				NULL);
 		break;
 	case V4L2_CID_TEST_PATTERN:
-		ret =  ar0234_write_reg(ar0234, AR0234_REG_TEST_PATTERN,
-				       ar0234_test_pattern_val[ctrl->val]);
+		ret = cci_write(ar0234->regmap, AR0234_TEST_PATTERN_MODE,
+				ar0234_test_pattern_val[ctrl->val], NULL);
 		break;
 	case V4L2_CID_HFLIP:
 	case V4L2_CID_VFLIP:
 	{
 		u64 reg;
 
-		ret = ar0234_read_reg(ar0234, AR0234_REG_ORIENTATION, &reg);
+		ret = cci_read(ar0234->regmap, AR0234_READ_MODE, &reg, NULL);
 		if (ret)
 			break;
 
-		reg &= ~(AR0234_REG_ORIENTATION_HFLIP |
-			AR0234_REG_ORIENTATION_VFLIP);
+		reg &= ~(AR0234_READ_MODE_HORIZ_MIRROR |
+			AR0234_READ_MODE_VERT_FLIP);
 		if (ar0234->hflip->val)
-			reg |= AR0234_REG_ORIENTATION_HFLIP;
+			reg |= AR0234_READ_MODE_HORIZ_MIRROR;
 		if (ar0234->vflip->val)
-			reg |= AR0234_REG_ORIENTATION_VFLIP;
+			reg |= AR0234_READ_MODE_VERT_FLIP;
 
-		ret = ar0234_write_reg(ar0234, AR0234_REG_ORIENTATION, reg);
+		ret = cci_write(ar0234->regmap, AR0234_READ_MODE, reg, NULL);
 		break;
 	}
 	case V4L2_CID_VBLANK:
-		ret = ar0234_write_reg(ar0234, AR0234_REG_VTS,
-					ar0234->mode->height + ctrl->val);
+		/* Clear the coarse value of both bands before the new length lands. */
+		ret = ar0234_write_coarse(ar0234, ar0234->exposure->cur.val,
+					  &coarse);
+		if (!ret && coarse != ar0234->exposure->cur.val)
+			ret = __v4l2_ctrl_s_ctrl(ar0234->exposure, coarse);
+		if (!ret)
+			ret = cci_write(ar0234->regmap, AR0234_FRAME_LENGTH_LINES,
+					ar0234->fll, NULL);
+		if (ret) {
+			ar0234->fll_prev = fll_prev;
+			ar0234->fll = fll;
+			ar0234_set_exposure_range(ar0234, fll);
+			/* Back under the old lengths: clear the coarse value for them. */
+			if (!ar0234_write_coarse(ar0234, ar0234->exposure->cur.val,
+						 &coarse) &&
+			    coarse != ar0234->exposure->cur.val)
+				__v4l2_ctrl_s_ctrl(ar0234->exposure, coarse);
+		}
 		break;
 	case V4L2_CID_TEST_PATTERN_RED:
-		ret = 0;//ar0234_write_reg(ar0234, AR0234_REG_TESTP_RED,
-			//	       AR0234_REG_VALUE_16BIT, ctrl->val);
+		ret = cci_write(ar0234->regmap, AR0234_TEST_DATA_RED, ctrl->val,
+				NULL);
 		break;
 	case V4L2_CID_TEST_PATTERN_GREENR:
-		ret = 0;//ar0234_write_reg(ar0234, AR0234_REG_TESTP_GREENR,
-			//	       AR0234_REG_VALUE_16BIT, ctrl->val);
+		ret = cci_write(ar0234->regmap, AR0234_TEST_DATA_GREENR,
+				ctrl->val, NULL);
 		break;
 	case V4L2_CID_TEST_PATTERN_BLUE:
-		ret = 0;//ar0234_write_reg(ar0234, AR0234_REG_TESTP_BLUE,
-		//		       AR0234_REG_VALUE_16BIT, ctrl->val);
+		ret = cci_write(ar0234->regmap, AR0234_TEST_DATA_BLUE, ctrl->val,
+				NULL);
 		break;
 	case V4L2_CID_TEST_PATTERN_GREENB:
-		ret = 0;//ar0234_write_reg(ar0234, AR0234_REG_TESTP_GREENB,
-			//	       AR0234_REG_VALUE_16BIT, ctrl->val);
+		ret = cci_write(ar0234->regmap, AR0234_TEST_DATA_GREENB,
+				ctrl->val, NULL);
 		break;
 	default:
-		dev_info(&client->dev,
-			"ctrl(id:0x%x,val:0x%x) is not handled\n",
+		dev_dbg(&client->dev, "ctrl(id:0x%x,val:0x%x) is not handled\n",
 			ctrl->id, ctrl->val);
 		ret = -EINVAL;
 		break;
 	}
 
-	pm_runtime_put(&client->dev);
+	if (pm > 0)
+		pm_runtime_put_autosuspend(&client->dev);
 
 	return ret;
 }
 
 static const struct v4l2_ctrl_ops ar0234_ctrl_ops = {
+	.try_ctrl = ar0234_try_ctrl,
 	.s_ctrl = ar0234_set_ctrl,
 };
 
@@ -586,19 +550,22 @@ static int ar0234_enum_mbus_code(struct v4l2_subdev *sd,
 				struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct ar0234 *ar0234 = to_ar0234(sd);
-	const u32 *codes = ar0234_get_codes(ar0234);
+	const struct ar0234_depth *depths = ar0234_depths_of(ar0234);
+	unsigned int i, n;
 
 	if (code->pad >= NUM_PADS)
 		return -EINVAL;
 
-	if (code->index >= NUM_CODES)
-		return -EINVAL;
+	for (i = 0, n = 0; i < AR0234_NUM_DEPTHS; i++) {
+		if (!ar0234_code_ok(ar0234, depths[i].code))
+			continue;
+		if (n++ == code->index) {
+			code->code = depths[i].code;
+			return 0;
+		}
+	}
 
-	code->code = ar0234_get_format_code(ar0234, codes[code->index]);
-	if (code->code == 0)
-		return -EINVAL;
-
-	return 0;
+	return -EINVAL;
 }
 
 static int ar0234_enum_frame_size(struct v4l2_subdev *sd,
@@ -624,235 +591,212 @@ static int ar0234_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static void ar0234_reset_colorspace(struct v4l2_mbus_framefmt *fmt)
+static void ar0234_update_pad_format(const struct ar0234_mode *mode, u32 code,
+				     struct v4l2_mbus_framefmt *fmt)
 {
+	fmt->code = code;
+	fmt->width = mode->width;
+	fmt->height = mode->height;
+	fmt->field = V4L2_FIELD_NONE;
 	fmt->colorspace = V4L2_COLORSPACE_SRGB;
 	fmt->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(fmt->colorspace);
-	fmt->quantization = V4L2_MAP_QUANTIZATION_DEFAULT(true,
-							fmt->colorspace,
-							fmt->ycbcr_enc);
+	fmt->quantization = V4L2_MAP_QUANTIZATION_DEFAULT(true, fmt->colorspace,
+							  fmt->ycbcr_enc);
 	fmt->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(fmt->colorspace);
 }
 
-static void ar0234_update_image_pad_format(struct ar0234 *ar0234,
-					const struct ar0234_mode *mode,
-					struct v4l2_subdev_format *fmt)
-{
-	fmt->format.width = mode->width;
-	fmt->format.height = mode->height;
-	fmt->format.field = V4L2_FIELD_NONE;
-	ar0234_reset_colorspace(&fmt->format);
-}
-
-static int __ar0234_get_pad_format(struct ar0234 *ar0234,
-				struct v4l2_subdev_state *sd_state,
-				struct v4l2_subdev_format *fmt)
-{
-	if (fmt->pad >= NUM_PADS)
-		return -EINVAL;
-
-	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		struct v4l2_mbus_framefmt *try_fmt =
-			v4l2_subdev_state_get_format(sd_state, fmt->pad);
-		/* update the code which could change due to vflip or hflip: */
-		try_fmt->code = ar0234_get_format_code(ar0234, try_fmt->code);
-		fmt->format = *try_fmt;
-	} else {
-		ar0234_update_image_pad_format(ar0234, ar0234->mode, fmt);
-		fmt->format.code =
-			ar0234_get_format_code(ar0234, ar0234->fmt.code);
-	}
-
-	return 0;
-}
-
-static int ar0234_get_pad_format(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *sd_state,
-				struct v4l2_subdev_format *fmt)
-{
-	struct ar0234 *ar0234 = to_ar0234(sd);
-	int ret;
-
-	mutex_lock(&ar0234->mutex);
-	ret = __ar0234_get_pad_format(ar0234, sd_state, fmt);
-	mutex_unlock(&ar0234->mutex);
-
-	return ret;
-}
-
 static int ar0234_set_pad_format(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *sd_state,
-				struct v4l2_subdev_format *fmt)
+				 struct v4l2_subdev_state *state,
+				 struct v4l2_subdev_format *fmt)
 {
 	struct ar0234 *ar0234 = to_ar0234(sd);
+	const struct ar0234_depth *depth;
 	const struct ar0234_mode *mode;
-	struct v4l2_mbus_framefmt *framefmt;
-	int exposure_max, exposure_def, hblank;
+	int hblank, ret;
+	u64 pixel_rate;
 
 	if (fmt->pad >= NUM_PADS)
 		return -EINVAL;
 
-	mutex_lock(&ar0234->mutex);
+	/* The window, depth and PLL only latch in standby. */
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    v4l2_subdev_is_streaming(sd))
+		return -EBUSY;
 
-	if (fmt->pad == IMAGE_PAD) {
-		fmt->format.code = ar0234_get_format_code(ar0234,
-							fmt->format.code);
+	mode = v4l2_find_nearest_size(supported_modes,
+				      ARRAY_SIZE(supported_modes), width, height,
+				      fmt->format.width, fmt->format.height);
+	ar0234_update_pad_format(mode,
+				 ar0234_get_format_code(ar0234, fmt->format.code),
+				 &fmt->format);
+	*v4l2_subdev_state_get_format(state, fmt->pad) = fmt->format;
+	*v4l2_subdev_state_get_crop(state, fmt->pad) = mode->crop;
 
-		mode = v4l2_find_nearest_size(supported_modes,
-						ARRAY_SIZE(supported_modes),
-						width, height,
-						fmt->format.width,
-						fmt->format.height);
-		ar0234_update_image_pad_format(ar0234, mode, fmt);
-		if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-			framefmt = v4l2_subdev_state_get_format(sd_state,
-								fmt->pad);
-			*framefmt = fmt->format;
-		} else {
-			ar0234->fmt = fmt->format;
-			ar0234->mode = mode;
-			/* Update limits and set FPS to default */
-			__v4l2_ctrl_modify_range(ar0234->vblank,
-						AR0234_VBLANK_MIN,
-						AR0234_VTS_MAX - mode->height,
-						1,
-						mode->vts_def - mode->height);
-			__v4l2_ctrl_s_ctrl(ar0234->vblank,
-					mode->vts_def - mode->height);
-			/*
-			* Update max exposure while meeting
-			* expected vblanking
-			*/
-			exposure_max = mode->vts_def - 4;
-			exposure_def =
-				(exposure_max < AR0234_EXPOSURE_DEFAULT) ?
-					exposure_max : AR0234_EXPOSURE_DEFAULT;
-			__v4l2_ctrl_modify_range(ar0234->exposure,
-						ar0234->exposure->minimum,
-						exposure_max,
-						ar0234->exposure->step,
-						exposure_def);
-			/*
-			* Currently PPL is fixed to AR0234_PPL_DEFAULT, so
-			* hblank depends on mode->width only, and is not
-			* changeble in any way other than changing the mode.
-			*/
-			hblank = AR0234_PPL_DEFAULT - mode->width;
-			__v4l2_ctrl_modify_range(ar0234->hblank, hblank, hblank,
-						1, hblank);
-		}
-	}
+	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
+		return 0;
 
-	mutex_unlock(&ar0234->mutex);
+	/* The depth picks the link and the dividers, and with them the pixel rate. */
+	depth = ar0234_depth_of(ar0234, fmt->format.code);
+	ret = __v4l2_ctrl_s_ctrl(ar0234->link_freq,
+				 ar0234_link_index(ar0234, depth));
+	if (ret)
+		return ret;
+	pixel_rate = ar0234_pixel_rate(ar0234, depth);
+	__v4l2_ctrl_modify_range(ar0234->pixel_rate, pixel_rate, pixel_rate, 1,
+				 pixel_rate);
+	__v4l2_ctrl_modify_range(ar0234->vblank, AR0234_VBLANK_MIN,
+				 AR0234_FRAME_LENGTH_LINES_MAX - mode->height, 1,
+				 mode->fll_def - mode->height);
+	__v4l2_ctrl_s_ctrl(ar0234->vblank, mode->fll_def - mode->height);
+	/* The VBLANK handler runs only when its value moves; derive the range here too. */
+	ar0234_set_exposure_range(ar0234, mode->fll_def);
+	hblank = AR0234_PIXELS_PER_LINE - mode->width;
+	__v4l2_ctrl_modify_range(ar0234->hblank, hblank, hblank, 1, hblank);
 
 	return 0;
 }
 
-static int ar0234_set_framefmt(struct ar0234 *ar0234)
+static void ar0234_set_framefmt(struct ar0234 *ar0234,
+				const struct ar0234_depth *depth, int *err)
 {
-	switch (ar0234->fmt.code) {
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-		return ar0234_write_reg(ar0234, 0x31AC, 0x0A0A);
-	case MEDIA_BUS_FMT_SGRBG12_1X12:
-		return ar0234_write_reg(ar0234, 0x31AC, 0x0C0C);
-	}
-
-	return -EINVAL;
+	cci_write(ar0234->regmap, AR0234_DATA_FORMAT_BITS,
+		  depth->data_format_bits, err);
 }
 
-static const struct v4l2_rect *
-__ar0234_get_pad_crop(struct ar0234 *ar0234, struct v4l2_subdev_state *sd_state,
-			unsigned int pad, enum v4l2_subdev_format_whence which)
+/* Applied in standby after SERIAL_FORMAT. */
+static void ar0234_write_window(struct ar0234 *ar0234,
+				const struct ar0234_mode *mode, int *err)
 {
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_state_get_crop(sd_state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &ar0234->mode->crop;
-	}
+	cci_write(ar0234->regmap, AR0234_Y_ADDR_START, mode->crop.top, err);
+	cci_write(ar0234->regmap, AR0234_X_ADDR_START, mode->crop.left, err);
+	cci_write(ar0234->regmap, AR0234_Y_ADDR_END,
+		  mode->crop.top + mode->crop.height - 1, err);
+	cci_write(ar0234->regmap, AR0234_X_ADDR_END,
+		  mode->crop.left + mode->crop.width - 1, err);
+	cci_write(ar0234->regmap, AR0234_FRAME_LENGTH_LINES, mode->fll_def, err);
+	cci_write(ar0234->regmap, AR0234_LINE_LENGTH_PCK,
+		  AR0234_LINE_LENGTH_PCK_MIN, err);
+	cci_write(ar0234->regmap, AR0234_COARSE_INTEGRATION_TIME,
+		  AR0234_EXPOSURE_DEFAULT, err);
+}
 
-	return NULL;
+static void ar0234_write_pll(struct ar0234 *ar0234,
+			     const struct ar0234_depth *depth, int *err)
+{
+	struct ar0234_pll pll;
+
+	ar0234_pll_for(ar0234, depth, &pll);
+	cci_write(ar0234->regmap, AR0234_PLL_MULTIPLIER, pll.pll_multiplier, err);
+	cci_write(ar0234->regmap, AR0234_PRE_PLL_CLK_DIV, pll.pre_pll_clk_div, err);
+	cci_write(ar0234->regmap, AR0234_VT_SYS_CLK_DIV, pll.vt_sys_clk_div, err);
+	cci_write(ar0234->regmap, AR0234_VT_PIX_CLK_DIV, pll.vt_pix_clk_div, err);
+	cci_write(ar0234->regmap, AR0234_OP_SYS_CLK_DIV, pll.op_sys_clk_div, err);
+	cci_write(ar0234->regmap, AR0234_OP_PIX_CLK_DIV, pll.op_pix_clk_div, err);
 }
 
 static int ar0234_get_selection(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_state *state,
 				struct v4l2_subdev_selection *sel)
 {
 	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP: {
-		struct ar0234 *ar0234 = to_ar0234(sd);
-
-		mutex_lock(&ar0234->mutex);
-		sel->r = *__ar0234_get_pad_crop(ar0234, sd_state, sel->pad,
-						sel->which);
-		mutex_unlock(&ar0234->mutex);
-
+	case V4L2_SEL_TGT_CROP:
+		sel->r = *v4l2_subdev_state_get_crop(state, sel->pad);
 		return 0;
-	}
 
 	case V4L2_SEL_TGT_NATIVE_SIZE:
 		sel->r.top = 0;
 		sel->r.left = 0;
 		sel->r.width = AR0234_NATIVE_WIDTH;
 		sel->r.height = AR0234_NATIVE_HEIGHT;
-
 		return 0;
 
 	case V4L2_SEL_TGT_CROP_DEFAULT:
 	case V4L2_SEL_TGT_CROP_BOUNDS:
+		/* The driver offers no window beyond the default. */
 		sel->r.top = AR0234_PIXEL_ARRAY_TOP;
 		sel->r.left = AR0234_PIXEL_ARRAY_LEFT;
 		sel->r.width = AR0234_PIXEL_ARRAY_WIDTH;
 		sel->r.height = AR0234_PIXEL_ARRAY_HEIGHT;
-
 		return 0;
 	}
 
 	return -EINVAL;
 }
 
-static int ar0234_start_streaming(struct ar0234 *ar0234)
+static int ar0234_start_streaming(struct ar0234 *ar0234,
+				  struct v4l2_subdev_state *state)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&ar0234->sd);
-	const struct ar0234_reg_list *reg_list;
+	const struct v4l2_mbus_framefmt *fmt;
+	const struct ar0234_depth *depth;
+	const struct ar0234_mode *mode;
 	u64 val;
-	int ret;
+	int ret = 0;
 
+	fmt = v4l2_subdev_state_get_format(state, IMAGE_PAD);
+	depth = ar0234_depth_of(ar0234, fmt->code);
+	mode = v4l2_find_nearest_size(supported_modes,
+				      ARRAY_SIZE(supported_modes), width, height,
+				      fmt->width, fmt->height);
 
-	/* Apply default values of current mode */
-	reg_list = &ar0234->mode->reg_list;
-	ret = ar0234_write_regs(ar0234, reg_list->regs, reg_list->num_of_regs);
+	/*
+	 * Software standby first: the PLL is powered down there, so the
+	 * link-rate multiplier, the PLL/MIPI base and the D-PHY timing latch
+	 * cleanly; SERIAL_FORMAT (lane count) only latches in standby too.
+	 */
+	cci_write(ar0234->regmap, AR0234_RESET_REGISTER,
+		  AR0234_STANDBY, &ret);
+	ar0234_write_pll(ar0234, depth, &ret);
+	cci_multi_reg_write(ar0234->regmap, ar0234_common_regs,
+			    ARRAY_SIZE(ar0234_common_regs), &ret);
+	cci_write(ar0234->regmap, AR0234_MIPI_CNTRL,
+		  FIELD_PREP(AR0234_MIPI_CNTRL_DATA_TYPE, depth->data_type),
+		  &ret);
+	ar0234_write_dphy_timing(ar0234, depth, &ret);
+	cci_write(ar0234->regmap, AR0234_SERIAL_FORMAT,
+		  AR0234_SERIAL_FORMAT_TYPE_MIPI |
+		  FIELD_PREP(AR0234_SERIAL_FORMAT_LANES, ar0234->num_data_lanes),
+		  &ret);
+	ar0234_write_window(ar0234, mode, &ret);
+
+	/* Still in standby: pixel depth and the embedded-data lines. */
+	cci_read(ar0234->regmap, AR0234_SMIA_TEST, &val, &ret);
+	cci_write(ar0234->regmap, AR0234_SMIA_TEST,
+		  val & ~AR0234_SMIA_TEST_EMBEDDED_DATA, &ret);
+	ar0234_set_framefmt(ar0234, depth, &ret);
 	if (ret) {
 		dev_err(&client->dev, "%s failed to set mode\n", __func__);
 		return ret;
 	}
 
-	/* Disable the sensor's embedded-data lines */
-	ret = ar0234_read_reg(ar0234, AR0234_REG_SMIA_TEST, &val);
-	if (!ret)
-		ret = ar0234_write_reg(ar0234, AR0234_REG_SMIA_TEST,
-				       val & ~AR0234_SMIA_TEST_EMB_DATA);
+	/* The window set the defaults; coarse 0 is below the minimum, so the first write lands. */
+	ar0234->fll = mode->fll_def;
+	ar0234->fll_prev = ar0234->fll;
+	ar0234->coarse = 0;
+
+	/* The band moved with the mode: commit a clear exposure first. */
+	ret = __v4l2_ctrl_s_ctrl(ar0234->exposure, ar0234->exposure->cur.val);
+	if (ret)
+		return ret;
+
+	/* The controls, READ_MODE among them, are written in standby too. */
+	ret = __v4l2_ctrl_handler_setup(ar0234->sd.ctrl_handler);
 	if (ret) {
-		dev_err(&client->dev, "%s failed to disable embedded data\n",
+		dev_err(&client->dev, "%s failed to apply the controls\n",
 			__func__);
 		return ret;
 	}
 
-	ret = ar0234_set_framefmt(ar0234);
+	/* Latch, then let the PLL relock: the sensor NAKs writes until it settles. */
+	cci_write(ar0234->regmap, AR0234_RESET_REGISTER,
+		  AR0234_STREAMING, &ret);
 	if (ret) {
-		dev_err(&client->dev, "%s failed to set frame format: %d\n",
-			__func__, ret);
+		dev_err(&client->dev, "%s failed to latch mode\n", __func__);
 		return ret;
 	}
+	fsleep(AR0234_PLL_RELOCK_DELAY_US);
 
-	/* Apply customized values from user */
-	ret =  __v4l2_ctrl_handler_setup(ar0234->sd.ctrl_handler);
-	if (ret)
-		return ret;
-
-	/* set stream on register */
-	return ar0234_write_reg(ar0234, AR0234_REG_RESET,
-				AR0234_REG_RESET_STREAM_ON);
+	return 0;
 }
 
 static void ar0234_stop_streaming(struct ar0234 *ar0234)
@@ -861,59 +805,51 @@ static void ar0234_stop_streaming(struct ar0234 *ar0234)
 	int ret;
 
 	/* set stream off register */
-	ret = ar0234_write_reg(ar0234, AR0234_REG_RESET,
-				AR0234_REG_RESET_STREAM_OFF);
+	ret = cci_write(ar0234->regmap, AR0234_RESET_REGISTER, AR0234_STANDBY,
+			NULL);
 	if (ret)
 		dev_err(&client->dev, "%s failed to set stream\n", __func__);
 }
 
-static int ar0234_set_stream(struct v4l2_subdev *sd, int enable)
+static int ar0234_enable_streams(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state, u32 pad,
+				 u64 streams_mask)
 {
 	struct ar0234 *ar0234 = to_ar0234(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	int ret = 0;
+	int ret;
 
-	mutex_lock(&ar0234->mutex);
-	if (ar0234->streaming == enable) {
-		mutex_unlock(&ar0234->mutex);
-		return 0;
-	}
+	ret = pm_runtime_resume_and_get(&client->dev);
+	if (ret < 0)
+		return ret;
 
-	if (enable) {
-		ret = pm_runtime_get_sync(&client->dev);
-		if (ret < 0) {
-			pm_runtime_put_noidle(&client->dev);
-			goto err_unlock;
-		}
-
-		/*
-		* Apply default & customized values
-		* and then start streaming.
-		*/
-		ret = ar0234_start_streaming(ar0234);
-		if (ret)
-			goto err_rpm_put;
-	} else {
+	ret = ar0234_start_streaming(ar0234, state);
+	if (ret) {
 		ar0234_stop_streaming(ar0234);
-		pm_runtime_put(&client->dev);
+		pm_runtime_put_autosuspend(&client->dev);
+		return ret;
 	}
 
-	ar0234->streaming = enable;
+	/* READ_MODE only latches in standby. */
+	__v4l2_ctrl_grab(ar0234->vflip, true);
+	__v4l2_ctrl_grab(ar0234->hflip, true);
 
-	/* vflip and hflip cannot change during streaming */
-	__v4l2_ctrl_grab(ar0234->vflip, enable);
-	__v4l2_ctrl_grab(ar0234->hflip, enable);
+	return 0;
+}
 
-	mutex_unlock(&ar0234->mutex);
+static int ar0234_disable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
+{
+	struct ar0234 *ar0234 = to_ar0234(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
-	return ret;
+	ar0234_stop_streaming(ar0234);
+	__v4l2_ctrl_grab(ar0234->vflip, false);
+	__v4l2_ctrl_grab(ar0234->hflip, false);
+	pm_runtime_put_autosuspend(&client->dev);
 
-err_rpm_put:
-	pm_runtime_put(&client->dev);
-err_unlock:
-	mutex_unlock(&ar0234->mutex);
-
-	return ret;
+	return 0;
 }
 
 /* Power/clock management functions */
@@ -986,7 +922,7 @@ static int ar0234_identify_module(struct ar0234 *ar0234)
 	u64 val;
 
 	for (retry = 0; retry < 5; retry++) {
-		ret = ar0234_read_reg(ar0234, AR0234_REG_CHIP_ID, &val);
+		ret = cci_read(ar0234->regmap, AR0234_MODEL_ID, &val, NULL);
 		if (ret) {
 			dev_warn(&client->dev,
 				 "failed to read chip id %d (attempt %u/5)\n",
@@ -994,12 +930,14 @@ static int ar0234_identify_module(struct ar0234 *ar0234)
 			continue;
 		}
 
-		if (val == AR0234_CHIP_ID || val == AR0234_CHIP_ID_MONO)
+		if (val == AR0234_MODEL_ID_COLOR || val == AR0234_MODEL_ID_MONO) {
+			ar0234->monochrome = val == AR0234_MODEL_ID_MONO;
 			break;
+		}
 
 		dev_warn(&client->dev,
 			 "chip id mismatch: %x!=%llx (attempt %u/5)\n",
-			 AR0234_CHIP_ID, val, retry + 1);
+			 AR0234_MODEL_ID_COLOR, val, retry + 1);
 		ret = -EIO;
 	}
 	if (ret) {
@@ -1008,10 +946,7 @@ static int ar0234_identify_module(struct ar0234 *ar0234)
 		return ret;
 	}
 
-	dev_info(&client->dev, "Success reading chip id: %llx\n", val);
-
-	if (val == AR0234_CHIP_ID_MONO)
-		ar0234->monochrome = true;
+	dev_dbg(&client->dev, "model id %llx\n", val);
 
 	return 0;
 }
@@ -1022,7 +957,7 @@ static const struct v4l2_subdev_core_ops ar0234_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops ar0234_video_ops = {
-	.s_stream = ar0234_set_stream,
+	.s_stream = v4l2_subdev_s_stream_helper,
 };
 
 static int ar0234_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
@@ -1044,18 +979,21 @@ static int ar0234_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	fd->entry->pixelcode = code;
 	fd->entry->stream = 0;
 	fd->entry->bus.csi2.vc = 0; /* Read from device tree */
-	fd->entry->bus.csi2.dt = MIPI_CSI2_DT_RAW12;
+	/* The descriptor must follow the format or the receiver unpacks a wrong DT. */
+	fd->entry->bus.csi2.dt = ar0234_depth_of(to_ar0234(sd), code)->data_type;
 
 	return 0;
 }
 
 static const struct v4l2_subdev_pad_ops ar0234_pad_ops = {
 	.enum_mbus_code = ar0234_enum_mbus_code,
-	.get_fmt = ar0234_get_pad_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = ar0234_set_pad_format,
 	.get_selection = ar0234_get_selection,
 	.enum_frame_size = ar0234_enum_frame_size,
 	.get_frame_desc = ar0234_get_frame_desc,
+	.enable_streams = ar0234_enable_streams,
+	.disable_streams = ar0234_disable_streams,
 };
 
 static const struct v4l2_subdev_ops ar0234_subdev_ops = {
@@ -1074,9 +1012,12 @@ static int ar0234_init_controls(struct ar0234 *ar0234)
 	struct i2c_client *client = v4l2_get_subdevdata(&ar0234->sd);
 	struct v4l2_fwnode_device_properties props;
 	struct v4l2_ctrl_handler *ctrl_hdlr;
-	unsigned int height = ar0234->mode->height;
+	const struct ar0234_mode *mode = &supported_modes[0];
+	const struct ar0234_depth *depth =
+		ar0234_depth_of(ar0234, ar0234_first_code(ar0234));
+	unsigned int height = mode->height;
+	u64 pixel_rate = ar0234_pixel_rate(ar0234, depth);
 	int exposure_max, exposure_def, hblank;
-	struct v4l2_ctrl *ctrl;
 	int i, ret;
 
 	ctrl_hdlr = &ar0234->ctrl_handler;
@@ -1084,32 +1025,27 @@ static int ar0234_init_controls(struct ar0234 *ar0234)
 	if (ret)
 		return ret;
 
-	mutex_init(&ar0234->mutex);
-	ctrl_hdlr->lock = &ar0234->mutex;
-
 	/* By default, PIXEL_RATE is read only */
 	ar0234->pixel_rate = v4l2_ctrl_new_std(ctrl_hdlr, &ar0234_ctrl_ops,
 						V4L2_CID_PIXEL_RATE,
-						AR0234_PIXEL_RATE,
-						AR0234_PIXEL_RATE, 1,
-						AR0234_PIXEL_RATE);
+						pixel_rate, pixel_rate, 1,
+						pixel_rate);
 	if (ar0234->pixel_rate)
 		ar0234->pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	/* Initial vblank/hblank/exposure parameters based on current mode */
 	ar0234->vblank = v4l2_ctrl_new_std(ctrl_hdlr, &ar0234_ctrl_ops,
 					V4L2_CID_VBLANK, AR0234_VBLANK_MIN,
-					AR0234_VTS_MAX - height, 1,
-					ar0234->mode->vts_def - height);
-	hblank = AR0234_PPL_DEFAULT - ar0234->mode->width;
+					AR0234_FRAME_LENGTH_LINES_MAX - height, 1,
+					mode->fll_def - height);
+	hblank = AR0234_PIXELS_PER_LINE - mode->width;
 	ar0234->hblank = v4l2_ctrl_new_std(ctrl_hdlr, &ar0234_ctrl_ops,
 					V4L2_CID_HBLANK, hblank, hblank,
 					1, hblank);
 	if (ar0234->hblank)
 		ar0234->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-	exposure_max = ar0234->mode->vts_def - 4;
-	exposure_def = (exposure_max < AR0234_EXPOSURE_DEFAULT) ?
-		exposure_max : AR0234_EXPOSURE_DEFAULT;
+	exposure_max = AR0234_EXPOSURE_MAX_FOR(mode->fll_def);
+	exposure_def = min(exposure_max, AR0234_EXPOSURE_DEFAULT);
 	ar0234->exposure = v4l2_ctrl_new_std(ctrl_hdlr, &ar0234_ctrl_ops,
 						V4L2_CID_EXPOSURE,
 						AR0234_EXPOSURE_MIN, exposure_max,
@@ -1150,11 +1086,13 @@ static int ar0234_init_controls(struct ar0234 *ar0234)
 		/* The "Solid color" pattern is white by default */
 	}
 
-	ctrl = v4l2_ctrl_new_int_menu(ctrl_hdlr, &ar0234_ctrl_ops,
-					V4L2_CID_LINK_FREQ, 0, 0,
-					link_freq);
-	if (ctrl)
-		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	ar0234->link_freq = v4l2_ctrl_new_int_menu(ctrl_hdlr, &ar0234_ctrl_ops,
+						   V4L2_CID_LINK_FREQ,
+						   ar0234->num_link_freqs - 1,
+						   max(ar0234_link_index(ar0234, depth), 0),
+						   ar0234->link_freq_menu);
+	if (ar0234->link_freq)
+		ar0234->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	ret = v4l2_fwnode_device_parse(&client->dev, &props);
 	if (!ret)
@@ -1174,7 +1112,6 @@ static int ar0234_init_controls(struct ar0234 *ar0234)
 
 error:
 	v4l2_ctrl_handler_free(ctrl_hdlr);
-	mutex_destroy(&ar0234->mutex);
 
 	return ret;
 }
@@ -1182,15 +1119,61 @@ error:
 static void ar0234_free_controls(struct ar0234 *ar0234)
 {
 	v4l2_ctrl_handler_free(ar0234->sd.ctrl_handler);
-	mutex_destroy(&ar0234->mutex);
 }
 
-static int ar0234_check_hwcfg(struct device *dev)
+/*
+ * Realise the link frequency exactly: FVCO = link * sys divider in range, PRE_PLL_CLK_DIV 2 then 3
+ * (the power-on value), and an even multiplier; the 2 * 2 layout keeps the LI register values.
+ */
+static int ar0234_pll_solve(struct device *dev, u64 link_freq,
+			    struct ar0234_pll *pll)
+{
+	static const u8 sys_divs[] = { 2, 1 };
+	static const u8 pre_divs[] = { 2, 3 };
+	unsigned int i, j;
+
+	/* Bound the DT value before multiplying; the lane rate is twice the link frequency. */
+	if (link_freq < AR0234_FSERIAL_MIN_BPS / 2 ||
+	    link_freq > AR0234_FSERIAL_MAX_BPS / 2) {
+		dev_err(dev, "link frequency %llu Hz: lane rate outside %llu-%llu bit/s\n",
+			link_freq, AR0234_FSERIAL_MIN_BPS, AR0234_FSERIAL_MAX_BPS);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(sys_divs); i++) {
+		u64 fvco = link_freq * sys_divs[i];
+
+		if (fvco < AR0234_FVCO_MIN_HZ || fvco > AR0234_FVCO_MAX_HZ)
+			continue;
+
+		for (j = 0; j < ARRAY_SIZE(pre_divs); j++) {
+			u32 rem;
+			u64 mult = div_u64_rem(fvco * pre_divs[j],
+					       AR0234_XCLK_FREQ, &rem);
+
+			if (rem || (mult & 1) || mult > AR0234_PLL_MULTIPLIER_MAX)
+				continue;
+
+			pll->pre_pll_clk_div = pre_divs[j];
+			pll->pll_multiplier = mult;
+			pll->vt_sys_clk_div = sys_divs[i];
+			pll->op_sys_clk_div = sys_divs[i];
+			return 0;
+		}
+	}
+
+	dev_err(dev, "link frequency %llu Hz has no even PLL multiplier in range\n",
+		link_freq);
+	return -EINVAL;
+}
+
+static int ar0234_check_hwcfg(struct ar0234 *ar0234, struct device *dev)
 {
 	struct fwnode_handle *endpoint;
 	struct v4l2_fwnode_endpoint ep_cfg = {
 		.bus_type = V4L2_MBUS_CSI2_DPHY
 	};
+	unsigned int i;
 	int ret = -EINVAL;
 
 	endpoint = fwnode_graph_get_next_endpoint(dev_fwnode(dev), NULL);
@@ -1205,23 +1188,28 @@ static int ar0234_check_hwcfg(struct device *dev)
 	}
 
 	/* Check the number of MIPI CSI2 data lanes */
-	if (ep_cfg.bus.mipi_csi2.num_data_lanes != 2) {
-		dev_err(dev, "only 2 data lanes are currently supported\n");
+	if (ep_cfg.bus.mipi_csi2.num_data_lanes != 2 &&
+	    ep_cfg.bus.mipi_csi2.num_data_lanes != 4) {
+		dev_err(dev, "only 2 or 4 data lanes are supported\n");
+		goto error_out;
+	}
+	ar0234->num_data_lanes = ep_cfg.bus.mipi_csi2.num_data_lanes;
+
+	if (!ep_cfg.nr_of_link_frequencies ||
+	    ep_cfg.nr_of_link_frequencies > AR0234_LINK_FREQS_MAX) {
+		dev_err(dev, "1 to %u link-frequencies are required\n",
+			AR0234_LINK_FREQS_MAX);
 		goto error_out;
 	}
 
-	/* Check the link frequency set in device tree */
-	if (!ep_cfg.nr_of_link_frequencies) {
-		dev_err(dev, "link-frequency property not found in DT\n");
-		goto error_out;
+	/* The solver realises each frequency exactly, so the menu holds the DT values. */
+	for (i = 0; i < ep_cfg.nr_of_link_frequencies; i++) {
+		if (ar0234_pll_solve(dev, ep_cfg.link_frequencies[i],
+				     &ar0234->plls[i]))
+			goto error_out;
+		ar0234->link_freq_menu[i] = ep_cfg.link_frequencies[i];
 	}
-
-	if (ep_cfg.nr_of_link_frequencies != 1 ||
-		ep_cfg.link_frequencies[0] != AR0234_DEFAULT_LINK_FREQ) {
-		dev_err(dev, "Link frequency not supported: %lld\n",
-			ep_cfg.link_frequencies[0]);
-		goto error_out;
-	}
+	ar0234->num_link_freqs = ep_cfg.nr_of_link_frequencies;
 
 	ret = 0;
 
@@ -1252,8 +1240,9 @@ static int ar0234_probe(struct i2c_client *client)
 	}
 
 	/* Check the hardware configuration in device tree */
-	if (ar0234_check_hwcfg(dev))
-		return -EINVAL;
+	ret = ar0234_check_hwcfg(ar0234, dev);
+	if (ret)
+		return ret;
 
 	/* Get system clock (xclk) */
 	ar0234->xclk = devm_clk_get(dev, NULL);
@@ -1292,22 +1281,19 @@ static int ar0234_probe(struct i2c_client *client)
 	if (ret)
 		goto error_power_off;
 
-	/* Set default mode to max resolution */
-	ar0234->mode = &supported_modes[0];
-
 	/* sensor doesn't enter LP-11 state upon power up until and unless
 	* streaming is started, so upon power up switch the modes to:
 	* streaming -> standby
 	*/
-	ret = ar0234_write_reg(ar0234, AR0234_REG_RESET,
-				AR0234_REG_RESET_STREAM_ON);
+	ret = cci_write(ar0234->regmap, AR0234_RESET_REGISTER, AR0234_STREAMING,
+			NULL);
 	if (ret < 0)
 		goto error_power_off;
 	usleep_range(100, 110);
 
 	/* put sensor back to standby mode */
-	ret = ar0234_write_reg(ar0234, AR0234_REG_RESET,
-				AR0234_REG_RESET_STREAM_OFF);
+	ret = cci_write(ar0234->regmap, AR0234_RESET_REGISTER, AR0234_STANDBY,
+			NULL);
 	if (ret < 0)
 		goto error_power_off;
 	usleep_range(100, 110);
@@ -1315,6 +1301,9 @@ static int ar0234_probe(struct i2c_client *client)
 	ret = ar0234_init_controls(ar0234);
 	if (ret)
 		goto error_power_off;
+
+	/* One lock for the controls and the state: s_ctrl reads the format. */
+	ar0234->sd.state_lock = ar0234->ctrl_handler.lock;
 
 	/* Initialize subdev */
 	ar0234->sd.internal_ops = &ar0234_internal_ops;
@@ -1325,40 +1314,38 @@ static int ar0234_probe(struct i2c_client *client)
 	/* Initialize source pads */
 	ar0234->pad[IMAGE_PAD].flags = MEDIA_PAD_FL_SOURCE;
 
-	/* Initialize default format */
-	ar0234_set_default_format(ar0234);
-
 	ret = media_entity_pads_init(&ar0234->sd.entity, NUM_PADS, ar0234->pad);
 	if (ret) {
 		dev_err(dev, "failed to init entity pads: %d\n", ret);
 		goto error_handler_free;
 	}
 
-	/*
-	 * Leave sd.state_lock unset (independent of ar0234->mutex): the format
-	 * pad ops take ar0234->mutex themselves, so sharing the state lock with
-	 * it would deadlock when the core locks the state around set_fmt.
-	 */
 	ret = v4l2_subdev_init_finalize(&ar0234->sd);
 	if (ret) {
 		dev_err(dev, "failed to init subdev state: %d\n", ret);
 		goto error_media_entity;
 	}
 
+	/* Runtime PM comes up before the subdev; the sensor sleeps a second after its last user. */
+	pm_runtime_set_active(dev);
+	pm_runtime_set_autosuspend_delay(dev, 1000);
+	pm_runtime_use_autosuspend(dev);
+	pm_runtime_enable(dev);
+
 	ret = v4l2_async_register_subdev_sensor(&ar0234->sd);
 	if (ret < 0) {
 		dev_err(dev, "failed to register sensor sub-device: %d\n", ret);
-		goto error_subdev_cleanup;
+		goto error_pm;
 	}
 
-	/* Enable runtime PM and turn off the device */
-	pm_runtime_set_active(dev);
-	pm_runtime_enable(dev);
 	pm_runtime_idle(dev);
 
 	return 0;
 
-error_subdev_cleanup:
+error_pm:
+	pm_runtime_disable(dev);
+	pm_runtime_dont_use_autosuspend(dev);
+	pm_runtime_set_suspended(dev);
 	v4l2_subdev_cleanup(&ar0234->sd);
 
 error_media_entity:
@@ -1384,13 +1371,14 @@ static void ar0234_remove(struct i2c_client *client)
 	ar0234_free_controls(ar0234);
 
 	pm_runtime_disable(&client->dev);
+	pm_runtime_dont_use_autosuspend(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
 		ar0234_power_off(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
 }
 
 static const struct of_device_id ar0234_dt_ids[] = {
-	{ .compatible = "OV,ar0234" },
+	{ .compatible = "onsemi,ar0234" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, ar0234_dt_ids);
@@ -1412,5 +1400,6 @@ static struct i2c_driver ar0234_i2c_driver = {
 module_i2c_driver(ar0234_i2c_driver);
 
 MODULE_AUTHOR("zihongl@leopardimaging.com");
-MODULE_DESCRIPTION("OnSemi AR0234 sensor driver");
+MODULE_AUTHOR("Punit Singh <punit.singh@sima.ai>");
+MODULE_DESCRIPTION("onsemi AR0234 sensor driver");
 MODULE_LICENSE("GPL");

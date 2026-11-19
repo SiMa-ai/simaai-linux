@@ -43,7 +43,7 @@ acamera_calib_mgr_entry_t *acamera_calib_mgr_init( void *param )
 
     // Check if we found anything
     if ( index < 0 ) {
-        LOG( LOG_CRIT, "No free space available for new calibration manager entry (%d of %d used).", FIRMWARE_CONTEXT_NUMBER, FIRMWARE_CONTEXT_NUMBER );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "No free space available for new calibration manager entry (%d of %d used).", FIRMWARE_CONTEXT_NUMBER, FIRMWARE_CONTEXT_NUMBER );
         return NULL;
     }
 
@@ -63,8 +63,27 @@ void acamera_calib_mgr_deinit( acamera_calib_mgr_entry_t *entry )
     system_memset( entry, 0, sizeof( *entry ) );
 }
 
+/* The slot read behind calib_mgr_calibration_bit_depth(), done once per
+ * update so that no reader has to hold a pointer into the calibration set. */
+static uint32_t calib_mgr_read_calibration_bit_depth( acamera_calib_mgr_entry_t *entry )
+{
+    const uint16_t *v;
+
+    if ( !calib_mgr_lut_exists( entry, MODALIX_ISP_CALIB_CALIBRATION_BIT_DEPTH ) ) {
+        return 12u;
+    }
+
+    v = calib_mgr_u16_lut_get( entry, MODALIX_ISP_CALIB_CALIBRATION_BIT_DEPTH );
+    /* Range-check the tuning-supplied depth: anything outside the ISP input
+     * range is a malformed blob, and feeding it to the downstream shift math
+     * would be undefined - fall back to the 12-bit default instead. */
+    return ( v && *v >= 8u && *v <= ISP_INPUT_PORT_MAX_BIT_WIDTH ) ? *v : 12u;
+}
+
 int32_t acamera_calib_mgr_update( acamera_calib_mgr_entry_t *entry, uint32_t wdr_mode )
 {
+    int32_t result;
+
     if ( entry == NULL ) {
         return -1;
     }
@@ -73,10 +92,35 @@ int32_t acamera_calib_mgr_update( acamera_calib_mgr_entry_t *entry, uint32_t wdr
         return -1;
     }
 
-    // Fill calibration manager entry data
-    system_memset( entry->c.calibrations, 0, sizeof( entry->c.calibrations ) );
+    /*
+     * Fill a scratch set and publish it only if the hand-out succeeded.
+     * Clearing the live slots first would leave the manager empty on a
+     * failure that nobody acts on - control_config() ignores this result,
+     * and required consumers index their slot without checking - so a
+     * transient failure would take a working calibration down with it.
+     */
+    {
+        /* On the stack, not static: there are FIRMWARE_CONTEXT_NUMBER
+         * contexts and they update independently. 137 u64s. */
+        ACameraCalibrations fresh;
 
-    return entry->get_calibrations( wdr_mode, entry->c.calibrations );
+        system_memset( fresh.calibrations, 0, sizeof( fresh.calibrations ) );
+
+        result = entry->get_calibrations( wdr_mode, fresh.calibrations );
+        if ( result == 0 ) {
+            system_memcpy( entry->c.calibrations, fresh.calibrations,
+                           sizeof( entry->c.calibrations ) );
+        } else {
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+                     "calibration update failed (%d); keeping the installed set",
+                     result );
+        }
+    }
+
+    /* Describes whatever is installed now, including nothing. */
+    entry->calibration_bit_depth = calib_mgr_read_calibration_bit_depth( entry );
+
+    return result;
 }
 
 /* The UAPI calibrations[] / lookup_table.ptr fields are typed as
@@ -111,7 +155,7 @@ static inline LookupTable *calib_mgr_lookup_get( acamera_calib_mgr_entry_t *entr
     if ( idx < MODALIX_ISP_CALIB_TOTAL_SIZE ) {
         return ( ( entry != NULL ) ? calib_mgr_table_ptr( entry, idx ) : NULL );
     } else {
-        LOG( LOG_CRIT, "Calibration LUT index %d is out of range [0..%d]", (int)idx, MODALIX_ISP_CALIB_TOTAL_SIZE - 1 );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Calibration LUT index %d is out of range [0..%d]", (int)idx, MODALIX_ISP_CALIB_TOTAL_SIZE - 1 );
         return NULL;
     }
 }
@@ -123,41 +167,97 @@ const void *calib_mgr_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx )
     if ( lut != NULL ) {
         result = calib_mgr_lut_data_ptr( lut );
     } else {
-        LOG( LOG_CRIT, "Calibration LUT %d(%#X) is not initialized (NULL). Going to the infinite loop", (int)idx, (int)idx );
-        assert( 0 );
+        /* A slot the tuning did not provide is missing input, not a broken
+         * invariant, and input arrives from user space. panic() is not an
+         * answer to that: the boundary refuses a blob that omits a slot the
+         * kernel reads unguarded, and everything else is guarded by
+         * calib_mgr_lut_exists(). Say so and hand back NULL. */
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Calibration LUT %d(%#X) was not provided by the tuning", (int)idx, (int)idx );
     }
     return result;
+}
+
+/* The blob says how wide a LUT's elements are; the FSM says how wide it
+ * expects them by choosing a getter. The two have to agree, because the
+ * count a consumer iterates - calib_mgr_lut_rows(), or calib_mgr_lut_len()
+ * for the flat getters - is in elements, not bytes. Reading a width-2 LUT
+ * through the u32 getter walks twice its data.
+ *
+ * The kernel cannot check this where the blob arrives: the boundary can
+ * only tell whether a descriptor is self-consistent and inside the blob.
+ * Only the call site knows the type it is about to read, so that is where
+ * the check belongs. @cols is 0 when any column count will do, or 2 for
+ * the modulation getters, whose entries are an (x, y) pair per row.
+ */
+static const void *calib_mgr_lut_get_typed( acamera_calib_mgr_entry_t *entry,
+                                            uint32_t idx, uint32_t width, uint32_t cols )
+{
+    LookupTable *lut = calib_mgr_lookup_get( entry, idx );
+
+    if ( ( lut != NULL ) && ( lut->ptr != 0 ) &&
+         ( ( lut->width != width ) || ( ( cols != 0 ) && ( lut->cols != cols ) ) ) ) {
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT,
+                 "Calibration LUT %d(%#X) is %u x %u of %u-byte elements, but is being read as %u x %u-byte. Refusing it.",
+                 (int)idx, (int)idx, (unsigned)lut->rows, (unsigned)lut->cols,
+                 (unsigned)lut->width, (unsigned)cols, (unsigned)width );
+        return NULL;
+    }
+
+    /* absent or empty: take the path the untyped getter has always taken,
+     * so a missing slot still fails exactly the way callers expect */
+    return calib_mgr_lut_get( entry, idx );
+}
+
+const void *calib_mgr_lut_get_sized( acamera_calib_mgr_entry_t *entry,
+                                     uint32_t idx, uint32_t bytes )
+{
+    LookupTable *lut = calib_mgr_lookup_get( entry, idx );
+
+    if ( ( lut != NULL ) && ( lut->ptr != 0 ) ) {
+        /* the boundary bounded this product against the blob, so it cannot
+         * overflow here */
+        const uint32_t have = (uint32_t)lut->rows * lut->cols * lut->width;
+
+        if ( have < bytes ) {
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT,
+                     "Calibration LUT %d(%#X) holds %u bytes but the caller reads %u. Refusing it.",
+                     (int)idx, (int)idx, have, bytes );
+            return NULL;
+        }
+    }
+
+    return calib_mgr_lut_get( entry, idx );
 }
 
 // Use fast version of LUT access routines.
 inline const uint8_t *calib_mgr_u8_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 {
-    return (const uint8_t *)calib_mgr_lut_get( entry, idx );
+    return (const uint8_t *)calib_mgr_lut_get_typed( entry, idx, 1, 0 );
 }
 
 inline const uint16_t *calib_mgr_u16_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 {
-    return (const uint16_t *)calib_mgr_lut_get( entry, idx );
+    return (const uint16_t *)calib_mgr_lut_get_typed( entry, idx, 2, 0 );
 }
 
 inline const uint32_t *calib_mgr_u32_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 {
-    return (const uint32_t *)calib_mgr_lut_get( entry, idx );
+    return (const uint32_t *)calib_mgr_lut_get_typed( entry, idx, 4, 0 );
 }
 
 inline uint32_t *calib_mgr_u32_lut_get_rw( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 {
-    return (uint32_t *)calib_mgr_lut_get( entry, idx );
+    return (uint32_t *)calib_mgr_lut_get_typed( entry, idx, 4, 0 );
 }
 
 inline const modulation_entry_t *calib_mgr_mod16_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 {
-    return (const modulation_entry_t *)calib_mgr_lut_get( entry, idx );
+    return (const modulation_entry_t *)calib_mgr_lut_get_typed( entry, idx, 2, 2 );
 }
 
 inline const modulation_entry_32_t *calib_mgr_mod32_lut_get( acamera_calib_mgr_entry_t *entry, uint32_t idx )
 {
-    return (const modulation_entry_32_t *)calib_mgr_lut_get( entry, idx );
+    return (const modulation_entry_32_t *)calib_mgr_lut_get_typed( entry, idx, 4, 2 );
 }
 
 inline uint32_t calib_mgr_lut_rows( acamera_calib_mgr_entry_t *entry, uint32_t idx )

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0
+config SIMAAI_MLA
+	tristate "SiMa.ai Modalix MLA (Machine Learning Accelerator) driver"
+	depends on ARM64 || COMPILE_TEST
+	depends on IO_URING
+	depends on DMA_SHARED_BUFFER
+	depends on DMABUF_HEAPS
+	select DMA_CMA
+	help
+	  Support for the SiMa.ai Modalix Machine Learning Accelerator.
+	  Exposes /dev/mla, an io_uring_cmd based interface for loading and
+	  executing compiled MLA models. Userspace runtime is mla-rt /
+	  libMLArt.so from the sibling mla_rt repository.
+
+	  DRAM buffers prefer the shared simaai,mla fallback DMA heap when
+	  available, otherwise the heap over the node's memory-region.
+	  Enable DMABUF_HEAPS_CARVEOUT for the legacy reserved pool, or
+	  DMABUF_HEAPS_CMA for reusable DMS and the shared fallback heap.
+
+	  To compile as a module, choose M here: the module will be called
+	  mla.

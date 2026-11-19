@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# SiMa.ai authored drivers
+
+config VIDEO_INTROSPECT_MIPI_GEN
+	tristate "Introspect Technology SV3C-DPTX MIPI generator stub support"
+	depends on I2C && VIDEO_DEV
+	select VIDEO_V4L2_SUBDEV_API
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 placeholder subdev driver for an
+	  Introspect Technology SV3C-DPTX MIPI D-PHY generator, used in
+	  place of a real camera sensor for CSI-2 receiver bring-up and
+	  validation. It performs no I2C/CCI register access, since the
+	  generator has no such interface.
+
+	  Not included in any shipped defconfig - enable explicitly (as
+	  a module, =m) only when generator-based bring-up/testing is
+	  actually needed.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called introspect_mipi_generator.

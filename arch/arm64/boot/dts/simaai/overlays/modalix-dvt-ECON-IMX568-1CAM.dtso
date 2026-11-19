@@ -1,0 +1,129 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+    imx568_vana_1: csi1_fixedregulator@0 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vana_1";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+
+    imx568_vdig_1: csi1_fixedregulator@1 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vdig_1";
+        regulator-min-microvolt = <110000>;
+        regulator-max-microvolt = <110000>;
+        regulator-always-on;
+    };
+
+    imx568_vddl_1: csi1_fixedregulator@2 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vddl_1";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+
+    imx568_clk_1: csi1_camera-clk {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+};
+
+&csi1 {
+    status = "okay";
+
+    /*
+     * IPI blanking timings (v4l2_bt_timings) consumed by the CSI controller.
+     * Porch/sync values are in pixels (horizontal) or lines (vertical).
+     * pixelclock is the MIPI clock in Hz.
+     */
+    simaai,bt-pixelclock = /bits/ 64 <500000000>;
+    simaai,bt-hsync = <2>;
+    simaai,bt-hbackporch = <100>;
+    simaai,bt-hfrontporch = <1548>;
+    simaai,bt-vsync = <1>;
+    simaai,bt-vbackporch = <68>;
+    simaai,bt-vfrontporch = <1>;
+
+    /* Defaults for the IPI custom V4L2 controls (0 = disabled) */
+    simaai,ipi-controller-mode = <1>;
+    simaai,ipi-emb-data-enable = <0>;
+};
+
+&axi_vdma1 {
+    status = "okay";
+};
+
+&mipi_dphy_rx1 {
+    status = "okay";
+};
+
+&v4l2video1 {
+    status = "okay";
+};
+
+&v4l2vdma1 {
+    status = "okay";
+};
+
+&csi10in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <594000000>;
+    remote-endpoint = <&cam10out>;
+    clock-continuous;
+};
+
+&i2c01 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    pca6408_camera_1: pca6408@20 {
+        compatible = "ti,tca6408";
+        gpio-controller;
+        #gpio-cells = <2>;
+        reg = <0x20>;
+        status = "okay";
+    };
+
+    imx568: imx568@42 {
+        compatible = "econ,imx568";
+        reg = <0x42>;
+        clocks = <&imx568_clk_1>;
+        clock-names = "xclk";
+        VANA-supply = <&imx568_vana_1>;
+        VDIG-supply = <&imx568_vdig_1>;
+        VDDL-supply = <&imx568_vddl_1>;
+        reset-gpios = <&pca6408_camera_1 1 0>;
+        boot-gpios = <&pca6408_camera_1 0 0>;
+        camera_mipi_lanes = <2>;
+        cam_fw_name = "imx568_cam_fw.bin";
+
+        /* Exposure window limits in microseconds (min 300 us, max 18 ms) */
+        simaai,manual_exposure_min = <300>;
+        simaai,manual_exposure_max = <18000>;
+
+        port@1 {
+            cam10out: endpoint@0 {
+                clock-lanes = <0>;
+                data-lanes = <1 2>;
+                link-frequencies = /bits/ 64 <594000000>;
+                remote-endpoint = <&csi10in>;
+                clock-continuous;
+            };
+        };
+    };
+};

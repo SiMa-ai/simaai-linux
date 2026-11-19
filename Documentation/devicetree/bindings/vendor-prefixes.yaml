@@ -1175,6 +1175,8 @@ patternProperties:
     description: Onion Corporation
   "^onnn,.*":
     description: ON Semiconductor Corp.
+  "^onsemi,.*":
+    description: onsemi (ON Semiconductor)
   "^ontat,.*":
     description: On Tat Industrial Company
   "^opalkelly,.*":

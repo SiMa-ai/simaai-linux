@@ -15,3 +15,4 @@ Depth data provides distance to points, mapped onto the image plane
     pixfmt-inzi
     pixfmt-z16
     pixfmt-cnf4
+    pixfmt-metoak-rgbd

@@ -71,7 +71,7 @@ uint8_t acamera_command( uint32_t ctx_id, uint8_t command_type, uint8_t command,
     } // switch ( command_type )
 
     if ( ret != SUCCESS ) {
-        LOG( LOG_WARNING, "API COMMAND FAILED: ctx: %d, if_mode: %d, type: %d, cmd: %d, value: %lu, direction: %d, ret_value: %lu, result: %d",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "API COMMAND FAILED: ctx: %d, if_mode: %d, type: %d, cmd: %d, value: %lu, direction: %d, ret_value: %lu, result: %d",
              ctx_id,
              cmd_if_mode,
              command_type,
@@ -81,7 +81,7 @@ uint8_t acamera_command( uint32_t ctx_id, uint8_t command_type, uint8_t command,
              ( ( ret_value ) ? (unsigned long)*ret_value : 0UL ),
              ret );
     } else {
-        LOG( LOG_DEBUG, "API: ctx %d, if_mode: %d, type: %d, cmd: %d, value: %lu, direction: %d, ret_value: %lu, result: %d, module: %s",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "API: ctx %d, if_mode: %d, type: %d, cmd: %d, value: %lu, direction: %d, ret_value: %lu, result: %d, module: %s",
              ctx_id,
              cmd_if_mode,
              command_type,

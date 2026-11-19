@@ -570,7 +570,7 @@ static int pcsiosimaai_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, pctl);
 
-	dev_info(&pdev->dev, "Initialised SiMa.ai SIO pinctrl driver\n");
+	dev_dbg(&pdev->dev, "Initialised SiMa.ai SIO pinctrl driver\n");
 
 	return 0;
 }

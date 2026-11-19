@@ -1,0 +1,98 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ *
+ * On-die PVT thermal sensor and its thermal zones, one per subsystem
+ * using its first RTSN channel (see rtsn_name[] in the
+ * simaai-modalix-thermal-sensor driver).
+ */
+
+/ {
+	pvt0: pvt-controller@ff0e000 {
+		compatible = "simaai,modalix-thermal-sensor";
+		reg = <0x0 0xff0e000 0x0 0xb80>,
+			<0x0 0x0ff10000 0x0 0x40>;
+		reg-names = "pvt", "efuse";
+		/* cell = temperature channel index (0..13) */
+		#thermal-sensor-cells = <1>;
+		status = "okay";
+	};
+
+	thermal-zones {
+		mla {
+			polling-delay = <30000>;
+			polling-delay-passive = <5000>;
+			thermal-sensors = <&pvt0 1>;
+
+			trips {
+				mla-alert {
+					temperature = <95000>;
+					hysteresis = <3000>;
+					type = "hot";
+				};
+				mla-crit {
+					temperature = <105000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+		};
+
+		apu {
+			polling-delay = <30000>;
+			polling-delay-passive = <5000>;
+			thermal-sensors = <&pvt0 4>;
+
+			trips {
+				apu-alert {
+					temperature = <95000>;
+					hysteresis = <3000>;
+					type = "hot";
+				};
+				apu-crit {
+					temperature = <105000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+		};
+
+		cvu {
+			polling-delay = <30000>;
+			polling-delay-passive = <5000>;
+			thermal-sensors = <&pvt0 5>;
+
+			trips {
+				cvu-alert {
+					temperature = <95000>;
+					hysteresis = <3000>;
+					type = "hot";
+				};
+				cvu-crit {
+					temperature = <105000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+		};
+
+		top {
+			polling-delay = <30000>;
+			polling-delay-passive = <5000>;
+			thermal-sensors = <&pvt0 6>;
+
+			trips {
+				top-alert {
+					temperature = <95000>;
+					hysteresis = <3000>;
+					type = "hot";
+				};
+				top-crit {
+					temperature = <105000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+		};
+	};
+};

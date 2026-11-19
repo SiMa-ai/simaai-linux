@@ -104,12 +104,12 @@ static void ae_update_exposure( AE_fsm_ptr_t p_fsm )
 
 void ae_init( AE_fsm_ptr_t p_fsm )
 {
-    LOG( LOG_INFO, "Initialize ae_manual FSM" );
+    LOG_CAT( ALOG_CAT_AE, LOG_INFO, "Initialize ae_manual FSM" );
 }
 
 void ae_config( AE_fsm_ptr_t p_fsm )
 {
-    LOG( LOG_INFO, "AE Configure" );
+    LOG_CAT( ALOG_CAT_AE, LOG_INFO, "AE Configure" );
 }
 
 void ae_reload_calibration( AE_fsm_ptr_t p_fsm )
@@ -127,7 +127,7 @@ void ae_update_algo( AE_fsm_ptr_t p_fsm )
     exp_target.exposure_ratio = p_fsm->exposure_ratio;
     WRAP_GENERAL_CMD( ACAMERA_FSM2ICTX_PTR( p_fsm ), CMD_ID_EXPOSURE_TARGET, CMD_DIRECTION_SET, (uint32_t *)&exp_target, NULL );
 
-    LOG( LOG_DEBUG, "ae exposure_log2: %d, exposure_ratio: %d", exp_target.exposure_log2, exp_target.exposure_ratio );
+    LOG_CAT( ALOG_CAT_AE, LOG_DEBUG, "ae exposure_log2: %d, exposure_ratio: %d", exp_target.exposure_log2, exp_target.exposure_ratio );
 
     // Raise ae_ready event
     fsm_raise_event( p_fsm, event_id_algo_ae_calculation_done );

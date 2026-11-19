@@ -63,7 +63,7 @@
 
 &csi30in{
     clock-lanes = <0>;
-    data-lanes = <1 2>;
+    data-lanes = <1 2 3 4>;
     link-frequencies = /bits/ 64 <594000000>;
     remote-endpoint = <&cam30out>;
     clock-continuous;
@@ -75,9 +75,26 @@
     #address-cells = <1>;
     #size-cells = <0>;
 
-    imx568: imx568@42 {
+    /*
+         * 0x44, not the MCU's native 0x42. Both camera MCUs are
+         * natively 0x42, and serializer B passes 0x42 through
+         * untranslated as well as translating 0x43 -> 0x42 for camera
+         * B - so with both links up, 0x42 has two responders and reads
+         * come back as the wire-AND of both MCUs.
+         *
+         * SER1_I2C_CONF (econ_imx568_serdes.h) programs serializer A's
+         * translator slot 0 with SRC 0x44 -> DST 0x42, so camera A is
+         * reachable here without colliding with anything. Verified on
+         * hardware 2026-08-19: r1@0x44 and r1@0x43 both ACK
+         * independently.
+         *
+         * NOTE: i2cdetect does NOT list 0x43 or 0x44 even when they
+         * respond. Use "i2ctransfer -y -f 0 r1@0x44" to test
+         * reachability - relying on i2cdetect here is misleading.
+         */
+        imx568: imx568@44 {
         compatible = "econ,imx568-gmsl";
-        reg = <0x42>;
+        reg = <0x44>;
         clocks = <&imx568_clk0>;
         clock-names = "xclk";
         VANA-supply = <&imx568_vana0>;
@@ -90,10 +107,12 @@
             cam30out: endpoint@0 {
                 reg = <0>;
                 clock-lanes = <0>;
-                data-lanes = <1 2>;
+                data-lanes = <1 2 3 4>;
                 link-frequencies = /bits/ 64 <594000000>;
                 remote-endpoint = <&csi30in>;
                 clock-continuous;
+                /* Link A is Pipe Y / VC0. */
+                sima,virtual-channel = <0>;
             };
         };
     };

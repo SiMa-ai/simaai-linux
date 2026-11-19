@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/reserved-memory/simaai,mla-cma.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SiMa MLA reusable DMA memory
+
+maintainers:
+  - Vimal Nakum <vimal.nakum@sima.ai>
+
+description: |
+  MLA-accessible System RAM made available to Linux movable allocations while
+  not held by a DMA buffer. The region is a dedicated, non-default CMA pool.
+  Userspace and the MLA driver share the CMA allocator backing its named
+  DMA-BUF heap; no carveout allocator may manage the same interval. The label preserves the
+  established userspace heap name independently of physical placement.
+
+  The node NAME must also keep the established "dms@" prefix, not only the
+  label: the mla-rt runtime enumerates /proc/device-tree/reserved-memory and
+  matches children on that name prefix, refusing to start when it finds no
+  such node.
+
+select:
+  properties:
+    compatible:
+      contains:
+        const: simaai,mla-cma
+  required:
+    - compatible
+
+allOf:
+  - $ref: reserved-memory.yaml
+
+properties:
+  compatible:
+    items:
+      - const: simaai,mla-cma
+      - const: shared-dma-pool
+
+  reg:
+    maxItems: 1
+
+  label:
+    const: simaai,dms
+
+  reusable: true
+
+  no-map: false
+
+  linux,cma-default: false
+
+  linux,dma-default: false
+
+required:
+  - compatible
+  - reg
+  - label
+  - reusable
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+
+        dms@1300000000 {
+            compatible = "simaai,mla-cma", "shared-dma-pool";
+            label = "simaai,dms";
+            reusable;
+            reg = <0x13 0x00000000 0x4 0x00000000>;
+        };
+    };

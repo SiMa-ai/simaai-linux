@@ -82,11 +82,7 @@
 		status = "disabled";
 	};
 
-	pvt0: pvt-controller@ff0e000 {
-		compatible = "simaai,modalix-thermal-sensor";
-		reg = <0x0 0xff0e000 0x0 0xb80>,
-			<0x0 0x0ff10000 0x0 0x40>;
-		reg-names = "pvt", "efuse";
-		status = "okay";
+	soc_poweroff: poweroff {
+		compatible = "simaai,modalix-poweroff";
 	};
 };

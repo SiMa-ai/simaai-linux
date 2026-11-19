@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025-2026 SiMa ai
+ *
+ * MLA accelerator binding for Modalix.
+ *
+ * Single platform node consumed by mla.ko via of_match_table. The
+ * memory-region phandle points the driver at dms0_reserved; at probe
+ * it resolves the carveout dma-heap registered for that node (named
+ * by its "label" — /dev/dma_heap/simaai,dms) and allocates through
+ * it. Per-board reserved-region size is set in the board DTS (e.g.
+ * modalix-som_16g.dts overrides dms0_reserved for the 16 GiB SoM
+ * variant).
+ */
+
+#include <dt-bindings/clock/simaai,clkc-prc.h>
+
+/ {
+	mla@5000000 {
+		compatible = "simaai,mla-modalix";
+		reg = <0x0 0x5000000 0x0 0xfe00>;
+		interrupts = <GIC_SPI 86 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 87 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "ftl", "non_ftl";
+		memory-region = <&dms0_reserved>;
+		clocks = <&clkc SIMAAI_PRC_CLK_MLA_PLL>,
+			 <&clkc SIMAAI_PRC_CLK_MLA_GATE>;
+		clock-names = "pll", "gate";
+		operating-points-v2 = <&mla_opp_table>;
+		/* Registers for the legacy /dev/simaai-mlamem REG ioctls. */
+		simaai,reg-list = <0x0ff00014
+				0x0ff00594
+				0xffffffff
+				0x0ff00528
+				0x0500f438
+				0x0500f638
+				0x0500f838
+				0x0500fa38>;
+		status = "okay";
+	};
+};

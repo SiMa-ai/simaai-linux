@@ -79,39 +79,54 @@ void iridix_reload_calibration( iridix_fsm_t *p_fsm )
         p_fsm->luma_th = *config++;
 #endif
     } else {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_IRIDIX8_EXTENDED_CONTROL is missing, module will not be configured correctly!" );
+        LOG_CAT( ALOG_CAT_IRIDIX, LOG_ERR, "MODALIX_ISP_CALIB_IRIDIX8_EXTENDED_CONTROL is missing, module will not be configured correctly!" );
     }
 
 
     const uint32_t lut_element_size = calib_mgr_lut_width( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY );
 
+    /* Every one of these loops indexes a fixed hardware array by the
+     * descriptor's own length, so bound each by its array. Tunings in tree
+     * ship the asymmetry curve at both 33 and 65 entries, so it is a clamp
+     * rather than a fixed count. */
+    uint32_t asymmetry_nodes = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY );
+    uint32_t gtm_x_nodes = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_X );
+    uint32_t gtm_y_nodes = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_Y );
+
+    if ( asymmetry_nodes > ACAMERA_ISP_IRIDIX_LUT_ASYMMETRY_LUT_NODES )
+        asymmetry_nodes = ACAMERA_ISP_IRIDIX_LUT_ASYMMETRY_LUT_NODES;
+    if ( gtm_x_nodes > ACAMERA_ISP_IRIDIX_LUT_GLOBALTM_X_LUT_NODES )
+        gtm_x_nodes = ACAMERA_ISP_IRIDIX_LUT_GLOBALTM_X_LUT_NODES;
+    if ( gtm_y_nodes > ACAMERA_ISP_IRIDIX_LUT_GLOBALTM_Y_LUT_NODES )
+        gtm_y_nodes = ACAMERA_ISP_IRIDIX_LUT_GLOBALTM_Y_LUT_NODES;
+
     // 32 bit tables
     if ( lut_element_size == 4 ) {
 
         const uint32_t *lut_data = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY );
-        for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY ); i++ ) {
+        for ( i = 0; i < asymmetry_nodes; i++ ) {
             acamera_isp_iridix_lut_asymmetry_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, lut_data[i] );
         }
         // 16 bit tables
     } else if ( lut_element_size == 2 ) {
 
         const uint16_t *lut_data = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY );
-        for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY ); i++ ) {
+        for ( i = 0; i < asymmetry_nodes; i++ ) {
             acamera_isp_iridix_lut_asymmetry_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, lut_data[i] );
         }
     } else {
-        LOG( LOG_ERR, "Unsupported MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY LUT element size: expected 4 or 2 bytes, got %d bytes", lut_element_size );
+        LOG_CAT( ALOG_CAT_IRIDIX, LOG_ERR, "Unsupported MODALIX_ISP_CALIB_IRIDIX_ASYMMETRY LUT element size: expected 4 or 2 bytes, got %d bytes", lut_element_size );
     }
 
     // Update gtm tables
     const uint32_t *lut_gtm_x = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_X );
     const uint32_t *lut_gtm_y = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_Y );
 
-    for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_X ); i++ ) {
+    for ( i = 0; i < gtm_x_nodes; i++ ) {
         acamera_isp_iridix_lut_globaltm_x_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, lut_gtm_x[i] );
     }
 
-    for ( i = 0; i < calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_IRIDIX_GTM_LUT_Y ); i++ ) {
+    for ( i = 0; i < gtm_y_nodes; i++ ) {
         acamera_isp_iridix_lut_globaltm_y_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, lut_gtm_y[i] );
     }
 }

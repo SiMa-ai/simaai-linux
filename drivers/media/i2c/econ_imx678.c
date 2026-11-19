@@ -146,6 +146,41 @@ static int cam_get_cmd_status(struct i2c_client *client, uint8_t * cmd_id,
         return 0;
 }
 
+/* Wait for the MCU to finish a command; one it never confirms is taken as done */
+static int cam_wait_cmd(struct i2c_client *client, u8 cmd)
+{
+	unsigned long timeout = jiffies +
+				msecs_to_jiffies(IMX678_MCU_CMD_TIMEOUT_MS);
+	u16 cmd_status = 0;
+	u8 retcode = 0, cmd_id;
+	int fails = 0, ret;
+
+	for (;;) {
+		cmd_id = cmd;
+		ret = cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode);
+		fails = ret ? fails + 1 : 0;
+		if (fails >= IMX678_MCU_STATUS_READ_TRIES)
+			return -EIO;
+
+		/* Only a reply for this command counts */
+		if (!ret && cmd_id == cmd) {
+			if (cmd_status == MCU_CMD_STATUS_SUCCESS &&
+			    retcode == ERRCODE_SUCCESS)
+				return 0;
+			if (cmd_status != MCU_CMD_STATUS_PENDING &&
+			    retcode != ERRCODE_BUSY)
+				return -EIO;
+		}
+		if (time_after(jiffies, timeout)) {
+			dev_warn(&client->dev,
+				 "MCU command 0x%02x not confirmed in %d ms\n",
+				 cmd, IMX678_MCU_CMD_TIMEOUT_MS);
+			return 0;
+		}
+		usleep_range(10000, 11000);
+	}
+}
+
 // MCU APIs
 static int cam_init(struct i2c_client *client)
 {
@@ -570,9 +605,8 @@ static int cam_stream_config(struct i2c_client *client, struct imx678 *priv,
         unsigned char mc_data[100];
         uint32_t payload_len = 0;
 
-        uint16_t cmd_status = 0, index = 0xFFFF;
-        uint8_t retcode = 0, cmd_id = 0;
-        int loop = 0, ret = 0, err = 0, retry = 10;
+	u16 index = 0xFFFF;
+	int loop = 0, ret = 0, err = 0;
 
         // Find Index of the streaming mode
         for (loop = 0; (&priv->streamdb[loop])!= NULL; loop++) {
@@ -632,41 +666,11 @@ static int cam_stream_config(struct i2c_client *client, struct imx678 *priv,
 	if (err != 0) {
                 dev_err(&client->dev," %s(%d) MCU Stream Config Error - %d \n", 
 				__func__, __LINE__, err);
-                ret = -1;
+		ret = err;
                 goto exit;
         }
 
-        while (--retry > 0) {
-		/* test Some time for processing command */
-                yield();
-
-                cmd_id = CMD_ID_STREAM_CONFIG;
-                if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
-                    0) {
-                       dev_err(&client->dev,
-				       " %s(%d) MCU GET CMD Status Error : loop : %d \n", 
-				       __func__, __LINE__, loop);
-			ret = -1;
-                        continue;
-                }
-
-                if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
-                    (retcode == ERRCODE_SUCCESS)) {
-                        dev_info(&client->dev, " %s(%d) Status Success !! \n", __func__, __LINE__);
-			ret = 0;
-                        goto exit;
-                }
-
-                if ((retcode != ERRCODE_BUSY) &&
-                    ((cmd_status != MCU_CMD_STATUS_PENDING))) {
-                       dev_err(&client->dev,
-                            "(%s) %d ISP Get CMD Error STATUS = 0x%04x RET = 0x%02x\n",
-                             __func__, __LINE__, cmd_status, retcode);
-			ret = -1;
-                       	continue;
-                }
-		mdelay(1);
-        }
+	ret = cam_wait_cmd(client, CMD_ID_STREAM_CONFIG);
 
 exit:
         return ret;
@@ -688,20 +692,19 @@ static int imx678_set_pad_format(struct v4l2_subdev *sd,
 	if (fmt->pad == IMAGE_PAD) {
 		fmt->format.code = MEDIA_BUS_FMT_SRGGB12_1X12;
 		imx678_update_image_pad_format(imx678, fmt);
+	} else if (fmt->which != V4L2_SUBDEV_FORMAT_TRY) {
+		/* Only one embedded data mode is supported */
+		imx678_update_metadata_pad_format(fmt);
+	}
 
+	/* Only an ACTIVE image format reaches the MCU */
+	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY || fmt->pad != IMAGE_PAD) {
 		if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 			framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 			*framefmt = fmt->format;
 		}
-	} else {
-		// Not Implemented
-		if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-			framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
-			*framefmt = fmt->format;
-		} else {
-			/* Only one embedded data mode is supported */
-			imx678_update_metadata_pad_format(fmt);
-		}
+		mutex_unlock(&imx678->mutex);
+		return 0;
 	}
 
 	switch (fmt->format.code) {
@@ -751,9 +754,7 @@ static int cam_stream_on(struct i2c_client *client, struct imx678 *priv)
         unsigned char mc_data[100];
         uint32_t payload_len = 0;
 
-        uint16_t cmd_status = 0;
-        uint8_t retcode = 0, cmd_id = 0;
-	int retry = 5, err = 0;
+	int err = 0;
 
         payload_len = 0;
 
@@ -774,37 +775,8 @@ static int cam_stream_on(struct i2c_client *client, struct imx678 *priv)
                 goto exit;
         }
 
-        while (--retry > 0) {
-                /* Some Sleep for init to process */
-                yield();
+	err = cam_wait_cmd(client, CMD_ID_STREAM_ON);
 
-                cmd_id = CMD_ID_STREAM_ON;
-                if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) <
-                    0) {
-                       dev_err(&client->dev,
-				       " %s(%d) MCU Get CMD Stream On Error \n", __func__, __LINE__);
-		       err = -1;
-		       continue;
-                }
-
-                if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
-                    (retcode == ERRCODE_SUCCESS)) {
-                        dev_info(&client->dev,
-					" %s %dMCU Stream On Success !! \n", __func__, __LINE__);
-			err = 0;
-			goto exit;
-                }
-
-                if ((retcode != ERRCODE_BUSY) &&
-                    ((cmd_status != MCU_CMD_STATUS_PENDING))) {
-                       dev_err(&client->dev,
-                            "(%s) %d MCU Get CMD Stream On Error STATUS = "
-			    "0x%04x RET = 0x%02x\n", __func__, __LINE__, cmd_status, retcode);
-		       err = -1;
-		       continue;
-                }
-		mdelay(1);
-        }
 exit:
 	return err;
 }
@@ -814,9 +786,7 @@ static int cam_stream_off(struct i2c_client *client, struct imx678 *priv)
 	unsigned char mc_data[100];
 	uint32_t payload_len = 0;
 	
-	uint16_t cmd_status = 0;
-	uint8_t retcode = 0, cmd_id = 0;
-	int retry = 5, err = 0;
+	int err = 0;
 	
 	/* First Txn Payload length = 0 */
 	payload_len = 0;
@@ -840,34 +810,8 @@ static int cam_stream_off(struct i2c_client *client, struct imx678 *priv)
 		goto exit;
 	}
 
-	while (--retry > 0) {
-		/* Some Sleep for init to process */
-		yield();
-		cmd_id = CMD_ID_STREAM_OFF;
-		if (cam_get_cmd_status(client, &cmd_id, &cmd_status, &retcode) < 0) {
-			dev_err(&client->dev,
-					"%s(%d) MCU Get CMD Stream Off Error \n", __func__, __LINE__);
-			err = -1;
-			continue;
-		}
-		if ((cmd_status == MCU_CMD_STATUS_SUCCESS) &&
-				(retcode == ERRCODE_SUCCESS)) {
-			dev_info(&client->dev,
-					" %s %d MCU Get CMD Stream off Success !! \n", __func__, __LINE__ );
-			err = 0;
-			goto exit;
-		}
+	err = cam_wait_cmd(client, CMD_ID_STREAM_OFF);
 
-		if ((retcode != ERRCODE_BUSY) &&
-				((cmd_status != MCU_CMD_STATUS_PENDING))) {
-			dev_err(&client->dev,
-					"(%s) %d MCU Get CMD Stream off Error STATUS = "
-					"0x%04x RET = 0x%02x\n", __func__, __LINE__, cmd_status, retcode);
-			err = -1;
-			continue;
-		}
-		mdelay(1);
-	}
 exit:
 	return err;
 }
@@ -881,7 +825,7 @@ static int imx678_start_streaming(struct imx678 *imx678)
 	ret = cam_stream_on(client, imx678);
 	if(ret != 0){
 		dev_err(&client->dev,"%s (%d) Stream_On - Failed\n", __func__, __LINE__);
-		return ret;
+		goto err_stop;
 	}
 
 	/* MCU control state is undefined across stream stop/start: invalidate
@@ -892,6 +836,14 @@ static int imx678_start_streaming(struct imx678 *imx678)
 
 	/* Apply customized values from user */
 	ret =  __v4l2_ctrl_handler_setup(imx678->sd.ctrl_handler);
+	if (ret)
+		goto err_stop;
+
+	return 0;
+
+err_stop:
+	/* The MCU may stream anyway: stop it */
+	cam_stream_off(client, imx678);
 	return ret;
 }
 
@@ -1014,7 +966,6 @@ static int __maybe_unused imx678_resume(struct device *dev)
 	return 0;
 
 error:
-	imx678_stop_streaming(imx678);
 	imx678->streaming = 0;
 	return ret;
 }
@@ -1038,7 +989,12 @@ static int imx678_get_mbus_config(struct v4l2_subdev *sd,
 {
 	struct imx678 *imx678 = to_imx678(sd);
 
-	cfg->link_freq =  imx678->link_freq_value;
+	cfg->link_freq = imx678->link_freq_value;
+	/* Two lanes: modes up to 1080 lines run at 720 MHz, taller at 1040 MHz */
+	if (imx678->mipi_lane_config == 2)
+		cfg->link_freq =
+			imx678->cam_frmfmt[imx678->frmfmt_mode].size.height > 1080 ?
+			IMX678_2LANE_4K_LINK_FREQ : IMX678_2LANE_1080P_LINK_FREQ;
 	return 0;
 }
 
@@ -1051,10 +1007,37 @@ static const struct v4l2_subdev_video_ops imx678_video_ops = {
 	.s_stream = imx678_set_stream,
 };
 
+static int imx678_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+{
+	struct imx678 *imx678 = to_imx678(sd);
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP:
+		sel->r.left = 0;
+		sel->r.top = 0;
+		sel->r.width = imx678->cam_frmfmt[imx678->frmfmt_mode].size.width;
+		sel->r.height = imx678->cam_frmfmt[imx678->frmfmt_mode].size.height;
+		return 0;
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		sel->r.left = 0;
+		sel->r.top = 0;
+		sel->r.width = imx678->cam_frmfmt[0].size.width;
+		sel->r.height = imx678->cam_frmfmt[0].size.height;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
 static const struct v4l2_subdev_pad_ops imx678_pad_ops = {
 	.enum_mbus_code = imx678_enum_mbus_code,
 	.get_fmt = imx678_get_pad_format,
 	.set_fmt = imx678_set_pad_format,
+	.get_selection = imx678_get_selection,
 	.enum_frame_size = imx678_enum_frame_size,
 	.get_mbus_config = imx678_get_mbus_config,
 };
@@ -1079,7 +1062,7 @@ static int imx678_init_controls(struct imx678 *imx678)
 	int ret;
 
 	ctrl_hdlr = &imx678->ctrl_handler;
-	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 10);
+	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 12);
 	if (ret)
 		return ret;
 
@@ -1122,6 +1105,23 @@ static int imx678_init_controls(struct imx678 *imx678)
                          IMX678_EXPOSURE_MAX,
                          IMX678_EXPOSURE_STEP,
                          IMX678_EXPOSURE_DEFAULT);
+
+	/* CAMERA_ORIENTATION + CAMERA_SENSOR_ROTATION from the DT node */
+	ret = v4l2_fwnode_device_parse(&client->dev, &props);
+	if (ret)
+		goto error;
+
+	ret = v4l2_ctrl_new_fwnode_properties(ctrl_hdlr, &imx678_ctrl_ops,
+					      &props);
+	if (ret)
+		goto error;
+
+	if (ctrl_hdlr->error) {
+		ret = ctrl_hdlr->error;
+		dev_err(&client->dev, "%s control init failed (%d)\n",
+				__func__, ret);
+		goto error;
+	}
 
 	imx678->sd.ctrl_handler = ctrl_hdlr;
 

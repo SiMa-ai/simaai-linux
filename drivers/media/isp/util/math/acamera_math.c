@@ -314,7 +314,7 @@ uint32_t math_log2(
 int32_t solving_lin_equation_a( int32_t y1, int32_t y2, int32_t x1, int32_t x2, int16_t a_fraction_size )
 {
     if ( x1 == x2 ) {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
         return x1;
     }
     return ( ( y1 - y2 ) * ( 1 << a_fraction_size ) ) / ( x1 - x2 ); // Division by zero is checked.
@@ -336,7 +336,7 @@ int32_t solving_lin_equation_b( int32_t y1, int32_t a, int32_t x1, int16_t a_fra
 uint32_t div_fixed( uint32_t a, uint32_t b, const int16_t fraction_size )
 {
     if ( b == 0 ) {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
         return a << fraction_size;
     }
     uint64_t c = ( (uint64_t)a << fraction_size );
@@ -443,6 +443,12 @@ int16_t acamera_sine( uint32_t theta )
 
 uint16_t calc_modulation_u16( uint16_t x, const modulation_entry_t *p_table, int table_len )
 {
+    /* A calibration slot the tuning omitted arrives here as NULL. Every caller
+     * would otherwise need its own guard, and several do not have one - answer
+     * for the missing table instead of dereferencing it. */
+    if ( !p_table || table_len < 1 ) {
+        return 0;
+    }
     if ( x <= p_table->x ) {
         return p_table->y;
     }
@@ -460,7 +466,7 @@ uint16_t calc_modulation_u16( uint16_t x, const modulation_entry_t *p_table, int
             int alpha = ( x - p_table[i - 1].x ) * 256 / ( p_table[i].x - p_table[i - 1].x ); // division by zero is checked
             return ( p_table[i].y * alpha + p_table[i - 1].y * ( 256 - alpha ) ) >> 8;
         } else {
-            LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
             return p_table[i].y;
         }
     }
@@ -468,6 +474,10 @@ uint16_t calc_modulation_u16( uint16_t x, const modulation_entry_t *p_table, int
 
 uint32_t calc_modulation_u32( uint32_t x, const modulation_entry_32_t *p_table, int table_len )
 {
+    if ( !p_table || table_len < 1 ) {
+        return 0;
+    }
+
     if ( x <= p_table->x ) {
         return p_table->y;
     }
@@ -486,7 +496,7 @@ uint32_t calc_modulation_u32( uint32_t x, const modulation_entry_32_t *p_table, 
             uint32_t alpha = ( x - p_table[i - 1].x ) * 256 / ( p_table[i].x - p_table[i - 1].x ); // division by zero is checked
             return ( p_table[i].y * alpha + p_table[i - 1].y * ( 256 - alpha ) ) >> 8;
         } else {
-            LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
             return p_table[i].y;
         }
     }
@@ -501,7 +511,7 @@ uint16_t calc_scaled_modulation_u16( uint16_t x, uint16_t target_min_y, uint16_t
         return target_max_y;
     }
     if ( ( p_table[0].y == 0 ) || ( p_table[table_len - 1].y == 0 ) || ( ( p_table[table_len - 1].x - p_table[0].x ) == 0 ) ) {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
         return 0;
     } else {
         uint32_t scale_min_y = (uint32_t)target_min_y * 256 / p_table[0].y;                   // Division by zero is checked.
@@ -523,7 +533,7 @@ uint16_t calc_scaled_modulation_u16( uint16_t x, uint16_t target_min_y, uint16_t
 
             return scale_factor * ( p_table[i].y * alpha + p_table[i - 1].y * ( 256 - alpha ) ) >> 16;
         } else {
-            LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
             return p_table[i].y;
         }
     }
@@ -544,7 +554,7 @@ uint16_t calc_equidistant_modulation_u16( uint16_t x, const uint16_t *p_table, u
 
     uint16_t d = ( 1 << 16 ) / ( table_len - 1 ); // Division by zero is checked.
     if ( d == 0 ) {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
         return p_table[0];
     }
     uint16_t bn = x / d;                           // Division by zero is checked.
@@ -572,7 +582,7 @@ uint32_t calc_equidistant_modulation_u32( uint32_t x, const uint32_t *p_table, u
 
     uint32_t d = ( 1 << 16 ) / ( table_len - 1 ); // Division by zero is checked.
     if ( d == 0 ) {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
         return p_table[0];
     }
     uint32_t bn = x / d;                           // Division by zero is checked.
@@ -607,7 +617,7 @@ uint16_t calc_inv_equidistant_modulation_u16( uint16_t x, const uint16_t *p_tabl
     uint16_t d = ( 1 << 16 ) / ( table_len - 1 ); // Division by zero is checked.
 
     if ( p_table[i] == p_table[i - 1] ) {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
         return d * i;
     }
 
@@ -642,7 +652,7 @@ uint32_t calc_inv_equidistant_modulation_u32( uint32_t x, const uint32_t *p_tabl
     uint32_t d = ( 1 << 16 ) / ( table_len - 1 ); // Division by zero is checked.
 
     if ( p_table[i] == p_table[i - 1] ) {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
         return d * i;
     }
 

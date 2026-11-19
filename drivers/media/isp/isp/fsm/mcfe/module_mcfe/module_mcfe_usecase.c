@@ -44,22 +44,22 @@ int module_mcfe_usecase_init( module_mcfe_usecase_config_t *config, module_mcfe_
 {
     // Check input parameters.
     if ( config == NULL ) {
-        LOG( LOG_ERR, "Error. Invalid parameter. Instance pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Invalid parameter. Instance pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
     if ( ( type <= MODULE_MCFE_USECASE_NONE ) || ( type > MODULE_MCFE_USECASE_MAX ) ) {
-        LOG( LOG_ERR, "Error. Invalid parameter. Type value is out of range: %d.", type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Invalid parameter. Type value is out of range: %d.", type );
         return MCFE_ERR_INV_PARM;
     }
 
     if ( slot_id >= MODULE_MCFE_SLOT_ARRAY_SIZE ) {
-        LOG( LOG_ERR, "Error. Invalid parameter. Slot id value is out of range: %u.", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Invalid parameter. Slot id value is out of range: %u.", slot_id );
         return MCFE_ERR_INV_PARM;
     }
 
     if ( hist_position_is_be != 0 && hist_position_is_be != 1 ) {
-        LOG( LOG_ERR, "Error. Invalid parameter. Histogram position value is out of range: %d.", hist_position_is_be );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Invalid parameter. Histogram position value is out of range: %d.", hist_position_is_be );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -70,12 +70,12 @@ int module_mcfe_usecase_deinit( module_mcfe_usecase_config_t *config )
 {
     // Check input parameters.
     if ( config == NULL ) {
-        LOG( LOG_ERR, "Error. Invalid parameter. Instance pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Invalid parameter. Instance pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
     if ( ( config->type <= MODULE_MCFE_USECASE_NONE ) || ( config->type > MODULE_MCFE_USECASE_MAX ) ) {
-        LOG( LOG_ERR, "Error. Invalid parameter. Type value is out of range: %d.", config->type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error. Invalid parameter. Type value is out of range: %d.", config->type );
         return MCFE_ERR_INV_PARM;
     }
 

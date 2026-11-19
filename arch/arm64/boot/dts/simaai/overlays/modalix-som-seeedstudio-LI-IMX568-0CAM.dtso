@@ -1,0 +1,140 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ *
+ * li-imx568 (direct Sony imx568, sony,imx568) on modalix seeedstudio SoM csi0,
+ * CSI-2 controller mode, i2c addr 0x3d, RAW12 1920x1080 first.
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+    li_imx568_avdd_2: csi0_fixedregulator@0 {
+        compatible = "regulator-fixed";
+        regulator-name = "li_imx568_avdd_2";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+
+    li_imx568_dvdd_2: csi0_fixedregulator@1 {
+        compatible = "regulator-fixed";
+        regulator-name = "li_imx568_dvdd_2";
+        regulator-min-microvolt = <1100000>;
+        regulator-max-microvolt = <1100000>;
+        regulator-always-on;
+    };
+
+    li_imx568_dovdd_2: csi0_fixedregulator@2 {
+        compatible = "regulator-fixed";
+        regulator-name = "li_imx568_dovdd_2";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+
+    li_imx568_clk_2: csi0_camera-clk {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+
+    i2cmux0: i2cmux@0 {
+        compatible = "i2c-mux-gpio";
+        i2c-parent = <&i2c52>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+        /* Set port6 gpio6 to GPIO_ACTIVE_LOW mode */
+        mux-gpios = <&port6 6 0>;
+
+        i2cmux0p0: i2c@0 {
+            reg = <0>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+    };
+};
+
+&port5 {
+        cam-hog0 {
+                gpio-hog;
+                /* Set port5 gpio6 to GPIO_ACTIVE_HIGH mode */
+                gpios = <6 0>;
+                output-high;
+                line-name = "cam0_powdn";
+        };
+};
+
+&i2c52 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+};
+
+/* csi0 controller mode; bt-* porches are a 1080p starting point, tune per board. */
+&csi0 {
+    status = "okay";
+    simaai,bt-pixelclock = /bits/ 64 <500000000>;
+    simaai,bt-hsync = <2>;
+    simaai,bt-hbackporch = <100>;
+    simaai,bt-hfrontporch = <1548>;
+    simaai,bt-vsync = <1>;
+    simaai,bt-vbackporch = <68>;
+    simaai,bt-vfrontporch = <1>;
+    simaai,ipi-controller-mode = <1>;
+    simaai,ipi-emb-data-enable = <0>;
+};
+
+&axi_vdma0 {
+    status = "okay";
+};
+
+&mipi_dphy_rx0 {
+    status = "okay";
+};
+
+&v4l2video0 {
+    status = "okay";
+};
+
+&v4l2vdma0 {
+    status = "okay";
+};
+
+&csi00in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <594000000>;
+    remote-endpoint = <&cam00out>;
+    clock-continuous;
+};
+
+&i2cmux0p0 {
+        li_imx568_p0: imx568@3d {
+                compatible = "sony,imx568";
+                /* sensor stream-on takes ~600 ms; do not free-run the IPI before it */
+                simaai,ipi-enable-delay-ms = <800>;
+                reg = <0x3d>;
+
+                clocks = <&li_imx568_clk_2>;
+                clock-names = "inck";
+
+                avdd-supply = <&li_imx568_avdd_2>;
+                dvdd-supply = <&li_imx568_dvdd_2>;
+                dovdd-supply = <&li_imx568_dovdd_2>;
+
+                port {
+                        cam00out: endpoint {
+                                clock-lanes = <0>;
+                                data-lanes = <1 2>;
+                                link-frequencies = /bits/ 64 <594000000>;
+                                remote-endpoint = <&csi00in>;
+                                clock-continuous;
+                        };
+                };
+        };
+};

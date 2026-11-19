@@ -17,12 +17,19 @@
 *
 */
 
+#include <linux/build_bug.h>
 #include "system_assert.h"
 #include "system_stdlib.h"
 #include "system_timer.h"
 #include "acamera_command_api.h"
 #include "acamera_isp_ctx.h"
 #include "acamera_logger.h"
+
+/* MODALIX_ISP_CALIB_CMOS_CONTROL is declared as 20 words; keep the struct
+ * the getter asks for in step with it. */
+static_assert( sizeof( cmos_control_param_t ) == 20 * sizeof( uint32_t ),
+               "cmos_control_param_t no longer matches its calibration slot" );
+
 #include "acamera_math.h"
 #include "cmos_fsm.h"
 
@@ -120,17 +127,28 @@ void cmos_update_exposure_partitioning_lut( cmos_fsm_ptr_t p_fsm )
     int i;
     int32_t param[2] = {0, 0}; // In log2
 
+    const uint32_t exp_partition_rows = calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION );
+    const exposure_partition_t *exp_partition = NULL;
+
     if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION ) &&
-         ( calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION ) <= EXP_LUT_TABLE_SIZE ) ) {
-        p_fsm->exp_partition_tbl = (const exposure_partition_t *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION );
-        p_fsm->exp_lut_valid_entries = calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION );
+         ( exp_partition_rows <= EXP_LUT_TABLE_SIZE ) ) {
+        /* the table is indexed by row, so the extent that matters is one
+         * exposure_partition_t per row, not the declared element count */
+        exp_partition = (const exposure_partition_t *)calib_mgr_lut_get_sized(
+            ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_EXP_PARTITION,
+            exp_partition_rows * sizeof( exposure_partition_t ) );
+    }
+
+    if ( exp_partition != NULL ) {
+        p_fsm->exp_partition_tbl = exp_partition;
+        p_fsm->exp_lut_valid_entries = exp_partition_rows;
     } else {
-        LOG( LOG_WARNING, "Default table is set! NULL pointer is passed or table is too big!" );
+        LOG_CAT( ALOG_CAT_SENSOR, LOG_WARNING, "Default table is set! NULL pointer is passed or table is too big!" );
 
         p_fsm->exp_partition_tbl = default_exposure_partitions_balanced;
         p_fsm->exp_lut_valid_entries = EXPOSURE_PARTIONS_COUNT;
         if ( EXP_LUT_TABLE_SIZE < EXPOSURE_PARTIONS_COUNT ) {
-            LOG( LOG_WARNING, "Default cmos exposure partition table is too big! Part of it will be used!" );
+            LOG_CAT( ALOG_CAT_SENSOR, LOG_WARNING, "Default cmos exposure partition table is too big! Part of it will be used!" );
             p_fsm->exp_lut_valid_entries = EXP_LUT_TABLE_SIZE;
         }
     }
@@ -203,7 +221,7 @@ uint16_t cmos_get_fps( cmos_fsm_ptr_t p_fsm )
         uint64_t _tps = ( tps << ( 8 + 4 ) );
         fps = (uint16_t)div64_u64( _tps, p_fsm->fps_cnt.avg_frame_ticks ); // Division by zero is checked.
     } else {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_SENSOR, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
         fps = 15 << 8;
     }
     return fps;
@@ -211,7 +229,7 @@ uint16_t cmos_get_fps( cmos_fsm_ptr_t p_fsm )
 
 void cmos_init( cmos_fsm_ptr_t p_fsm )
 {
-    LOG( LOG_INFO, "cmos INIT E" );
+    LOG_CAT( ALOG_CAT_SENSOR, LOG_INFO, "cmos INIT E" );
 
     p_fsm->cmos_frame_start_irq = ACAMERA_IRQ_FE_FRAME_START;
     p_fsm->repeat_irq_mask = BIT( p_fsm->cmos_frame_start_irq ) | BIT( ACAMERA_IRQ_BE_FRAME_END );
@@ -226,14 +244,14 @@ void cmos_init( cmos_fsm_ptr_t p_fsm )
 #endif
 
     _init_fps_cnt( &p_fsm->fps_cnt );
-    LOG( LOG_INFO, "cmos INIT X" );
+    LOG_CAT( ALOG_CAT_SENSOR, LOG_INFO, "cmos INIT X" );
 }
 
 void cmos_config( cmos_fsm_ptr_t p_fsm )
 {
-    LOG( LOG_INFO, "cmos CFG E" );
+    LOG_CAT( ALOG_CAT_SENSOR, LOG_INFO, "cmos CFG E" );
     cmos_update_exposure_partitioning_lut( p_fsm );
-    LOG( LOG_INFO, "cmos CFG X" );
+    LOG_CAT( ALOG_CAT_SENSOR, LOG_INFO, "cmos CFG X" );
 }
 
 void cmos_reload_calibration( cmos_fsm_ptr_t p_fsm )
@@ -242,7 +260,16 @@ void cmos_reload_calibration( cmos_fsm_ptr_t p_fsm )
 
     // Configure context parameters with default values (MODALIX_ISP_CALIB_CMOS_CONTROL)
     {
-        cmos_control_param_t *param = (cmos_control_param_t *)calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_CONTROL );
+        /* Read as a struct, so ask for the struct's worth of bytes rather
+         * than trusting the descriptor to be as long as the cast assumes. */
+        const cmos_control_param_t *param = (const cmos_control_param_t *)calib_mgr_lut_get_sized(
+            ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CMOS_CONTROL,
+            sizeof( cmos_control_param_t ) );
+
+        if ( param == NULL ) {
+            LOG_CAT( ALOG_CAT_SENSOR, LOG_ERR, "cmos control calibration is unusable; leaving the defaults" );
+            return;
+        }
         set_context_param( p_ictx, SYSTEM_ANTIFLICKER_ENABLE_PARAM, param->antiflicker_enable );
         set_context_param( p_ictx, SYSTEM_ANTI_FLICKER_FREQUENCY_PARAM, param->anti_flicker_frequency );
         set_context_param( p_ictx, SYSTEM_MANUAL_INTEGRATION_TIME_PARAM, param->manual_integration_time );
@@ -280,7 +307,7 @@ void cmos_reload_calibration( cmos_fsm_ptr_t p_fsm )
         acamera_isp_frame_stitch_mcoff_vs_max_write( p_ictx->settings.isp_base, *config++ );
 #endif
     } else {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_WDR_STITCH_CONFIG is missing, module will not be configured correctly!" );
+        LOG_CAT( ALOG_CAT_SENSOR, LOG_ERR, "MODALIX_ISP_CALIB_WDR_STITCH_CONFIG is missing, module will not be configured correctly!" );
     }
 }
 
@@ -1045,7 +1072,7 @@ static void cmos_inttime_update( cmos_fsm_ptr_t p_fsm )
     acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
 
     if ( p_fsm->exp_partition_tbl == NULL ) {
-        LOG( LOG_INFO, "Initialize exposure partition and exposure lut tables!" );
+        LOG_CAT( ALOG_CAT_SENSOR, LOG_INFO, "Initialize exposure partition and exposure lut tables!" );
         cmos_update_exposure_partitioning_lut( p_fsm );
     }
 
@@ -1108,7 +1135,7 @@ static void cmos_inttime_update( cmos_fsm_ptr_t p_fsm )
                 uint32_t line_per_half_period = ( sensor_info.lines_per_second << 8 ) / ( p_fsm->flicker_freq * 2 ); // Division by zero is checked.
                 if ( line_per_half_period != 0 ) {
                     int32_t half_period_log2 = log2_fixed_to_fixed( line_per_half_period, 0, LOG2_GAIN_SHIFT );
-                    LOG( LOG_LEVEL_DEBUG, "ANTI-FLICKER: calculated integration time:%d , anti-flicker integration time:%d , exposure target:%d", int_time, half_period_log2, exp_target );
+                    LOG_CAT( ALOG_CAT_SENSOR, LOG_LEVEL_DEBUG, "ANTI-FLICKER: calculated integration time:%d , anti-flicker integration time:%d , exposure target:%d", int_time, half_period_log2, exp_target );
                     if ( int_time <= half_period_log2 ) {
                         // If calculated integration time (IT) < antiflicker required IT,
                         // increase IT but not more than exposure target
@@ -1530,7 +1557,7 @@ void cmos_set_exposure_target( cmos_fsm_ptr_t p_fsm, int32_t exposure_log2, uint
 
             override_context_param( p_ictx, STATUS_INFO_EXPOSURE_LOG2_ID_PARAM, p_fsm->exposure_log2 );
 
-            LOG( LOG_DEBUG, "Set exposure %d and exposure ratio %d", (unsigned int)exposure_log2, (unsigned int)exposure_ratio );
+            LOG_CAT( ALOG_CAT_SENSOR, LOG_DEBUG, "Set exposure %d and exposure ratio %d", (unsigned int)exposure_log2, (unsigned int)exposure_ratio );
         }
     }
 #if defined( ISP_HAS_SENSOR_FSM )

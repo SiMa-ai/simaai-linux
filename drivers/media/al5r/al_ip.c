@@ -20,54 +20,7 @@
 #include <linux/wait.h>
 
 #include "al_ip.h"
-
-int al5r_codec_bind_channel(struct al5r_codec_chan *chan,
-			    struct inode *inode)
-{
-	struct al5r_codec_desc *codec;
-	unsigned long flags;
-	struct list_head *pos, *n;
-	struct r_irq *tmp;
-	int ret = 0;
-
-	codec = container_of(inode->i_cdev, struct al5r_codec_desc, cdev);
-
-	spin_lock_irqsave(&codec->i_lock, flags);
-
-	chan->codec = codec;
-	/* No mcu, there is a one for one mapping */
-	if (codec->chan != NULL) {
-		ret = -ENODEV;
-		goto unlock;
-	}
-
-	list_for_each_safe(pos, n, &codec->irq_masks) {
-		tmp = list_entry(pos, struct r_irq, list);
-		al5_err("Previous channel lost irq:%x\n", tmp->bitfield);
-		list_del(pos);
-		kmem_cache_free(codec->cache, tmp);
-	}
-
-	codec->chan = chan;
-
-unlock:
-	spin_unlock_irqrestore(&codec->i_lock, flags);
-	return ret;
-
-}
-
-void al5r_codec_unbind_channel(struct al5r_codec_chan *chan)
-{
-	struct al5r_codec_desc *codec;
-	unsigned long flags;
-
-	codec = chan->codec;
-	spin_lock_irqsave(&codec->i_lock, flags);
-
-	codec->chan = NULL;
-
-	spin_unlock_irqrestore(&codec->i_lock, flags);
-}
+#include "al_cmd.h"
 
 int al5r_codec_read_register(struct al5r_codec_chan *chan,
 			     struct al5_reg *reg)
@@ -103,9 +56,7 @@ irqreturn_t al5r_hardirq_handler(int irq, void *data)
 	u32 mask;
 	unsigned long flags;
 	struct r_irq *i_callback;
-	int callback_nb;
 	int i = 0;
-	int al5_interrupt_nb = 27;
 
 	mask = ioread32(codec->regs + AL5_INTERRUPT_MASK(codec));
 	unmasked_irq_bitfield = ioread32(codec->regs + AL5_INTERRUPT(codec));
@@ -119,25 +70,37 @@ irqreturn_t al5r_hardirq_handler(int irq, void *data)
 
 	al5_dbg("got irq. bitfield:%x, mask:%x", unmasked_irq_bitfield, mask);
 
-	for (i = 0; i < al5_interrupt_nb; ++i) {
-		callback_nb = 1U << i;
-		if (irq_bitfield & callback_nb) {
-			i_callback = kmem_cache_alloc(codec->cache, GFP_ATOMIC);
-			if (!i_callback) {
-				al5_dbg("ENOMEM: Missed interrupt\n");
-				return IRQ_NONE;
-			}
-			i_callback->bitfield = i;
-			spin_lock_irqsave(&codec->i_lock, flags);
-			list_add_tail(&i_callback->list, &codec->irq_masks);
-			spin_unlock_irqrestore(&codec->i_lock, flags);
-		}
-	}
+	for (i = 0; i < 32; ++i) {
+		struct al5r_codec_chan *target;
 
-	spin_lock_irqsave(&codec->i_lock, flags);
-	if (codec->chan)
-		wake_up_interruptible(&codec->chan->irq_queue);
-	spin_unlock_irqrestore(&codec->i_lock, flags);
+		if (!(irq_bitfield & (1U << i)))
+			continue;
+
+		/* completion of a command submitted through the arbiter */
+		if (al5_cmd_engine_irq(codec, i))
+			continue;
+
+		/* raw event for the legacy owner or the MVD holder */
+		spin_lock_irqsave(&codec->i_lock, flags);
+		if (((1U << i) & AL5_MVD_IRQ_MASK) && codec->mvd_chan)
+			target = codec->mvd_chan;
+		else
+			target = codec->legacy_chan;
+		if (!target) {
+			spin_unlock_irqrestore(&codec->i_lock, flags);
+			continue;
+		}
+		i_callback = kmem_cache_alloc(codec->cache, GFP_ATOMIC);
+		if (!i_callback) {
+			spin_unlock_irqrestore(&codec->i_lock, flags);
+			al5_dbg("ENOMEM: Missed interrupt\n");
+			return IRQ_NONE;
+		}
+		i_callback->bitfield = i;
+		list_add_tail(&i_callback->list, &target->irq_masks);
+		wake_up_interruptible(&target->irq_queue);
+		spin_unlock_irqrestore(&codec->i_lock, flags);
+	}
 
 	return IRQ_HANDLED;
 }

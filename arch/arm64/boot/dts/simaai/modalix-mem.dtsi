@@ -16,25 +16,22 @@
 			reg = <0x00000010 0x00000000 0x00000000 0x6FC00000>;
 		};
 
-		ev_vdev0vring0: vdev0vring0@EFFF4000 {
-			reg = <0x0 0xEFFF4000 0x0 0x2000>;
+		ev_vdev0vring0: vdev0vring0@106fff4000 {
+			reg = <0x10 0x6fff4000 0x0 0x2000>;
 			no-map;
 		};
-
-		ev_vdev0vring1: vdev0vring1@EFFF6000 {
-			reg = <0x0 0xEFFF6000 0x0 0x2000>;
+		ev_vdev0vring1: vdev0vring1@106fff6000 {
+			reg = <0x10 0x6fff6000 0x0 0x2000>;
 			no-map;
 		};
-
-		ev_vdev0buffer: vdev0buffer@106FFF8000 {
+		ev_vdev0buffer: vdev0buffer@106fff8000 {
 			compatible = "shared-dma-pool";
-			reg = <0x00000010 0x6FFF8000 0x00000000 0x00008000>;
+			reg = <0x10 0x6fff8000 0x0 0x8000>;
 			no-map;
 			alignment = <0x1000>;
 		};
-
-		evmem_rsvd: evmem@0xF0000000 {
-			reg = <0x0 0xF0000000 0x0 0x4000000>;
+		evmem_rsvd: evmem@1070000000 {
+			reg = <0x10 0x70000000 0x0 0x4000000>;
 			no-map;
 		};
 
@@ -51,9 +48,31 @@
 		};
 
 		dms0_reserved: dms@0x1400000000 {
-			compatible = "shared-dma-pool";
+			/*
+			 * The carveout dma-heap matches "carved-out" from its
+			 * own module_init, gen_pool_add()s this node's ENTIRE
+			 * range and exports it as /dev/dma_heap/simaai,dms
+			 * (the name comes from the label below, not the node
+			 * name). It is the SOLE allocator for this region:
+			 * mla.ko resolves the heap via the memory-region
+			 * phandle at probe and takes every kernel-side
+			 * allocation (BUF_ALLOC, section loads) from the same
+			 * gen_pool userspace allocates from, so the two share
+			 * one set of bookkeeping and cannot hand out the same
+			 * pages.
+			 *
+			 * Deliberately NOT a "shared-dma-pool": that compatible
+			 * made kernel/dma/coherent.c stand up a second,
+			 * independent allocator over the same range for the
+			 * legacy simaai,dms0-manager node -- a bitmap sharing no
+			 * bookkeeping with the gen_pool, plus an ioremap_wc()
+			 * mapping of the WHOLE region that aliased the heap's
+			 * cacheable per-buffer mappings with mismatched memory
+			 * attributes. Both are gone with dms0-manager.
+			 */
+			compatible = "carved-out";
+			label = "simaai,dms";
 			no-map;
-			simaai,skip-memset-in-alloc;
 			reg = <0x00000014 0x00000000 0x0000000A 0x00000000>;
 		};
 
@@ -86,13 +105,6 @@
 		compatible = "simaai,memory-manager";
 		memory-region = <&ocm_reserved>;
 		simaai,target = <1>;
-		status = "okay";
-	};
-
-	simaai,dms0-manager {
-		compatible = "simaai,memory-manager";
-		memory-region = <&dms0_reserved>;
-		simaai,target = <2>;
 		status = "okay";
 	};
 

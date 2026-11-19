@@ -8432,6 +8432,13 @@ formats.
       - 0x5001
       - Interleaved raw UYVY and JPEG image format with embedded meta-data
 	used by Samsung S3C73MX camera sensors.
+    * .. _MEDIA-BUS-FMT-METOAK-RGBD-3X8:
+
+      - MEDIA_BUS_FMT_METOAK_RGBD_3X8
+      - 0x5002
+      - Metoak S315 stereo payload: 12-bit disparity packed with a reference
+	YUV image, three 8-bit samples per pixel, transported as RAW8; see
+	:ref:`V4L2-PIX-FMT-METOAK-RGBD`.
 
 .. _v4l2-mbus-metadata-fmts:
 

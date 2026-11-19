@@ -70,7 +70,7 @@
 #define XC9080_SEL_CMOSB     0x02 /* Select CMOS-B */
 #define XC9080_SEL_BOTH      0x03 /* Select both CMOS */
 
-/* SC132GS FPS lookup table (supported FPS: 10, 12, 15, 20, 25) */
+/* SC132GS FPS lookup table (supported FPS: 10, 12, 15, 18, 20, 25) */
 typedef struct {
 	int fps;
 	/* SIMOR-side config */
@@ -81,13 +81,19 @@ typedef struct {
 	uint8_t cmos_blank[2]; // 0x3228 ~ 0x3229: Blank Rows
 } FpsConfig;
 
+/*
+ * Timing constants: FPSY = 42165/fps (simor), VTS = 45000/fps (xc9080),
+ * BLK = VTS - 6, HTS fixed. The xc9080 is the module timing master: its VTS
+ * paces both channels; the simor FPSY only has to stay consistent with it.
+ */
 static const FpsConfig fps_table[] = {
 	/* FPS  FPSY_H FPSY_L  HTS_H HTS_L VTS_H VTS_L  BLK_H BLK_L */
-	{ 10, 0x10, 0x7A, { 0x05, 0x78, 0x11, 0x94 }, { 0x11, 0x8E } },
-	{  5, 0x0D, 0xBA, { 0x05, 0x78, 0x0E, 0xA6 }, { 0x0E, 0xA0 } },
-	{ 15, 0x0A, 0xFB, { 0x05, 0x78, 0x0B, 0xB8 }, { 0x0B, 0xB2 } },
-	{ 20, 0x08, 0x3C, { 0x05, 0x78, 0x08, 0xCA }, { 0x08, 0xC4 } },
-	{ 25, 0x06, 0x96, { 0x05, 0x78, 0x07, 0x08 }, { 0x07, 0x02 } },
+	{ 10, 0x10, 0x7A, { 0x05, 0x78, 0x11, 0x94 }, { 0x11, 0x8E } }, /* FPSY 4218 VTS 4500 */
+	{ 12, 0x0D, 0xBA, { 0x05, 0x78, 0x0E, 0xA6 }, { 0x0E, 0xA0 } }, /* FPSY 3514 VTS 3750 */
+	{ 15, 0x0A, 0xFB, { 0x05, 0x78, 0x0B, 0xB8 }, { 0x0B, 0xB2 } }, /* FPSY 2811 VTS 3000 */
+	{ 18, 0x09, 0x27, { 0x05, 0x78, 0x09, 0xC4 }, { 0x09, 0xBE } }, /* FPSY 2343 VTS 2500 */
+	{ 20, 0x08, 0x3C, { 0x05, 0x78, 0x08, 0xCA }, { 0x08, 0xC4 } }, /* FPSY 2108 VTS 2250 */
+	{ 25, 0x06, 0x96, { 0x05, 0x78, 0x07, 0x08 }, { 0x07, 0x02 } }, /* FPSY 1687 VTS 1800 */
 };
 
 struct xc9080_sensor {
@@ -111,8 +117,11 @@ struct xc9080_sensor {
 
 static const struct v4l2_fract s315_supported_intervals[] = {
 	{ .numerator = 1, .denominator = 10 }, /* 10 fps */
-	{ .numerator = 1, .denominator = 5  }, /* 12 fps */
+	/* was 1/5: the "5 fps" table row's registers solved to 12 fps at both
+	 * FPSY and VTS - the label was wrong, not the timing */
+	{ .numerator = 1, .denominator = 12 }, /* 12 fps */
 	{ .numerator = 1, .denominator = 15 }, /* 15 fps */
+	{ .numerator = 1, .denominator = 18 }, /* 18 fps */
 	{ .numerator = 1, .denominator = 20 }, /*  20 fps */
 	{ .numerator = 1, .denominator = 25 }, /*  25 fps */
 };
@@ -339,7 +348,7 @@ static int xc9080_stop_streaming(struct xc9080_sensor *xc9080)
 {
 	int ret;
 
-	dev_info(&xc9080->client->dev, "xc: stop streaming\n");
+	dev_dbg(&xc9080->client->dev, "xc: stop streaming\n");
 
 	ret = xc9080_write_array(xc9080, xc9080_stop_stream_data,
 				 ARRAY_SIZE(xc9080_stop_stream_data));

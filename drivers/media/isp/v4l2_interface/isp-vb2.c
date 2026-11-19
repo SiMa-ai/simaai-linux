@@ -50,9 +50,9 @@ static int isp_vb2_queue_setup( struct vb2_queue *vq, const struct v4l2_format *
     isp_v4l2_stream_t *pstream = vb2_get_drv_priv( vq );
     struct v4l2_format vfmt;
 
-    LOG( LOG_DEBUG, "Setting up vb2 queue for stream type: %d, nplanes: %u, nbuffers: %u, fcall#: %lu.",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "Setting up vb2 queue for stream type: %d, nplanes: %u, nbuffers: %u, fcall#: %lu.",
          pstream->stream_type, *nplanes, *nbuffers, cnt++ );
-    LOG( LOG_DEBUG, "VB2 queue details, vq ptr: %p, vq->max_num_buffers: %u, vq->type: %u",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "VB2 queue details, vq ptr: %p, vq->max_num_buffers: %u, vq->type: %u",
          vq, vq->max_num_buffers, vq->type );
 
     // Get stream direction based on the queue type
@@ -65,33 +65,33 @@ static int isp_vb2_queue_setup( struct vb2_queue *vq, const struct v4l2_format *
 
     // Get current format based on the stream type and direction
     if ( isp_v4l2_stream_get_format( pstream, stream_direction, &vfmt ) < 0 ) {
-        LOG( LOG_ERR, "Error. Failed to get stream format" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. Failed to get stream format" );
         return -EBUSY;
     }
 
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION( 4, 8, 0 ) )
     if ( fmt )
-        LOG( LOG_DEBUG, "Requested format, fmt: %p, width: %u, height: %u, sizeimage: %u.",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "Requested format, fmt: %p, width: %u, height: %u, sizeimage: %u.",
              fmt, fmt->fmt.pix.width, fmt->fmt.pix.height, fmt->fmt.pix.sizeimage );
 #endif
 
     if ( ( vfmt.type == V4L2_BUF_TYPE_VIDEO_CAPTURE ) || ( vfmt.type == V4L2_BUF_TYPE_VIDEO_OUTPUT ) ) {
         *nplanes = 1;
         sizes[0] = vfmt.fmt.pix.sizeimage;
-        LOG( LOG_DEBUG, "Effective nplanes: %u, size: %u", *nplanes, sizes[0] );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "Effective nplanes: %u, size: %u", *nplanes, sizes[0] );
     } else if ( V4L2_TYPE_IS_MULTIPLANAR( vfmt.type ) ) {
         *nplanes = vfmt.fmt.pix_mp.num_planes;
-        LOG( LOG_DEBUG, "Effective nplanes: %u", *nplanes );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "Effective nplanes: %u", *nplanes );
         int i;
         for ( i = 0; i < vfmt.fmt.pix_mp.num_planes; i++ ) {
             sizes[i] = vfmt.fmt.pix_mp.plane_fmt[i].sizeimage;
-            LOG( LOG_INFO, "  |--Plane %d. Effective size: %u", i, sizes[i] );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "  |--Plane %d. Effective size: %u", i, sizes[i] );
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION( 4, 8, 0 ) )
             alloc_ctxs[i] = 0;
 #endif
         }
     } else {
-        LOG( LOG_ERR, "Error. Wrong v4l2 buffer type supplied: %u", vfmt.type );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. Wrong v4l2 buffer type supplied: %u", vfmt.type );
         return -EINVAL;
     }
 
@@ -120,7 +120,7 @@ static int isp_vb2_buf_prepare( struct vb2_buffer *vb )
 
     // Get current format based on the stream type and direction
     if ( isp_v4l2_stream_get_format( pstream, stream_direction, &vfmt ) < 0 ) {
-        LOG( LOG_ERR, "Error. Failed to get stream format" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. Failed to get stream format" );
         return -EBUSY;
     }
 
@@ -128,7 +128,7 @@ static int isp_vb2_buf_prepare( struct vb2_buffer *vb )
         size = vfmt.fmt.pix.sizeimage;
 
         if ( vb2_plane_size( vb, 0 ) < size ) {
-            LOG( LOG_ERR, "Error. Supplied buffer size (%lu) is too small, required at least: %lu", vb2_plane_size( vb, 0 ), size );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. Supplied buffer size (%lu) is too small, required at least: %lu", vb2_plane_size( vb, 0 ), size );
             return -EINVAL;
         }
 
@@ -140,7 +140,7 @@ static int isp_vb2_buf_prepare( struct vb2_buffer *vb )
         for ( i = 0; i < vfmt.fmt.pix_mp.num_planes; i++ ) {
             size = vfmt.fmt.pix_mp.plane_fmt[i].sizeimage;
             if ( vb2_plane_size( vb, i ) < size ) {
-                LOG( LOG_ERR, "  |--Plane %d. Supplied buffer size (%lu) is too small, required at least: %lu",
+                LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "  |--Plane %d. Supplied buffer size (%lu) is too small, required at least: %lu",
                      i, vb2_plane_size( vb, i ), size );
                 return -EINVAL;
             }
@@ -195,7 +195,7 @@ int isp_vb2_cap_queue_init( struct vb2_queue *q, isp_v4l2_stream_t *pstream )
 
     q->type = pstream->cur_v4l2_fmt[V4L2_STREAM_DIRECTION_CAP].type;
 
-    LOG( LOG_INFO, "isp_vb2_cap_queue_init for stream type: %d, queue type: %u.", pstream->stream_type, q->type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "isp_vb2_cap_queue_init for stream type: %d, queue type: %u.", pstream->stream_type, q->type );
 
     q->io_modes = VB2_MMAP | VB2_READ | VB2_USERPTR;
     q->drv_priv = pstream;
@@ -230,7 +230,7 @@ int isp_vb2_m2m_queue_init( void *priv, struct vb2_queue *out_vq, struct vb2_que
     // ISP input stream, data to process
     out_vq->type = pstream->cur_v4l2_fmt[V4L2_STREAM_DIRECTION_OUT].type;
 
-    LOG( LOG_INFO, "isp_vb2_m2m_queue_init for stream type: %d, direction: %d, queue type: %u.",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "isp_vb2_m2m_queue_init for stream type: %d, direction: %d, queue type: %u.",
          pstream->stream_type, V4L2_STREAM_DIRECTION_OUT, out_vq->type );
 
     out_vq->io_modes = VB2_MMAP | VB2_READ | VB2_USERPTR | VB2_DMABUF;
@@ -255,7 +255,7 @@ int isp_vb2_m2m_queue_init( void *priv, struct vb2_queue *out_vq, struct vb2_que
     // ISP output stream, processed data
     cap_vq->type = pstream->cur_v4l2_fmt[V4L2_STREAM_DIRECTION_CAP].type;
 
-    LOG( LOG_INFO, "isp_vb2_m2m_queue_init for stream type: %d, direction: %d, queue type: %u.",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "isp_vb2_m2m_queue_init for stream type: %d, direction: %d, queue type: %u.",
          pstream->stream_type, V4L2_STREAM_DIRECTION_CAP, cap_vq->type );
 
     cap_vq->io_modes = VB2_MMAP | VB2_READ | VB2_USERPTR | VB2_DMABUF;

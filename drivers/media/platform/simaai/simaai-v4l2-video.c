@@ -4,6 +4,7 @@
  */
 
 #include <linux/clk.h>
+#include <linux/bitops.h>
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -22,12 +23,14 @@
 #include <media/v4l2-async.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-mc.h>
+#include <linux/media/simaai/metoak_rgbd.h>
+
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-dma-contig.h>
 
 #include "simaai-v4l2-vdma.h"
 
-#define MIN_CAPTURE_BUFFERS		8
+#define N_BUFFERS			8
 #define MAX_CAP_DEVICES			4
 
 #define MAX_WIDTH			4096
@@ -47,6 +50,7 @@ struct v4l2vid_dev {
 	const struct plat_csi_fmt	*fmt;
 	struct vdma_channel		*vdma_channel;
 	bool				enabled;
+	bool				pipe_started;
 	const char			*label;
 	struct mutex			lock;
 };
@@ -69,6 +73,10 @@ struct plat_csi_fmt {
 	u32				mbus_code;
 	u32				fourcc;
 	u8				depth;
+	/*
+	 * Fixed node geometry, 0 when negotiable: a generic range lets S_FMT
+	 * accept a size the source cannot emit and STREAMON then rejects.
+	 */
 };
 
 static const struct plat_csi_fmt v4l2vid_formats[] = {
@@ -98,6 +106,18 @@ static const struct plat_csi_fmt v4l2vid_formats[] = {
                 .fourcc = V4L2_PIX_FMT_RGB24,
                 .depth = 24,
                 .mbus_code = MEDIA_BUS_FMT_RGB888_1X24,
+        },
+
+        /*
+         * Metoak S315 SIMOR: three bytes per pixel, disparity + reference YUV;
+         * real 640x360 geometry, _3X8 tells the receiver the sample count.
+         * Never feed it to the ISP. See <linux/media/simaai/metoak_rgbd.h>.
+         */
+        {
+                .name = "METOAK_RGBD",
+                .fourcc = V4L2_PIX_FMT_METOAK_RGBD,
+                .depth = 8 * METOAK_RGBD_BPP,
+                .mbus_code = MEDIA_BUS_FMT_METOAK_RGBD_3X8,
         },
 
         /* 8-bit RAW / Greyscale */
@@ -275,19 +295,378 @@ vidioc_querycap(struct file *file, void *priv, struct v4l2_capability *cap)
 	return 0;
 }
 
+
+/* vdev -> vdma -> receiver -> sensor is three hops; allow a little slack. */
+#define V4L2VID_SOURCE_WALK_MAX		8
+
+/* a sensor's own format list; not tied to the graph-walk depth limit */
+#define V4L2VID_SOURCE_CODE_ENUM_MAX	64
+
+/*
+ * Walk enabled links and active routes from the capture node to the
+ * device that originates the data. The receiver enumerates every code
+ * it can carry, so stopping there would say yes to anything; routes are
+ * followed so a VC1..3 node resolves its own chain. NULL if unresolved.
+ */
+
+/*
+ * v4l2_subdev_routing_find_opposite_end() over active routes only: an
+ * inactive route is not the live data path.
+ */
+static int v4l2vid_find_opposite_active_route(const struct v4l2_subdev_krouting *routing,
+					      u32 pad, u32 stream,
+					      u32 *other_pad, u32 *other_stream)
+{
+	struct v4l2_subdev_route *route;
+
+	for_each_active_route(routing, route) {
+		if (route->source_pad == pad && route->source_stream == stream) {
+			if (other_pad)
+				*other_pad = route->sink_pad;
+			if (other_stream)
+				*other_stream = route->sink_stream;
+			return 0;
+		}
+		if (route->sink_pad == pad && route->sink_stream == stream) {
+			if (other_pad)
+				*other_pad = route->source_pad;
+			if (other_stream)
+				*other_stream = route->source_stream;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+static struct v4l2_subdev *v4l2vid_resolve_source(struct v4l2vid_dev *dev,
+						  u32 *pad_out, u32 *stream_out)
+{
+	struct media_pad *pad = &dev->vdev.entity.pads[0];
+	u32 stream = 0;
+	unsigned int hop;
+
+	lockdep_assert_held(&dev->vdev.entity.graph_obj.mdev->graph_mutex);
+
+	if (dev->vdma_channel) {
+		u64 chan_mask = get_vdma_channel_mask(dev->vdma_channel);
+
+		if (chan_mask)
+			stream = __ffs(chan_mask);
+	}
+
+	for (hop = 0; hop < V4L2VID_SOURCE_WALK_MAX; hop++) {
+		struct v4l2_subdev_state *state;
+		struct media_pad *remote;
+		struct v4l2_subdev *sd;
+		u32 other_pad, other_stream;
+		bool has_routing;
+		int ret;
+
+		/*
+		 * No link: a bridge with no upstream is unresolved, not
+		 * the origin. Only a genuine terminal, accepted below, is
+		 * returned.
+		 */
+		remote = media_pad_remote_pad_first(pad);
+		if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
+			return NULL;
+
+		sd = media_entity_to_v4l2_subdev(remote->entity);
+
+		/*
+		 * A sensor is always the origin: some single-pad sensors route their
+		 * pad to itself for s_stream_helper(), which would bounce the walk.
+		 */
+		if (remote->entity->function == MEDIA_ENT_F_CAM_SENSOR) {
+			if (pad_out)
+				*pad_out = remote->index;
+			if (stream_out)
+				*stream_out = stream;
+			return sd;
+		}
+
+		state = v4l2_subdev_lock_and_get_active_state(sd);
+		if (!state) {
+			/* No state support at all: a plain sensor, the origin. */
+			if (pad_out)
+				*pad_out = remote->index;
+			if (stream_out)
+				*stream_out = stream;
+			return sd;
+		}
+
+		has_routing = state->routing.num_routes != 0;
+		ret = v4l2vid_find_opposite_active_route(&state->routing,
+							 remote->index,
+							 stream, &other_pad,
+							 &other_stream);
+		v4l2_subdev_unlock_state(state);
+		if (ret) {
+			/* No routing at all: a plain sensor, the origin. */
+			if (!has_routing) {
+				if (pad_out)
+					*pad_out = remote->index;
+				if (stream_out)
+					*stream_out = stream;
+				return sd;
+			}
+			/* routing skips this pad and stream: a bridge */
+			return NULL;
+		}
+
+		if (other_pad >= sd->entity.num_pads)
+			return NULL;
+		pad = &sd->entity.pads[other_pad];
+		stream = other_stream;
+	}
+
+	return NULL;
+}
+
+/* hold the graph lock across the walk and the call into what it found */
+static struct media_device *v4l2vid_graph_lock(struct v4l2vid_dev *dev)
+{
+	struct media_device *mdev = dev->vdev.entity.graph_obj.mdev;
+
+	if (mdev)
+		mutex_lock(&mdev->graph_mutex);
+	return mdev;
+}
+
+static void v4l2vid_graph_unlock(struct media_device *mdev)
+{
+	if (mdev)
+		mutex_unlock(&mdev->graph_mutex);
+}
+
+/*
+ * ep_sd alone does not prove the chain up to the source exists (the
+ * notifier sets it before the links); the walk answers exactly that.
+ */
+static bool v4l2vid_source_ready_locked(struct v4l2vid_dev *dev)
+{
+	return v4l2vid_resolve_source(dev, NULL, NULL) != NULL;
+}
+
+/* Whether the resolved source can emit @code, per its own enum_mbus_code list. */
+static bool v4l2vid_source_emits_code_locked(struct v4l2vid_dev *dev,
+					     u32 code)
+{
+	u32 pad, stream;
+	struct v4l2_subdev *sd = v4l2vid_resolve_source(dev, &pad, &stream);
+	unsigned int hop;
+	int ret;
+
+	if (!sd)
+		return false;
+
+	for (hop = 0; hop < V4L2VID_SOURCE_CODE_ENUM_MAX; hop++) {
+		struct v4l2_subdev_mbus_code_enum mce = {
+			.which = V4L2_SUBDEV_FORMAT_ACTIVE,
+			.index = hop,
+			.pad = pad,
+			.stream = stream,
+		};
+
+		/*
+		 * Not a raw v4l2_subdev_call(): a stream-aware source's check_state()
+		 * wants a locked active state and would empty the enumeration.
+		 */
+		ret = v4l2_subdev_call_state_active(sd, pad, enum_mbus_code, &mce);
+		if (ret) {
+			/*
+			 * No enum_mbus_code at all (li-fpga) says nothing, so
+			 * keep the table; any other failure means the source
+			 * emits nothing we can name.
+			 */
+			if (!hop && ret == -ENOIOCTLCMD)
+				return true;
+			break;
+		}
+		if (mce.code == code)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Whether the bound source can originate the format. No ISP sits in
+ * this driver's path, so every table entry means its mbus_code.
+ */
+static bool v4l2vid_fmt_available_locked(struct v4l2vid_dev *dev,
+					 const struct plat_csi_fmt *p_fmt)
+{
+	return v4l2vid_source_emits_code_locked(dev, p_fmt->mbus_code);
+}
+
+/*
+ * The resolved source's active geometry for @code, for the TRY_FMT
+ * fallback: a fixed sensor has one legal size a generic clamp cannot know.
+ */
+static bool v4l2vid_source_active_geometry_locked(struct v4l2vid_dev *dev,
+						  u32 code,
+						  struct v4l2_mbus_framefmt *out)
+{
+	u32 pad, stream;
+	struct v4l2_subdev *sd = v4l2vid_resolve_source(dev, &pad, &stream);
+	struct v4l2_subdev_format fmt = {
+		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
+		.pad = pad,
+		.stream = stream,
+	};
+
+	if (!sd)
+		return false;
+
+	if (v4l2_subdev_call_state_active(sd, pad, get_fmt, &fmt))
+		return false;
+
+	if (fmt.format.code != code)
+		return false;
+
+	*out = fmt.format;
+	return true;
+}
+
+/*
+ * TRY-negotiate @width x @height at @code with the source: a fixed
+ * sensor clamps to its one mode, a negotiable one adjusts to nearest.
+ */
+static bool v4l2vid_source_try_geometry_locked(struct v4l2vid_dev *dev,
+					       u32 code,
+					       u32 width,
+					       u32 height,
+					       struct v4l2_mbus_framefmt *out)
+{
+	u32 pad, stream;
+	struct v4l2_subdev *sd = v4l2vid_resolve_source(dev, &pad, &stream);
+	struct v4l2_subdev_format fmt = {
+		.which = V4L2_SUBDEV_FORMAT_TRY,
+		.pad = pad,
+		.stream = stream,
+	};
+
+	if (!sd)
+		return false;
+
+	fmt.format.code = code;
+	fmt.format.width = width;
+	fmt.format.height = height;
+	fmt.format.field = V4L2_FIELD_NONE;
+
+	if (v4l2_subdev_call_state_try(sd, pad, set_fmt, &fmt))
+		return false;
+
+	if (fmt.format.code != code)
+		return false;
+
+	*out = fmt.format;
+	return true;
+}
+
+/*
+ * The source's own size bound for @code (min == max: fixed). Only a
+ * format whose size is part of its ABI (MORD) keeps table geometry.
+ */
+static bool v4l2vid_source_frame_size_locked(struct v4l2vid_dev *dev,
+					     u32 code,
+					     u32 index,
+					     struct v4l2_subdev_frame_size_enum *out)
+{
+	u32 pad, stream;
+	struct v4l2_subdev *sd = v4l2vid_resolve_source(dev, &pad, &stream);
+	struct v4l2_subdev_frame_size_enum fse = {
+		.index = index,
+		.pad = pad,
+		.code = code,
+		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
+		.stream = stream,
+	};
+
+	if (!sd)
+		return false;
+
+	if (v4l2_subdev_call_state_active(sd, pad, enum_frame_size, &fse))
+		return false;
+
+	*out = fse;
+	return true;
+}
+
+/*
+ * A format S_FMT can always fall back to: the configured one, else the
+ * first table entry the source offers, with the source's own geometry
+ * in @geom. @geom is left untouched only when neither is available.
+ */
+static const struct plat_csi_fmt *
+v4l2vid_fallback_fmt_locked(struct v4l2vid_dev *dev,
+			    struct v4l2_mbus_framefmt *geom)
+{
+	unsigned int i;
+
+	/*
+	 * The source can have changed since dev->fmt was negotiated: check the
+	 * code is still offered and re-negotiate the geometry.
+	 */
+	if (dev->fmt && v4l2vid_fmt_available_locked(dev, dev->fmt) &&
+	    v4l2vid_source_try_geometry_locked(dev, dev->fmt->mbus_code,
+					       dev->format.fmt.pix.width,
+					       dev->format.fmt.pix.height, geom))
+		return dev->fmt;
+
+	for (i = 0; i < ARRAY_SIZE(v4l2vid_formats); i++) {
+		const struct plat_csi_fmt *cand = &v4l2vid_formats[i];
+
+		if (v4l2vid_source_active_geometry_locked(dev, cand->mbus_code, geom))
+			return cand;
+	}
+
+	return NULL;
+}
+
+static int v4l2vid_enum_fmt_locked(struct v4l2vid_dev *dev,
+				   struct v4l2_fmtdesc *f)
+{
+	unsigned int i, offered = 0;
+
+	/*
+	 * The node registers before its source resolves; answering from the
+	 * table then would hide the formats it will have once bound. Fail.
+	 */
+	if (!v4l2vid_source_ready_locked(dev))
+		return -ENODEV;
+
+	/* index over what this node offers, so an enumeration has no holes */
+	for (i = 0; i < ARRAY_SIZE(v4l2vid_formats); i++) {
+		const struct plat_csi_fmt *p_fmt = &v4l2vid_formats[i];
+
+		if (!v4l2vid_fmt_available_locked(dev, p_fmt))
+			continue;
+
+		if (offered++ == f->index) {
+			f->pixelformat = p_fmt->fourcc;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
 static int
 vidioc_enum_fmt_vid_cap(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 {
-	const struct plat_csi_fmt *p_fmt;
+	struct v4l2vid_dev *dev = video_drvdata(file);
+	struct media_device *mdev = v4l2vid_graph_lock(dev);
+	int ret;
 
-	if (f->index >= ARRAY_SIZE(v4l2vid_formats))
-		return -EINVAL;
-
-	p_fmt = &v4l2vid_formats[f->index];
-
-	f->pixelformat = p_fmt->fourcc;
-
-	return 0;
+	/* Unbind has taken the entity out of the graph: nothing to resolve. */
+	if (!mdev)
+		return -ENODEV;
+	ret = v4l2vid_enum_fmt_locked(dev, f);
+	v4l2vid_graph_unlock(mdev);
+	return ret;
 }
 
 static int vidioc_g_fmt_vid_cap(struct file *file, void *priv,
@@ -299,21 +678,72 @@ static int vidioc_g_fmt_vid_cap(struct file *file, void *priv,
 	return 0;
 }
 
-static int
-vidioc_try_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f)
+/* Negotiates pixelformat and geometry with the source; @fmt is the result. */
+static int v4l2vid_try_fmt_locked(struct v4l2vid_dev *dev,
+				  struct v4l2_format *f,
+				  const struct plat_csi_fmt **out)
 {
 	const struct plat_csi_fmt *fmt;
+	struct v4l2_mbus_framefmt geom;
+
+	/* Same unresolved-source race as ENUM_FMT: see the comment there. */
+	if (!v4l2vid_source_ready_locked(dev))
+		return -ENODEV;
 
 	fmt = v4l2vid_find_format(f);
 
-	if (!fmt) {
-		f->fmt.pix.pixelformat = V4L2_PIX_FMT_SRGGB8;
-		fmt = v4l2vid_find_format(f);
+	/*
+	 * Fall back for an unknown fourcc or one this node cannot originate,
+	 * else the mismatch only surfaces as -EPIPE at STREAMON; the fallback
+	 * takes the source's size, not the caller's.
+	 */
+	if (!fmt || !v4l2vid_fmt_available_locked(dev, fmt)) {
+		fmt = v4l2vid_fallback_fmt_locked(dev, &geom);
+		if (!fmt)
+			return -EINVAL;
+		f->fmt.pix.pixelformat = fmt->fourcc;
+		f->fmt.pix.width = geom.width;
+		f->fmt.pix.height = geom.height;
+		f->fmt.pix.field = geom.field;
+		*out = fmt;
+		return 0;
 	}
 
-	f->fmt.pix.field = V4L2_FIELD_NONE;
+	/*
+	 * A matching code does not guarantee a matching size. TRY-negotiate
+	 * the caller's request with the source; TRY leaves its active state
+	 * untouched, and a fixed source clamps to its one mode.
+	 */
 	v4l_bound_align_image(&f->fmt.pix.width, 48, MAX_WIDTH, 2,
 			     &f->fmt.pix.height, 32, MAX_HEIGHT, 0, 0);
+	if (v4l2vid_source_try_geometry_locked(dev, fmt->mbus_code,
+					       f->fmt.pix.width,
+					       f->fmt.pix.height, &geom)) {
+		f->fmt.pix.width = geom.width;
+		f->fmt.pix.height = geom.height;
+		f->fmt.pix.field = geom.field;
+	} else {
+		f->fmt.pix.field = V4L2_FIELD_NONE;
+	}
+	*out = fmt;
+	return 0;
+}
+
+static int
+vidioc_try_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f)
+{
+	struct v4l2vid_dev *dev = video_drvdata(file);
+	struct media_device *mdev = v4l2vid_graph_lock(dev);
+	const struct plat_csi_fmt *fmt;
+	int ret;
+
+	/* Unbind has taken the entity out of the graph: nothing to resolve. */
+	if (!mdev)
+		return -ENODEV;
+	ret = v4l2vid_try_fmt_locked(dev, f, &fmt);
+	v4l2vid_graph_unlock(mdev);
+	if (ret)
+		return ret;
 
 	f->fmt.pix.bytesperline = (f->fmt.pix.width * fmt->depth) >> 3;
 	f->fmt.pix.sizeimage = f->fmt.pix.height * f->fmt.pix.bytesperline + VDMA_FRAME_METADATA_SIZE;
@@ -338,6 +768,13 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 	if (vb2_is_busy(&dev->vb_queue))
 		return -EBUSY;
 
+	/*
+	 * The video node is registered before the async notifier, so it can be
+	 * opened before the VDMA subdev binds - ep_sd is NULL until then.
+	 */
+	if (!dev->ep_sd || dev->ep_pad < VDMA_CHANNELS)
+		return -ENODEV;
+
 	ret = vidioc_try_fmt_vid_cap(file, dev, f);
 	if (ret)
 		return ret;
@@ -353,7 +790,12 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 	fmt.format.width = dev_fmt_pix->width;
 	fmt.format.height = dev_fmt_pix->height;
 	fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	fmt.pad = 0;
+	/*
+	 * Address this node's own VDMA channel, not channel 0: ep_pad is the
+	 * source pad and vdma_set_fmt() only accepts the sink side.
+	 */
+	fmt.pad = dev->ep_pad - VDMA_CHANNELS;
+	fmt.stream = fmt.pad;
 	fmt.format.field = dev_fmt_pix->field;
 
 	ret = v4l2_subdev_call_state_active(dev->ep_sd, pad, set_fmt, &fmt);
@@ -363,8 +805,8 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 	return ret;
 }
 
-static int vidioc_enum_framesizes(struct file *file, void *fh,
-		      struct v4l2_frmsizeenum *fsize)
+static int v4l2vid_enum_framesizes_locked(struct v4l2vid_dev *dev,
+					  struct v4l2_frmsizeenum *fsize)
 {
 	static const struct v4l2_frmsize_stepwise sizes = {
 		48, MAX_WIDTH, 4,
@@ -372,17 +814,70 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,
 	};
 	int i;
 
-	if (fsize->index)
-		return -EINVAL;
+	/* Same unresolved-source race as ENUM_FMT: see the comment there. */
+	if (!v4l2vid_source_ready_locked(dev))
+		return -ENODEV;
 
 	for (i = 0; i < ARRAY_SIZE(v4l2vid_formats); i++)
 		if (v4l2vid_formats[i].fourcc == fsize->pixel_format)
 			break;
 	if (i == ARRAY_SIZE(v4l2vid_formats))
 		return -EINVAL;
+
+	/* a source that cannot emit the format has no frame size for it */
+	if (!v4l2vid_fmt_available_locked(dev, &v4l2vid_formats[i]))
+		return -EINVAL;
+
+	/*
+	 * Use the source's own bound, not the generic range, and pass the index
+	 * through: a multi-mode sensor reports one min == max entry per index.
+	 * Only index 0 falls back to the generic range for a source without
+	 * enum_frame_size.
+	 */
+	{
+		struct v4l2_subdev_frame_size_enum fse;
+
+		if (v4l2vid_source_frame_size_locked(dev,
+						    v4l2vid_formats[i].mbus_code,
+						    fsize->index, &fse)) {
+			if (fse.min_width == fse.max_width &&
+			    fse.min_height == fse.max_height) {
+				fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
+				fsize->discrete.width = fse.min_width;
+				fsize->discrete.height = fse.min_height;
+			} else {
+				fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+				fsize->stepwise = sizes;
+				fsize->stepwise.min_width = fse.min_width;
+				fsize->stepwise.max_width = fse.max_width;
+				fsize->stepwise.min_height = fse.min_height;
+				fsize->stepwise.max_height = fse.max_height;
+			}
+			return 0;
+		}
+
+		if (fsize->index)
+			return -EINVAL;
+	}
+
 	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
 	fsize->stepwise = sizes;
 	return 0;
+}
+
+static int vidioc_enum_framesizes(struct file *file, void *fh,
+				  struct v4l2_frmsizeenum *fsize)
+{
+	struct v4l2vid_dev *dev = video_drvdata(file);
+	struct media_device *mdev = v4l2vid_graph_lock(dev);
+	int ret;
+
+	/* Unbind has taken the entity out of the graph: nothing to resolve. */
+	if (!mdev)
+		return -ENODEV;
+	ret = v4l2vid_enum_framesizes_locked(dev, fsize);
+	v4l2vid_graph_unlock(mdev);
+	return ret;
 }
 
 static int vidioc_enum_input(struct file *file, void *priv,
@@ -416,23 +911,49 @@ v4l2vid_streamon(struct file *file, void *priv, enum v4l2_buf_type type)
 	struct v4l2vid_dev *dev = video_drvdata(file);
 	int ret;
 
-	ret = video_device_pipeline_start(&dev->vdev, &dev->vdev.pipe);
+	/* Nothing to stream once the endpoint unbound; skip the pipeline walk. */
+	if (!dev->ep_sd || !dev->vdma_channel)
+		return -ENOLINK;
+
+	/*
+	 * An aggregating source puts every VC's video node in one pipeline, so
+	 * join that pipeline instead of insisting on this node's own.
+	 */
+	ret = video_device_pipeline_alloc_start(&dev->vdev);
 	if (ret < 0) {
 		dev_err(dev->dev, "Failed to start pipeline %d", ret);
 		return ret;
 	}
 
-	return vb2_ioctl_streamon(file, priv, type);
+	ret = vb2_ioctl_streamon(file, priv, type);
+	if (ret < 0) {
+		video_device_pipeline_stop(&dev->vdev);
+		return ret;
+	}
+
+	dev->pipe_started = true;
+
+	return 0;
 }
 
 static int
 v4l2vid_streamoff(struct file *file, void *priv, enum v4l2_buf_type type)
 {
 	struct v4l2vid_dev *dev = video_drvdata(file);
+	int ret;
 
-	vb2_ioctl_streamoff(file, priv, type);
-	if (dev->pad.pipe)
+	ret = vb2_ioctl_streamoff(file, priv, type);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * pad.pipe is set on every pad the pipeline walk covers, so it cannot
+	 * tell whether this node is the one that started the pipeline.
+	 */
+	if (dev->pipe_started) {
 		video_device_pipeline_stop(&dev->vdev);
+		dev->pipe_started = false;
+	}
 
 	return 0;
 }
@@ -488,16 +1009,28 @@ v4l2vid_release(struct file *file)
 {
 	struct v4l2vid_dev *dev = video_drvdata(file);
 	struct media_entity *entity = &dev->vdev.entity;
+	bool owner;
 
 	mutex_lock(&dev->lock);
 
+	/* Unbind takes the entity out of the graph, leaving mdev NULL. */
 	if (v4l2_fh_is_singular_file(file)) {
-		mutex_lock(&entity->graph_obj.mdev->graph_mutex);
-		entity->use_count--;
-		mutex_unlock(&entity->graph_obj.mdev->graph_mutex);
+		struct media_device *mdev = v4l2vid_graph_lock(dev);
+
+		if (mdev)
+			entity->use_count--;
+		v4l2vid_graph_unlock(mdev);
 	}
 
+	/* Mirrors the ownership test _vb2_fop_release() itself applies. */
+	owner = !dev->vb_queue.owner || file->private_data == dev->vb_queue.owner;
+
 	_vb2_fop_release(file, NULL);
+
+	if (owner && dev->pipe_started) {
+		video_device_pipeline_stop(&dev->vdev);
+		dev->pipe_started = false;
+	}
 
 	mutex_unlock(&dev->lock);
 	return 0;
@@ -524,36 +1057,15 @@ static int queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
 	struct v4l2vid_dev *dev = vb2_get_drv_priv(vq);
 	unsigned long size = 0;
 
+	if (!dev->ep_sd || !dev->vdma_channel)
+		return -ENOLINK;
+
 	size = dev->format.fmt.pix.sizeimage;
 	if (dev->format.fmt.pix.sizeimage  == 0) {
 		dev_err(dev->dev, "Configured Image size is zero\n");
 		return -EINVAL;
 	}
-	/*
-	 * MIN_CAPTURE_BUFFERS is a floor, not a queue size.  vb2 calls
-	 * queue_setup() with *nbuffers holding the count userspace asked for,
-	 * and the driver may only raise it.  Assigning here instead turned the
-	 * minimum into a cap and silently handed every caller an 8-deep queue,
-	 * however many it had requested.
-	 *
-	 * That breaks any consumer that sizes its queue for the mode it runs.
-	 * libcamera asks for 32 capture buffers on the IMX568 path and treats a
-	 * short allocation as fatal, so the clamp failed stream configuration
-	 * outright with "Not enough buffers provided by V4L2VideoDevice.
-	 * Wanted 32, got 8" before a single frame was captured.
-	 *
-	 * Depth here is not merely latency headroom.  The sensor is a
-	 * free-running producer that cannot be back-pressured: if the consumer
-	 * is holding every queued buffer, VDMA has nowhere to land the next
-	 * frame and falls into its scratch/error path, so a short queue surfaces
-	 * as dropped frames rather than as flow control.  High-bandwidth modes
-	 * such as IMX568 2432x2048 RAW12 hit that window first.
-	 *
-	 * Honouring a larger request stays bounded, because vb2 still enforces
-	 * q->max_num_buffers.  Keep this a floor - never assign to *nbuffers.
-	 */
-	if (*nbuffers < MIN_CAPTURE_BUFFERS)
-		*nbuffers = MIN_CAPTURE_BUFFERS;
+	*nbuffers = N_BUFFERS;
 	*nplanes = 1;
 	sizes[0] = size;
 
@@ -566,6 +1078,9 @@ static int buffer_prepare(struct vb2_buffer *vb)
 	struct vdma_buffer *buf = to_vdma_buffer(vbuf);
 	struct v4l2vid_dev *dev = vb2_get_drv_priv(vb->vb2_queue);
 
+	if (!dev->vdma_channel)
+		return -ENOLINK;
+
 	buf->channel = dev->vdma_channel;
 	buf->size = dev->format.fmt.pix.sizeimage;
 
@@ -575,24 +1090,15 @@ static int buffer_prepare(struct vb2_buffer *vb)
 static int start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct v4l2vid_dev *dev = vb2_get_drv_priv(vq);
-	struct vb2_buffer *vb;
-	unsigned int i;
 	int ret;
+
+	if (!dev->ep_sd || !dev->vdma_channel)
+		return -ENOLINK;
 
 	ret = v4l2_subdev_enable_streams(dev->ep_sd, dev->ep_pad,
 		get_vdma_channel_mask(dev->vdma_channel));
 	if (ret) {
 		dev_err(dev->dev, "Failed to enable stream on EP subdevice: %d", ret);
-		/*
-		 * The VDMA abort path returns submitted descriptors in QUEUED
-		 * state.  Reclaim descriptors that did not reach that path as
-		 * well, so vb2 can retry the queue after a failed STREAMON.
-		 */
-		for (i = 0; i < vq->max_num_buffers; i++) {
-			vb = vb2_get_buffer(vq, i);
-			if (vb && vb->state == VB2_BUF_STATE_ACTIVE)
-				vb2_buffer_done(vb, VB2_BUF_STATE_QUEUED);
-		}
 		return ret;
 	}
 
@@ -603,6 +1109,9 @@ static void stop_streaming(struct vb2_queue *vq)
 {
 
 	struct v4l2vid_dev *dev = vb2_get_drv_priv(vq);
+
+	if (!dev || !dev->ep_sd || !dev->vdma_channel)
+		return;
 
 	v4l2_subdev_disable_streams(dev->ep_sd, dev->ep_pad,
 		get_vdma_channel_mask(dev->vdma_channel));
@@ -635,6 +1144,7 @@ static int v4l2vid_register_video_dev(struct v4l2vid_dev *dev, struct v4l2vid_ma
 	vfd->minor = -1;
 	vfd->release = video_device_release_empty;
 	vfd->queue = q;
+	vfd->lock = &dev->lock;
 	vfd->device_caps = V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_CAPTURE;
 	video_set_drvdata(vfd, dev);
 
@@ -728,14 +1238,35 @@ static void v4l2vid_notify_unbind(struct v4l2_async_notifier *nf,
 				  struct v4l2_async_connection *base_asc)
 {
 	struct v4l2vid_dev *dev = asc_to_v4l2vid(base_asc)->dev;
+	bool registered;
 
+	registered = video_is_registered(&dev->vdev);
+
+	/*
+	 * Outside dev->lock: vdev->lock is dev->lock, which mainline's
+	 * video_unregister_device() takes. Ours does not, but keep it unlocked.
+	 */
+	if (registered)
+		video_unregister_device(&dev->vdev);
+
+	/*
+	 * Cancel the queue while ep_sd and vdma_channel are live: stop_streaming()
+	 * is the only path that stops the DMA before vb2 frees its buffers.
+	 */
+	mutex_lock(&dev->lock);
+	if (dev->pipe_started) {
+		video_device_pipeline_stop(&dev->vdev);
+		dev->pipe_started = false;
+	}
+	vb2_queue_release(&dev->vb_queue);
+	/* Clearing owner releases the queue again on close; that pass no-ops. */
+	dev->vb_queue.owner = NULL;
 	dev->ep_sd = NULL;
 	dev->vdma_channel = NULL;
+	mutex_unlock(&dev->lock);
 
-	if (video_is_registered(&dev->vdev)) {
-		video_unregister_device(&dev->vdev);
+	if (registered)
 		media_entity_cleanup(&dev->vdev.entity);
-	}
 }
 
 static int v4l2vid_link_validate(struct media_link *link)
@@ -747,6 +1278,13 @@ static int v4l2vid_link_validate(struct media_link *link)
 	struct video_device *vdev = media_entity_to_video_device(entity);
 	struct v4l2vid_dev *dev = video_get_drvdata(vdev);
 
+	/*
+	 * A co-pipeline node that never had S_FMT has no format to check, and
+	 * queue_setup() already refuses to let it stream.
+	 */
+	if (!dev->fmt)
+		return 0;
+
 	if (!is_media_entity_v4l2_subdev(link->source->entity)) {
 		dev_err(dev->dev, "Remote is not a subdev\n");
 		return -EINVAL;
@@ -756,6 +1294,26 @@ static int v4l2vid_link_validate(struct media_link *link)
 
 	source_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 	source_fmt.pad = link->source->index;
+	/*
+	 * source_fmt.stream defaults to 0 from the { 0 } initializer above,
+	 * which only happens to be correct for VC0. For any other VC, the
+	 * source pad's real stream number matches this video node's own
+	 * bound VDMA channel id (routing convention: channel id N <-> stream
+	 * N throughout this driver) - without this, get_fmt is queried for a
+	 * stream that was never configured on the source pad, and fails.
+	 *
+	 * struct vdma_channel is opaque here (only forward-declared in
+	 * simaai-v4l2-vdma.h), so the channel id can't be read directly -
+	 * go through the exported get_vdma_channel_mask() instead, which
+	 * returns BIT(id), and recover id via __ffs() since exactly one bit
+	 * is ever set for a single bound channel.
+	 */
+	if (dev->vdma_channel) {
+		u64 chan_mask = get_vdma_channel_mask(dev->vdma_channel);
+
+		if (chan_mask)
+			source_fmt.stream = __ffs(chan_mask);
+	}
 
 	ret = v4l2_subdev_call(source_sd, pad, get_fmt, NULL, &source_fmt);
 	if (ret < 0) {
@@ -880,7 +1438,9 @@ static void v4l2vid_cleanup_capture_dev(struct v4l2vid_dev *dev)
 {
 	struct media_entity *entity = &dev->vdev.entity;
 
+	vb2_video_unregister_device(&dev->vdev);
 	media_entity_cleanup(entity);
+	dev->enabled = false;
 }
 
 static int v4l2vid_master_init(struct v4l2vid_master_dev *master_dev)
@@ -951,6 +1511,9 @@ static void v4l2vid_v4l2_cleanup(struct v4l2vid_master_dev *dev)
 {
 	int i;
 
+	/* Unbind first so an active queue stops while its graph is intact. */
+	v4l2vid_notifier_unregister(dev);
+
 	for (i = 0; i < MAX_CAP_DEVICES; i++) {
 		if (!dev->devs[i].enabled)
 			continue;
@@ -958,7 +1521,6 @@ static void v4l2vid_v4l2_cleanup(struct v4l2vid_master_dev *dev)
 		v4l2vid_cleanup_capture_dev(&dev->devs[i]);
 	}
 
-	v4l2vid_notifier_unregister(dev);
 	v4l2_device_unregister(&dev->v4l2_dev);
 	media_device_unregister(&dev->media_dev);
 	media_device_cleanup(&dev->media_dev);

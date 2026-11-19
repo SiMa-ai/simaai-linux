@@ -92,7 +92,7 @@
 &csi20in {
     clock-lanes = <0>;
     data-lanes = <1 2>;
-    link-frequencies = /bits/ 64 <270000000>;
+    link-frequencies = /bits/ 64 <360000000>;
     remote-endpoint = <&cam20out>;
     clock-continuous;
 };
@@ -113,7 +113,7 @@
                         cam20out: endpoint@0 {
                                 clock-lanes = <0>;
                                 data-lanes = <1 2>;
-                                link-frequencies = /bits/ 64 <270000000>;
+                                link-frequencies = /bits/ 64 <360000000>;
                                 remote-endpoint = <&csi20in>;
                                 clock-continuous;
                         };

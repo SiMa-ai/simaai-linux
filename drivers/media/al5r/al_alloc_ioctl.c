@@ -10,7 +10,8 @@
 #include <linux/uaccess.h>
 #include "al_dmabuf.h"
 
-int al5_ioctl_get_dma_fd(struct device *dev, dma_addr_t dma_offset, unsigned long arg)
+int al5_ioctl_get_dma_fd(struct al5r_codec_chan *chan, struct device *dev,
+			 dma_addr_t dma_offset, unsigned long arg)
 {
 	struct al5_dma_info info;
 	int err;
@@ -23,7 +24,7 @@ int al5_ioctl_get_dma_fd(struct device *dev, dma_addr_t dma_offset, unsigned lon
 	if (err)
 		return err;
 
-	err = al5_dmabuf_get_address(dev, info.fd, &bus_addr);
+	err = al5_dmabuf_import_address(chan, dev, info.fd, &bus_addr);
 	if (err)
 		return err;
 
@@ -35,7 +36,9 @@ int al5_ioctl_get_dma_fd(struct device *dev, dma_addr_t dma_offset, unsigned lon
 	return 0;
 }
 
-int al5_ioctl_get_dma_fd_cached(struct device *dev, dma_addr_t dma_offset, unsigned long arg)
+int al5_ioctl_get_dma_fd_cached(struct al5r_codec_chan *chan,
+				struct device *dev, dma_addr_t dma_offset,
+				unsigned long arg)
 {
         struct al5_dma_info info;
         struct al5_dma_buffer *buffer = NULL;
@@ -49,7 +52,7 @@ int al5_ioctl_get_dma_fd_cached(struct device *dev, dma_addr_t dma_offset, unsig
         if (err)
                 return err;
 
-        err = al5_dmabuf_get_address(dev, info.fd, &bus_addr);
+	err = al5_dmabuf_import_address(chan, dev, info.fd, &bus_addr);
         if (err)
                 return err;
 
@@ -108,7 +111,8 @@ int al5_ioctl_get_dma_mmap(struct device *dev, struct al5r_codec_chan *chan,
 	return 0;
 }
 
-int al5_ioctl_get_dmabuf_dma_addr(struct device *dev, dma_addr_t dma_offset,
+int al5_ioctl_get_dmabuf_dma_addr(struct al5r_codec_chan *chan,
+				  struct device *dev, dma_addr_t dma_offset,
 				  unsigned long arg)
 {
 	struct al5_dma_info info;
@@ -118,7 +122,7 @@ int al5_ioctl_get_dmabuf_dma_addr(struct device *dev, dma_addr_t dma_offset,
 	if (copy_from_user(&info, (struct al5_dma_info *)arg, sizeof(info)))
 		return -EFAULT;
 
-	err = al5_dmabuf_get_address(dev, info.fd, &bus_addr);
+	err = al5_dmabuf_import_address(chan, dev, info.fd, &bus_addr);
 	if (err)
 		return err;
 

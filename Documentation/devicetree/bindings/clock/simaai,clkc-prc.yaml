@@ -42,6 +42,7 @@ properties:
         1    SIMAAI_PRC_CLK_ISP_PLL   ISP PLL
         2    SIMAAI_PRC_CLK_MLA_GATE  MLA clock gate
         3    SIMAAI_PRC_CLK_ISP_GATE  ISP clock gate
+        4    SIMAAI_PRC_CLK_APU_PLL   APU PLL
 
   simaai,ignore-unused:
     $ref: /schemas/types.yaml#/definitions/uint32

@@ -17,7 +17,7 @@
 #include <linux/irqreturn.h>
 #include <linux/kmsg_dump.h>
 
-#include <linux/simaai_pcie_api.h>
+#include <uapi/linux/simaai/simaai_pcie_api.h>
 #include "simaai_pcie_drv.h"
 #include "simaai_pcie_net.h"
 #include "simaai_pep_net_drv.h"
@@ -34,6 +34,16 @@ extern int dbg_level;
 	} while (0)
 
 #define si_err(pep, fmt, args...) si_err_common((pep->dev), fmt, ##args)
+/* For what a process can make happen as often as it likes */
+#define si_err_ratelimited(pep, fmt, args...)				\
+	do {								\
+		static DEFINE_RATELIMIT_STATE(_rs,			\
+				DEFAULT_RATELIMIT_INTERVAL,		\
+				DEFAULT_RATELIMIT_BURST);		\
+									\
+		if (__ratelimit(&_rs))					\
+			si_err(pep, fmt, ##args);			\
+	} while (0)
 #define si_qerr(qdev, fmt, args...)					\
 	si_err_common((qdev->pep->dev), "%s queue %d, " fmt,		\
 		si_pep_qtype_str(qdev->qtype), qdev->qid, ##args)	\
@@ -176,6 +186,10 @@ struct si_pep_stats {
 	uint32_t abort_reqs_suc;
 	/* Number of reqs that was consumed by application before aborting */
 	uint32_t abort_reqs_fail;
+	/* dma-buf attachment cache lookups that reused an existing mapping */
+	uint32_t dbuf_cache_hits;
+	/* dma-buf attachment cache lookups that had to attach and map */
+	uint32_t dbuf_cache_misses;
 	/* Time stamp of last last resp sent to Host */
 	ktime_t last_resp;
 };
@@ -203,6 +217,40 @@ struct si_pep_db_int_desc {
 	u32 offset;
 };
 
+struct dma_buf;
+struct dma_buf_attachment;
+
+/*
+ * Number of dma-buf attachments a queue keeps mapped. Producers recycle a
+ * small pool of buffers (v4l2 typically 4-8, GStreamer 4-16), so this covers
+ * realistic reuse without holding on to attachments that will never be seen
+ * again. Validate against a real pipeline with the hit/miss counters in
+ * struct si_pep_stats before changing it.
+ */
+#define SI_PEP_DBUF_CACHE_SIZE 16
+
+/**
+ * struct si_pep_dbuf_cache_ent - one cached dma-buf attachment
+ * @dbuf: imported buffer; the cache holds a reference for as long as the
+ *	  entry is populated. Doubles as the "slot occupied" flag.
+ * @attach: attachment of @dbuf to this device.
+ * @sgt: mapping owned by the exporter, valid until the entry is released.
+ * @dir: direction @sgt was mapped with. Part of the lookup key: a mapping made
+ *	 for DMA_TO_DEVICE cannot serve a DMA_FROM_DEVICE transfer.
+ * @inuse: number of transfers currently using @sgt. An entry is only evictable
+ *	   at zero, otherwise eviction would unmap under an in-flight DMA.
+ * @stamp: value of si_pep_qdev.dbuf_cache_clock when the entry was last handed
+ *	   out; the lowest stamp among idle entries is evicted first.
+ */
+struct si_pep_dbuf_cache_ent {
+	struct dma_buf *dbuf;
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
+	enum dma_data_direction dir;
+	unsigned int inuse;
+	u64 stamp;
+};
+
 struct si_pep_userbuf_map {
 	struct page **pages;
 	unsigned int nr_pages;
@@ -210,6 +258,23 @@ struct si_pep_userbuf_map {
 	unsigned int nr_sgents;
 	dma_addr_t *dma_addrs;
 	size_t total_size;
+	/*
+	 * Set only for SI_BUF_ADDR_DMABUF entries: the entry is backed by an
+	 * imported dma-buf and dbuf_sgt (owned by the exporter) is used in
+	 * place of pinned pages and sgt.
+	 */
+	struct dma_buf *dbuf;
+	struct dma_buf_attachment *dbuf_attach;
+	struct sg_table *dbuf_sgt;
+	/*
+	 * When set, the three fields above are borrowed from the queue's
+	 * attachment cache and this transfer only holds a use count on the
+	 * entry: unmapping must release that count, not tear the mapping down.
+	 * NULL means the mapping is private to this transfer (either a pinned
+	 * user pointer, or a dma-buf imported while every cache entry was
+	 * busy) and is unmapped when the transfer completes.
+	 */
+	struct si_pep_dbuf_cache_ent *dbuf_ent;
 	/*
 	 * Direction this buffer was dma-mapped with. The DMA API requires
 	 * unmap to use the same direction as map, so it is recorded here
@@ -242,6 +307,18 @@ struct si_pep_drv_ops {
 	void (*platform_deinit)(struct si_pep_dev*);
 	int (*local_init)(struct si_pep_dev*);
 	void (*local_deinit)(struct si_pep_dev*);
+	/*
+	 * Arm and disarm the host doorbells. Optional; a SoC with no
+	 * doorbell to mask leaves both NULL.
+	 *
+	 * platform_init() installs the handlers but leaves every doorbell
+	 * masked, because the handler needs the workqueue local_init()
+	 * allocates and the queue contexts probe sets up after that.
+	 * Nothing is armed until probe has finished, and everything is
+	 * disarmed again before local_deinit() takes the workqueue away.
+	 */
+	void (*enable_doorbells)(struct si_pep_dev*);
+	void (*disable_doorbells)(struct si_pep_dev*);
 	void (*set_soc_state)(struct si_pep_dev*, enum si_soc_state);
 	/* Net device operations */
 	void (*net_release)(struct si_pep_dev*);
@@ -269,6 +346,32 @@ struct si_pep_qdev {
 	dma_addr_t ll_cache_dma;
 	size_t ll_cache_size;
 	unsigned long ll_busy;
+	/*
+	 * Cached scratch buffer for the remote SGE list copied in from the
+	 * host by si_pep_dma_buflist_from_sge(). Same rationale as ll_cache:
+	 * dma_alloc_coherent() per transfer is too expensive to repeat for
+	 * every buffer, so the queue keeps one buffer and reuses it, growing
+	 * on demand. sge_busy claims it without a lock on the submission
+	 * path; a concurrent transfer on the same queue falls back to its own
+	 * allocation.
+	 */
+	void *sge_cache;
+	dma_addr_t sge_cache_dma;
+	size_t sge_cache_size;
+	unsigned long sge_busy;
+	/*
+	 * Cached dma-buf attachments. Importing a dma-buf costs an attach and a
+	 * dma-map on every transfer, which dominates the transfer itself for
+	 * the buffer pools userspace actually recycles, so the mappings are
+	 * kept here and reused. The cache lives on the queue because an
+	 * application stays on one queue, and its idle entries are flushed on
+	 * every close of the queue device -- opens are not refcounted, so a
+	 * second holder of the same queue loses its warm entries when the
+	 * first one closes.
+	 */
+	struct mutex dbuf_cache_lock;
+	struct si_pep_dbuf_cache_ent dbuf_cache[SI_PEP_DBUF_CACHE_SIZE];
+	u64 dbuf_cache_clock;
 	atomic_t seqid;
 	/* Timestamps structures per queue */
 	struct si_pep_timestamps cache_dreq_ts;
@@ -321,6 +424,23 @@ struct si_pep_dev {
 	phys_addr_t p_mreq_cache;
 	struct mutex dreq_cache_mutex[SI_MAX_DQS];
 	struct mutex mreq_cache_mutex;
+
+	/*
+	 * Serialise completion and receive slot allocation.
+	 *
+	 * The queue contexts these protect live in the OCM window, which is
+	 * ioremapped and so is Device memory. Atomic read-modify-write
+	 * instructions are not supported there on arm64 -- a cmpxchg on
+	 * ctx->head raises a synchronous external abort -- so the allocation
+	 * cannot be made atomic in place and has to be serialised by a lock
+	 * held in ordinary memory instead. The accesses inside stay plain
+	 * loads and stores.
+	 *
+	 * Index 0 is the management queue and 1..SI_MAX_DQS are data queue
+	 * qid + 1, matching the qdev[] convention.
+	 */
+	spinlock_t cqe_alloc_lock[SI_MAX_DQS + 1];
+	spinlock_t rqe_alloc_lock[SI_MAX_DQS + 1];
 	u32 dreq_cached[SI_MAX_DQS];
 	u32 mreq_cached;
 	wait_queue_head_t dreq_wait[SI_MAX_DQS];
@@ -361,11 +481,27 @@ struct si_pep_dev {
 	size_t pciesys_size;
 
 	int card_num;
+	/* Completion interrupts of the veth DMA channel, if any */
+	int net_tx_irq;
+	int net_rx_irq;
+	/* The veth is up, so its doorbell may schedule its poll */
+	bool net_rx_up;
 	bool modalix;
 	enum si_soc_state state;
 
 	bool recovery_mode;
 	struct task_struct *recovery_thread;
+
+	/*
+	 * Serialises the link-down handler, the recovery thread's rebuild
+	 * and si_pep_remove() against one another, and guards 'initialized':
+	 * true from the moment probe has built everything the link-down
+	 * path tears down until remove() starts taking it apart. A link-down
+	 * event that arrives outside that window has nothing to clean up
+	 * and is ignored.
+	 */
+	struct mutex state_lock;
+	bool initialized;
 };
 
 #define qdev_to_pep_dev(x) (x->pep)
@@ -436,6 +572,7 @@ struct si_pep_dev {
 #define net_get_txtail(pep) pep->drv_ops->net_get_val(pep, tx_tail)
 #define net_get_rxhead(pep) pep->drv_ops->net_get_val(pep, rx_head)
 #define net_get_txhead(pep) pep->drv_ops->net_get_val(pep, tx_head)
+#define net_get_host_rxint(pep) pep->drv_ops->net_get_val(pep, host_rxint)
 
 #define net_set_txhead(pep, val) pep->drv_ops->net_set_val(pep, tx_head, val)
 #define net_set_rxtail(pep, val) pep->drv_ops->net_set_val(pep, rx_tail, val)
@@ -443,8 +580,15 @@ struct si_pep_dev {
 /* Functions that are provided by the common driver */
 int si_pep_copy_from_host(struct si_pep_dev *, u64, u64, u32, int);
 int si_pep_copy_to_host(struct si_pep_dev *, u64, u64, u32, int, int);
+int si_pep_copy_to_host_quiet(struct si_pep_dev *pep, u64 dest, u64 src,
+			      u32 size, int ch, int msi);
+struct si_pep_dma_ll_ctx;
+int si_pep_copy_do_ll(struct si_pep_dev *, struct si_pep_dma_ll_ctx *, int, int);
+void si_pep_dma_ll_program(struct si_pep_dev *pep, int ch, int dir,
+			   dma_addr_t ll_p);
+bool si_pep_msi_has_vector(struct si_pep_dev *, int);
 void si_pep_handle_mcmd(struct si_pep_dev *, struct si_mcmd *);
-void si_pep_get_reqs_from_host(struct si_pep_dev *, enum si_qtype, int);
+int si_pep_get_reqs_from_host(struct si_pep_dev *, enum si_qtype, int);
 void si_pep_recycle_qes(struct si_pep_dev *, enum si_qtype, int);
 void si_pep_iomem_read_rep(void *, void __iomem *, size_t);
 void si_pep_iomem_write_rep(void __iomem *, void *, size_t);

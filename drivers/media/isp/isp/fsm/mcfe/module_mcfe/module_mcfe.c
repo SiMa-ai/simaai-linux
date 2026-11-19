@@ -104,7 +104,7 @@ int module_mcfe_init( void )
         return rc;
     }
 
-    LOG( LOG_INFO, "Initializing module_mcfe : E" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Initializing module_mcfe : E" );
 
     // Initialize MCFE instance.
     system_memset( &mcfe_module_config, 0x0, sizeof( mcfe_module_config ) );
@@ -120,7 +120,7 @@ int module_mcfe_init( void )
     // initialize service layer
     module_mcfe_service_init();
 
-    LOG( LOG_INFO, "Initializing module_mcfe : X" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Initializing module_mcfe : X" );
 
     return rc;
 }
@@ -129,14 +129,14 @@ int module_mcfe_deinit( void )
 {
     int rc = MCFE_ERR_NONE;
 
-    LOG( LOG_INFO, "De-initializing module_mcfe : E" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "De-initializing module_mcfe : E" );
 
     // Error handler
     if ( mcfe_module_config.initialized == 0 ) {
-        LOG( LOG_ERR, "Error, MCFE module is not initialized." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, MCFE module is not initialized." );
         return MCFE_ERR_NOT_INIT;
     } else if ( mcfe_module_config.running != 0 ) {
-        LOG( LOG_ERR, "Error, MCFE module is still running." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, MCFE module is still running." );
         return MCFE_ERR_NOT_RUN;
     }
 
@@ -146,7 +146,7 @@ int module_mcfe_deinit( void )
     // Deinitialize MCFE instance.
     mcfe_module_config.initialized = 0;
 
-    LOG( LOG_INFO, "De-initializing module_mcfe : X" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "De-initializing module_mcfe : X" );
 
     return rc;
 }
@@ -155,32 +155,32 @@ int module_mcfe_start( void )
 {
     int rc = MCFE_ERR_NONE;
 
-    LOG( LOG_INFO, "Starting module_mcfe : E" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Starting module_mcfe : E" );
 
     // Error handler
     if ( mcfe_module_config.initialized == 0 ) {
-        LOG( LOG_ERR, "Error, MCFE module is not initialized." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, MCFE module is not initialized." );
         return MCFE_ERR_NOT_INIT;
     } else if ( mcfe_module_config.running != 0 ) {
-        LOG( LOG_ERR, "Error, MCFE module is already running." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, MCFE module is already running." );
         return MCFE_ERR_NOT_RUN;
     }
 
     // Update mcfe scheduler mode
     rc = module_mcfe_scheduler_set_mode( MODULE_MCFE_SCHED_MODE_MANUAL );
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Error, failed to set scheduler mode." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to set scheduler mode." );
         return rc;
     }
 
     rc = module_mcfe_scheduler_start();
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Error, failed to start scheduler." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to start scheduler." );
         return rc;
     }
 
     mcfe_module_config.running = 1;
-    LOG( LOG_INFO, "Starting module_mcfe : X" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Starting module_mcfe : X" );
 
     return rc;
 }
@@ -189,28 +189,28 @@ int module_mcfe_stop( void )
 {
     int rc = MCFE_ERR_NONE;
 
-    LOG( LOG_INFO, "Stopping module_mcfe : E" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Stopping module_mcfe : E" );
 
     // Error handler
     if ( mcfe_module_config.initialized == 0 ) {
-        LOG( LOG_ERR, "Error, MCFE module is not initialized." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, MCFE module is not initialized." );
         return MCFE_ERR_NOT_INIT;
     } else if ( mcfe_module_config.running == 0 ) {
-        LOG( LOG_ERR, "Error, MCFE module is not running." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, MCFE module is not running." );
         return MCFE_ERR_NOT_RUN;
     }
 
     module_mcfe_scheduler_stop();
     rc = module_mcfe_check_scheduler_status( 0, 20, 1000 );
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Error, failed to stop MCFE scheduler." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to stop MCFE scheduler." );
         return rc;
     }
 
     // Update MCFE status.
     mcfe_module_config.running = 0;
 
-    LOG( LOG_INFO, "Stopping module_mcfe : X" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Stopping module_mcfe : X" );
 
     return rc;
 }
@@ -230,7 +230,7 @@ int module_mcfe_update_inputs( void )
         }
 
         if ( rc != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Error, failed to get slot id for input %d (rc = %d)\n", i, rc );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to get slot id for input %d (rc = %d)\n", i, rc );
             return rc;
         }
 

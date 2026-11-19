@@ -80,6 +80,16 @@ int modalix_meta_stats_publish( struct modalix_meta_stats_dev *dev,
  * @histogram: pointer to histogram bin array (length must equal
  *             MODALIX_ISP_HISTOGRAM_BINS).
  * @sum:       total pixel count contributing to @histogram.
+ * @zone_bins: aexp per-zone bins, or NULL when the aexp block was
+ *             not decoded this frame (CRC miss). Opaque pointer,
+ *             binary-compatible with struct modalix_isp_ae_zone
+ *             (four __u16 bins per zone, zone raster order).
+ * @zones_h:   metering grid width in zones.
+ * @zones_v:   metering grid height in zones.
+ *
+ * Both sections ride in one buffer: valid_mask carries VALID_AE,
+ * plus VALID_AE_ZONES when @zone_bins is non-NULL and the grid is
+ * sane.
  *
  * Called directly by histogram_func.c on stats-ready, replacing the
  * legacy sbuf get_item / set_item dance that buffered the same data
@@ -87,7 +97,10 @@ int modalix_meta_stats_publish( struct modalix_meta_stats_dev *dev,
  */
 void modalix_meta_stats_publish_ae( uint32_t        ctx_id,
                                     const uint32_t *histogram,
-                                    uint32_t        sum );
+                                    uint32_t        sum,
+                                    const void     *zone_bins,
+                                    uint32_t        zones_h,
+                                    uint32_t        zones_v );
 
 /**
  * modalix_meta_stats_publish_awb - direct-from-FSM AWB stats

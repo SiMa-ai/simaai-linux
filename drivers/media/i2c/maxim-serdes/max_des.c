@@ -1276,8 +1276,17 @@ static int max_des_set_fmt(struct v4l2_subdev *sd,
 	struct max_des *des = priv->des;
 	struct v4l2_mbus_framefmt *fmt;
 
-	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE && des->active)
-		return -EBUSY;
+	/*
+	 * The pipe and PHY modes depend only on the bpp, so while other links
+	 * stream, a stream that is not enabled may still change its size.
+	 */
+	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE && des->active) {
+		fmt = v4l2_subdev_state_get_format(state, format->pad,
+						   format->stream);
+		if (!fmt || fmt->code != format->format.code ||
+		    priv->streams_masks[format->pad] & BIT_ULL(format->stream))
+			return -EBUSY;
+	}
 
 	/* No transcoding, source and sink formats must match. */
 	if (max_des_pad_is_source(des, format->pad))
@@ -1794,7 +1803,7 @@ static int max_des_enable_streams(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  u32 pad, u64 streams_mask)
 {
-	printk(KERN_ERR "Deserializer: max_des_enable_streams called\n");
+	pr_debug("Deserializer: %s called\n", __func__);
 	return max_des_update_streams(sd, state, pad, streams_mask, true);
 }
 
@@ -2127,7 +2136,8 @@ static int max_des_parse_src_dt_endpoint(struct max_des_priv *priv,
 	unsigned int i;
 	int ret;
 
-	ep = fwnode_graph_get_endpoint_by_id(fwnode, pad, 0, 0);
+	ep = fwnode_graph_get_endpoint_by_id(fwnode, pad, 0,
+					     FWNODE_GRAPH_ENDPOINT_NEXT);
 	if (!ep)
 		return 0;
 
@@ -2450,6 +2460,31 @@ int max_des_remove(struct max_des *des)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(max_des_remove);
+
+void max_des_shutdown(struct max_des *des)
+{
+	struct max_des_priv *priv = des->priv;
+	unsigned int i;
+	int ret;
+
+	/*
+	 * A serializer keeps its alias until it loses power, which a reboot
+	 * does not do. Hand back the power-up address for the next boot.
+	 */
+	for (i = 0; i < des->ops->num_links; i++) {
+		struct max_des_link *link = &des->links[i];
+
+		if (!link->ser_xlate.en)
+			continue;
+
+		ret = max_ser_reset(priv->client->adapter, link->ser_xlate.src);
+		if (ret)
+			dev_warn(priv->dev,
+				 "Failed to reset serializer at 0x%02x: %d\n",
+				 link->ser_xlate.src, ret);
+	}
+}
+EXPORT_SYMBOL_GPL(max_des_shutdown);
 
 MODULE_LICENSE("GPL");
 MODULE_IMPORT_NS("I2C_ATR");

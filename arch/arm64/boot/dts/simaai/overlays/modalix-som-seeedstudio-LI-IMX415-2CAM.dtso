@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ *
+ * LI IMX415 on the Seeed Studio CAM2 connector (CSI2, GPIO-mux child 1,
+ * cam1_powdn).
+ *
+ * This carrier connector routes two CSI-2 lanes. The 37.125 MHz INCK and
+ * 891 Mbps/lane match the other in-tree LI IMX415 overlays.
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+&{/} {
+    imx415_clk_2: csi2_camera-clk {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+
+    i2cmux0: i2cmux@0 {
+        compatible = "i2c-mux-gpio";
+        i2c-parent = <&i2c52>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+        mux-gpios = <&port6 6 GPIO_ACTIVE_HIGH>;
+
+        i2cmux0p1: i2c@1 {
+            reg = <1>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+    };
+};
+
+&port5 {
+    cam-hog1 {
+        gpio-hog;
+        gpios = <7 GPIO_ACTIVE_HIGH>;
+        output-high;
+        line-name = "cam1_powdn";
+    };
+};
+
+&i2c52 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+};
+
+&csi2 {
+    status = "okay";
+};
+
+&axi_vdma2 {
+    status = "okay";
+};
+
+&mipi_dphy_rx2 {
+    status = "okay";
+};
+
+&v4l2video2 {
+    status = "okay";
+};
+
+&v4l2vdma2 {
+    status = "okay";
+};
+
+&csi20in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <445500000>;
+    remote-endpoint = <&cam20out>;
+};
+
+&i2cmux0p1 {
+    imx415p1: imx415@1a {
+        compatible = "sony,imx415";
+        reg = <0x1a>;
+
+        clocks = <&imx415_clk_2>;
+
+        avdd-supply = <&cam_dummy_reg>;
+        dvdd-supply = <&cam_dummy_reg>;
+        ovdd-supply = <&cam_dummy_reg>;
+
+        orientation = <2>;
+
+        port {
+            cam20out: endpoint {
+                clock-lanes = <0>;
+                data-lanes = <1 2>;
+                link-frequencies = /bits/ 64 <445500000>;
+                remote-endpoint = <&csi20in>;
+            };
+        };
+    };
+};

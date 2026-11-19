@@ -11,6 +11,7 @@
 #include <linux/of_device.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
+#include <linux/interrupt.h>
 
 #include "simaai_pcie_modalix.h"
 #include "simaai_pep_drv_modalix.h"
@@ -35,16 +36,57 @@ static int n_db_irqs = ARRAY_SIZE(db_int_descs);
 
 static irqreturn_t si_pep_mod_doorbell_int_handler(int, void*);
 static irqreturn_t si_pep_mod_net_rxhead_int_handler(int, void*);
-static irqreturn_t si_pep_mod_net_rxhead_int_handler_t(int, void*);
 static void si_pep_mod_delayed_mcmd_handler(struct work_struct*);
 static void si_pep_asr_db_enable_int(struct si_pep_dev *, u32);
 
 typedef void (*si_pep_dreq_cacher)(struct work_struct *);
 
+/*
+ * Fetch what the host queued, then re-enable the doorbell interrupt, then
+ * look again -- and keep going while each pass makes progress.
+ *
+ * The interrupt is masked from the moment the handler takes it until this
+ * runs, and a doorbell written during that window updates the register
+ * without raising anything. Fetching once and enabling once therefore
+ * loses any request the host queued between the fetch and the enable:
+ * nothing will ask again, because the only thing that asks is a doorbell,
+ * and a host that is now blocked waiting for the reply to that very
+ * request will not write another. The transfer stops dead with no error
+ * on either side.
+ *
+ * Re-checking after the enable closes it. A request that arrives after the
+ * last check raises an interrupt, because by then the interrupt is on. The
+ * progress test is what keeps a request cache that has genuinely run out
+ * of room from spinning here.
+ */
+static void si_pep_mod_cache_reqs(struct si_pep_dev *pep, enum si_qtype t,
+				  int qid, u32 db_off)
+{
+	/*
+	 * Enable the interrupt before fetching, never after.
+	 *
+	 * The doorbell is masked from the moment the handler takes it until
+	 * this runs, and a doorbell written while it is masked raises
+	 * nothing. Fetch-then-enable therefore always leaves a window: a
+	 * request queued between the fetch and the enable is not in what we
+	 * just read, and will not raise an interrupt either, so nothing ever
+	 * looks again -- and a host blocked waiting for the reply to that
+	 * request will not write another doorbell to shake it loose.
+	 *
+	 * Enabling first inverts the two cases and leaves no gap between
+	 * them. Anything queued before the enable is picked up by the fetch
+	 * below, which reads the live head register rather than anything
+	 * latched at interrupt time. Anything queued after it raises an
+	 * interrupt, which queues this work again. The cost is at most one
+	 * redundant run, which finds nothing and returns.
+	 */
+	si_pep_asr_db_enable_int(pep, db_off);
+	si_pep_get_reqs_from_host(pep, t, qid);
+}
+
 static void si_pep_mod_delayed_mreq_cacher(struct work_struct *qwork)
 {
-	si_pep_get_reqs_from_host(g_pep_dev, SI_MWQ, 0);
-	si_pep_asr_db_enable_int(g_pep_dev, MOD_OFF_MWQ_HEAD_DB);
+	si_pep_mod_cache_reqs(g_pep_dev, SI_MWQ, 0, MOD_OFF_MWQ_HEAD_DB);
 }
 
 #define DEF_DQ_REQ_CHECKERS \
@@ -53,8 +95,8 @@ static void si_pep_mod_delayed_mreq_cacher(struct work_struct *qwork)
 #define RC(q) \
 static void si_pep_mod_delayed_dreq_cacher_##q(struct work_struct *w) \
 { \
-	si_pep_get_reqs_from_host(g_pep_dev, SI_DWQ, q); \
-	si_pep_asr_db_enable_int(g_pep_dev, MOD_OFF_WQ_HEAD_DB(q)); \
+	si_pep_mod_cache_reqs(g_pep_dev, SI_DWQ, q, \
+			      MOD_OFF_WQ_HEAD_DB(q)); \
 } \
 
 DEF_DQ_REQ_CHECKERS
@@ -287,8 +329,29 @@ static int si_pep_mod_resp_mcmd(struct si_pep_dev *pep, struct si_mcmd_res *resp
 	si_pep_iomem_write_rep(mresp_asr_base, resp, sizeof(struct si_mcmd_res));
 	si_pep_iomem_write_rep(mresp, resp, sizeof(struct si_mcmd_res));
 
-	daddr = daddr + sizeof(struct si_mcmd);
-	si_pep_copy_to_host(pep, daddr, saddr, 4, MCMD_DMA_CH, SI_SMCMD_DONE_MSI);
+	/*
+	 * The reply the host actually reads is the one written into the ASR
+	 * window above. The DMA below is a second copy into the host's
+	 * coherent buffer, and it carries the MSI that releases the host from
+	 * its wait.
+	 *
+	 * Its destination comes from the host, which writes MCMD_ADDR when it
+	 * sees the SoC reach SOC_STATE_INIT. A host that missed that
+	 * transition leaves the register at zero, and DMAing to zero plus the
+	 * offset below is a write into whatever sits at host physical address
+	 * 0x80 -- an IOMMU fault at best, silent corruption of the host's low
+	 * memory at worst. Skip it. The host falls back to polling the
+	 * doorbell cleared below, which costs it a timeout but is correct.
+	 */
+	if (daddr == 0) {
+		if (printk_ratelimit())
+			si_err(pep, "Host has not set the mgmt response address");
+	} else {
+		daddr = daddr + sizeof(struct si_mcmd);
+		si_pep_copy_to_host(pep, daddr, saddr, 4, MCMD_DMA_CH,
+				SI_SMCMD_DONE_MSI);
+	}
+
 	si_pep_asr_reg_write(pep, MOD_OFF_MCMD_DB, 0);
 
 	return 0;
@@ -356,14 +419,42 @@ static int si_pep_mod_plat_init(struct si_pep_dev *pep)
 		return PTR_ERR(pep->pciesys_base);
 	}
 
+	/*
+	 * Install the link-down handler but leave the event masked, for the
+	 * same reason the doorbells below are masked: the handler tears down
+	 * the workqueue, the queues and the veth, none of which probe has
+	 * built yet. Some hosts retrain the link while the SoC is still
+	 * probing, and that event used to reach local_deinit() with no
+	 * workqueue to destroy. si_pep_probe() lifts the mask once there is
+	 * something to tear down.
+	 *
+	 * Masking first, rather than after the request, keeps an enable left
+	 * behind by a previous boot from firing the moment the line is on.
+	 */
+	si_pep_irq_link_down_disable(pep);
 	i = si_pep_register_irq_handler(pep, "pcie0_lde", si_pep_irq_link_down,
 			pep);
 	if (i != 0) {
 		si_err(pep, "Failed to register handler for pcie0_ldeinterrupt. Error %d\n", i);
 		return -EINVAL;
 	}
-	si_pep_irq_link_down_enable(pep);
 
+
+	/*
+	 * Mask every doorbell before a single handler is installed.
+	 *
+	 * The mask lives in the ASR register rather than in the GIC, so it
+	 * survives what the kernel knows about. A doorbell left unmasked by
+	 * a previous boot -- the host keeps running across an SoC reset, and
+	 * goes on writing doorbells throughout it -- fires the instant
+	 * devm_request_irq() enables the line, which is long before the
+	 * workqueue and the queue contexts the handler needs exist.
+	 *
+	 * si_pep_mod_enable_doorbells() lifts the mask once probe has built
+	 * all of that.
+	 */
+	for (i = 0; i < n_db_irqs; i++)
+		si_pep_asr_db_clear_and_mask_int(pep, db_int_descs[i].offset);
 
 	for (i = MOD_MCMD_DB; i <= MOD_DQ_DB_END; i++) {
 		snprintf(irqname, sizeof(irqname), "doorbell_%d", i);
@@ -378,9 +469,7 @@ static int si_pep_mod_plat_init(struct si_pep_dev *pep)
 		return irq;
 	}
 
-	i = devm_request_threaded_irq(dev, irq,
-			si_pep_mod_net_rxhead_int_handler,
-			si_pep_mod_net_rxhead_int_handler_t, IRQF_ONESHOT,
+	i = devm_request_irq(dev, irq, si_pep_mod_net_rxhead_int_handler, 0,
 			pep->dev->driver->name,
 			&db_int_descs[MOD_NET_TXHEAD_DB]);
 	if (i < 0) {
@@ -388,12 +477,28 @@ static int si_pep_mod_plat_init(struct si_pep_dev *pep)
 		return i;
 	}
 
-	for (i = 0; i < n_db_irqs; i++) {
-		if (i == MOD_NET_TXHEAD_DB)
-			continue;
+	/*
+	 * The completion interrupts of the DMA channel the network interface
+	 * transmits and receives on. Nothing depends on them: without one,
+	 * the transfers in its direction are waited for. They are left
+	 * disabled here and enabled for as long as there is an interface.
+	 */
+	snprintf(irqname, sizeof(irqname), "hdma_wch%d", ETH_DATA_DMA_CH);
+	irq = platform_get_irq_byname_optional(pdev, irqname);
+	if (irq > 0 && devm_request_irq(dev, irq, si_pep_net_tx_irq,
+				IRQF_NO_AUTOEN, "simaai_pep_net_tx", pep) == 0)
+		pep->net_tx_irq = irq;
+	else
+		si_err(pep, "No interrupt for '%s'", irqname);
 
-		si_pep_asr_db_enable_int(pep, db_int_descs[i].offset);
-	}
+	snprintf(irqname, sizeof(irqname), "hdma_rch%d", ETH_DATA_DMA_CH);
+	irq = platform_get_irq_byname_optional(pdev, irqname);
+	if (irq > 0 && devm_request_irq(dev, irq, si_pep_net_rx_irq,
+				IRQF_NO_AUTOEN, "simaai_pep_net_rx", pep) == 0)
+		pep->net_rx_irq = irq;
+	else
+		si_err(pep, "No interrupt for '%s'", irqname);
+
 #if 0
 	/* This will cause nested interrupts */
 	for (i = 0; i < 16; i++) {
@@ -414,13 +519,44 @@ static void si_pep_mod_plat_deinit(struct si_pep_dev *pep)
 {
 }
 
-static int si_pep_mod_local_init(struct si_pep_dev *pep)
+/*
+ * The network doorbell is deliberately left out. Its interrupt belongs to
+ * the netdev, which arms it in net_enable_rxint() when the interface comes
+ * up and masks it again on the way down; arming it here would deliver
+ * packets to an interface that is not open.
+ *
+ * So is the register the host keeps its receive interrupt enable in. It is
+ * a doorbell only by address: its value is read when a packet is sent and
+ * nothing is ever meant to ring it.
+ */
+static void si_pep_mod_enable_doorbells(struct si_pep_dev *pep)
 {
 	int i;
 
-	irq_work = alloc_workqueue("sima-mod", WQ_MEM_RECLAIM | WQ_HIGHPRI |
+	for (i = 0; i < n_db_irqs; i++) {
+		if (i == MOD_NET_TXHEAD_DB || i == MOD_NET_RXINT_DB)
+			continue;
+
+		si_pep_asr_db_enable_int(pep, db_int_descs[i].offset);
+	}
+}
+
+static void si_pep_mod_disable_doorbells(struct si_pep_dev *pep)
+{
+	int i;
+
+	for (i = 0; i < n_db_irqs; i++)
+		si_pep_asr_db_disable_int(pep, db_int_descs[i].offset);
+}
+
+static int si_pep_mod_local_init(struct si_pep_dev *pep)
+{
+	struct workqueue_struct *wq;
+	int i;
+
+	wq = alloc_workqueue("sima-mod", WQ_MEM_RECLAIM | WQ_HIGHPRI |
 			WQ_UNBOUND, 0);
-	if (!irq_work) {
+	if (!wq) {
 		si_err(pep, "Failed to allocate a workqueue for irq");
 		return -ENOMEM;
 	}
@@ -429,6 +565,16 @@ static int si_pep_mod_local_init(struct si_pep_dev *pep)
 	for (i = 0; i < SI_MAX_DQS; i++)
 		INIT_DELAYED_WORK(&d_dreq_cachers[i], dreq_cachers[i]);
 	INIT_DELAYED_WORK(&d_mreq_cacher, si_pep_mod_delayed_mreq_cacher);
+
+	/*
+	 * Publish the workqueue only once the work items it will be handed
+	 * are initialised. irq_work is what the doorbell handler tests before
+	 * it queues anything, so the store has to be the last of the group to
+	 * become visible -- otherwise the handler can find a usable workqueue
+	 * and hand it a work_struct that INIT_DELAYED_WORK has not reached,
+	 * which is the same NULL func it would have crashed on before.
+	 */
+	smp_store_release(&irq_work, wq);
 	si_pep_mod_set_soc_state(pep, SOC_STATE_INIT);
 
 	return 0;
@@ -436,14 +582,35 @@ static int si_pep_mod_local_init(struct si_pep_dev *pep)
 
 static void si_pep_mod_local_deinit(struct si_pep_dev *pep)
 {
+	struct workqueue_struct *wq = irq_work;
 	int i;
 
+	/*
+	 * Nothing to take down if local_init() never ran, or already undid
+	 * this: the work items are uninitialised and destroy_workqueue()
+	 * does not tolerate NULL.
+	 */
+	if (!wq)
+		return;
+
 	si_pep_mod_set_soc_state(pep, SOC_STATE_INIT);
+
+	/*
+	 * Withdraw the workqueue before freeing it, not after.
+	 *
+	 * Callers disarm the doorbells before getting here, so the handler
+	 * should already be quiet. But a freed workqueue whose pointer still
+	 * looks valid is the one mistake on this path with no recovery, and
+	 * the order that prevents it costs nothing: the handler cannot pick
+	 * up what it can no longer see.
+	 */
+	WRITE_ONCE(irq_work, NULL);
+
 	cancel_delayed_work(&mcmd_handler);
 	cancel_delayed_work(&d_mreq_cacher);
 	for (i = 0; i < SI_MAX_DQS; i++)
 		cancel_delayed_work(&d_dreq_cachers[i]);
-	destroy_workqueue(irq_work);
+	destroy_workqueue(wq);
 }
 
 static void si_pep_mod_net_set_val(struct si_pep_dev *pep,
@@ -482,6 +649,9 @@ static u16 si_pep_mod_net_get_val(struct si_pep_dev *pep,
 		break;
 	case rx_tail:
 		offset = MOD_OFF_NET_TXTAIL;
+		break;
+	case host_rxint:
+		offset = MOD_OFF_NET_RXINT;
 		break;
 	default:
 		return 0;
@@ -524,6 +694,11 @@ static void si_pep_mod_delayed_mcmd_handler(struct work_struct *iwork)
 
 }
 
+/*
+ * The host published a packet. Mask the doorbell and leave the rest to the
+ * poll, which fetches what the host has queued and turns the doorbell back
+ * on when it has caught up.
+ */
 static irqreturn_t si_pep_mod_net_rxhead_int_handler(int irq, void *arg)
 {
 	struct si_pep_dev *pep = g_pep_dev;
@@ -531,18 +706,7 @@ static irqreturn_t si_pep_mod_net_rxhead_int_handler(int irq, void *arg)
 
 	desc = (struct si_pep_db_int_desc*)arg;
 	si_pep_asr_db_clear_and_mask_int(pep, desc->offset);
-	
-	return IRQ_WAKE_THREAD;
-}
-
-static irqreturn_t si_pep_mod_net_rxhead_int_handler_t(int irq, void *arg)
-{
-	u16 head;
-	u16 tail;
-
-	head = net_get_rxhead((g_pep_dev));
-	tail = net_get_rxtail((g_pep_dev));
-	si_pep_check_packets(g_pep_dev, head, tail);
+	si_pep_net_rx_schedule(pep);
 
 	return IRQ_HANDLED;
 }
@@ -565,6 +729,16 @@ static irqreturn_t si_pep_mod_doorbell_int_handler(int irq, void *arg)
 	reg = readl(pep->asr_base + desc->offset);
 	/* Disable the interrupt and mask further interrupts until we are done */
 	si_pep_asr_db_clear_and_mask_int(pep, desc->offset);
+
+	/*
+	 * Probe has not reached local_init() yet, or teardown has already
+	 * passed local_deinit(). Either way there is no workqueue to defer to
+	 * and no queue context to act on, so leave the doorbell masked and
+	 * drop this one. enable_doorbells() re-arms it, and the host re-reads
+	 * the live head register when it does.
+	 */
+	if (!smp_load_acquire(&irq_work))
+		return IRQ_HANDLED;
 	
 	val = MOD_DOORBELL_VAL(reg);
 	si_dbg_l(pep, "Interrupt %d, Doorbell Interrupt %d, Ofset 0x%x, "
@@ -582,10 +756,23 @@ static irqreturn_t si_pep_mod_doorbell_int_handler(int irq, void *arg)
 			break;
 		case MOD_DCQ_DB_REM: /* cqe tail */
 			si_pep_recycle_qes(pep, SI_DCQ, qid);
-			break;
+			si_pep_asr_db_enable_int(pep, desc->offset);
+			/*
+			 * Again with the interrupt back on. These doorbells
+			 * carry a position, not an event, so one written
+			 * while the interrupt was masked raises nothing and
+			 * would otherwise leave this end believing the host
+			 * has consumed less than it has -- and refusing to
+			 * produce completions into a queue it thinks is
+			 * full. Re-reading costs a register access.
+			 */
+			si_pep_recycle_qes(pep, SI_DCQ, qid);
+			return IRQ_HANDLED;
 		case MOD_DRQ_DB_REM: /* rqe tail */
 			si_pep_recycle_qes(pep, SI_DRQ, qid);
-			break;
+			si_pep_asr_db_enable_int(pep, desc->offset);
+			si_pep_recycle_qes(pep, SI_DRQ, qid);
+			return IRQ_HANDLED;
 		default:
 			/* This should not happen, right? */
 			BUG();
@@ -619,10 +806,14 @@ static irqreturn_t si_pep_mod_doorbell_int_handler(int irq, void *arg)
 		break;
 	case MOD_MCQ_DB:	/* MCQ tail */
 		si_pep_recycle_qes(pep, SI_MCQ, 0);
-		break;
+		si_pep_asr_db_enable_int(pep, desc->offset);
+		si_pep_recycle_qes(pep, SI_MCQ, 0);
+		return IRQ_HANDLED;
 	case MOD_MRQ_DB:	/* MRQ tail */
 		si_pep_recycle_qes(pep, SI_MRQ, 0);
-		break;
+		si_pep_asr_db_enable_int(pep, desc->offset);
+		si_pep_recycle_qes(pep, SI_MRQ, 0);
+		return IRQ_HANDLED;
 	}
 
 handled:
@@ -645,6 +836,8 @@ const struct si_pep_drv_ops modalix_drv_ops = {
 	.local_init = si_pep_mod_local_init,
 	.platform_deinit = si_pep_mod_plat_deinit,
 	.local_deinit = si_pep_mod_local_deinit,
+	.enable_doorbells = si_pep_mod_enable_doorbells,
+	.disable_doorbells = si_pep_mod_disable_doorbells,
 	.set_soc_state = si_pep_mod_set_soc_state,
 	.net_set_val = si_pep_mod_net_set_val,
 	.net_get_val = si_pep_mod_net_get_val,
