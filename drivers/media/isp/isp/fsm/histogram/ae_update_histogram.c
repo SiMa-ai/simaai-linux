@@ -60,7 +60,7 @@ void ae_histogram_dgain_compensation( histogram_fsm_ptr_t p_fsm )
             }
         } else {
             if ( ispDGain < 0x100 )
-                LOG( LOG_ERR, "ispDGain %x < 0x100 is not handled; ispGDain not applied to histogram.", ispDGain );
+                LOG_CAT( ALOG_CAT_AE, LOG_ERR, "ispDGain %x < 0x100 is not handled; ispGDain not applied to histogram.", ispDGain );
         }
     }
 }
@@ -94,7 +94,7 @@ void ae_update_histogram_shading_lut( histogram_fsm_const_ptr_t p_fsm, int input
         acamera_isp_metering_hist_4_radial_shading_enable_write( cfg_offset, hist_radial_shading_enable );
         break;
     default:
-        LOG( LOG_ERR, "Invalid metering hist input" );
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "Invalid metering hist input" );
         break;
     }
 
@@ -106,7 +106,7 @@ void ae_update_histogram_shading_lut( histogram_fsm_const_ptr_t p_fsm, int input
     const uint32_t radial_shading_lut_size = calib_mgr_lut_len( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_SHADING_RADIAL_G );
 
     if ( ( radial_shading_lut_size >> 1 ) != ( ACAMERA_ISP_METERING_HIST_1_SHADING_LUT_ARRAY_DIM_0_SIZE - 1 ) ) {
-        LOG( LOG_ERR, "Failed to configure metering histogram %d shading lut. Radial shading (G) size mismatch (%d != %d).",
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "Failed to configure metering histogram %d shading lut. Radial shading (G) size mismatch (%d != %d).",
              input, ( radial_shading_lut_size >> 1 ), ( ACAMERA_ISP_METERING_HIST_1_SHADING_LUT_ARRAY_DIM_0_SIZE - 1 ) );
         return;
     }
@@ -130,7 +130,7 @@ void ae_update_histogram_shading_lut( histogram_fsm_const_ptr_t p_fsm, int input
             acamera_isp_metering_hist_4_shading_lut_write( cfg_offset, i, radial_shading_lut[i << 1] );
         break;
     default:
-        LOG( LOG_ERR, "Invalid metering hist input" );
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "Invalid metering hist input" );
         break;
     }
 }
@@ -206,7 +206,7 @@ void ae_update_histogram_wbgain( histogram_fsm_const_ptr_t p_fsm, int input )
         acamera_isp_metering_hist_4_gain_11_write( cfg_offset, wbGain[3] );
         break;
     default:
-        LOG( LOG_ERR, "Invalid metering hist input" );
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "Invalid metering hist input" );
         break;
     }
 }
@@ -240,8 +240,14 @@ void ae_update_histogram_black_level( histogram_fsm_const_ptr_t p_fsm, int input
             return;
         }
 
-        const int32_t black_level_shift = ISP_HISTOGRAM_INPUT_BIT_WIDTH - sensor_info.current_sensor_mode.channel_info.exposure_max_bit_width;
-        hist_bk_level = p_ictx->fsmgr.sensor_fsm.black_level << black_level_shift;
+        /* Shift the pedestal into the histogram domain from the depth the
+         * producer says it is expressed in, not the operating depth. */
+        const int32_t black_level_shift = ISP_HISTOGRAM_INPUT_BIT_WIDTH - (int32_t)sensor_info.black_level_bits;
+        if ( black_level_shift < 0 ) {
+            LOG_CAT( ALOG_CAT_AE, LOG_ERR, "Histogram black level shift is a negative value, check sensor configuration." );
+            return;
+        }
+        hist_bk_level = sensor_info.black_level << black_level_shift;
 #else
         return;
 #endif
@@ -273,7 +279,7 @@ void ae_update_histogram_black_level( histogram_fsm_const_ptr_t p_fsm, int input
         acamera_isp_metering_hist_4_black_11_write( cfg_offset, hist_bk_level );
         break;
     default:
-        LOG( LOG_WARNING, "Could not find the input port so not setting black level for it." );
+        LOG_CAT( ALOG_CAT_AE, LOG_WARNING, "Could not find the input port so not setting black level for it." );
     }
     return;
 }
@@ -377,7 +383,7 @@ void ae_update_histogram_geometry( histogram_fsm_const_ptr_t p_fsm, int input )
 #endif
         break;
     default:
-        LOG( LOG_ERR, "Invalid metering hist input" );
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "Invalid metering hist input" );
         break;
     }
 }
@@ -417,7 +423,7 @@ void ae_update_histogram_zone_weights( histogram_fsm_const_ptr_t p_fsm, int inpu
         weight_table_write = acamera_isp_metering_hist_4_weight_table_write;
         break;
     default:
-        LOG( LOG_ERR, "Invalid metering hist input" );
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "Invalid metering hist input" );
         return;
     }
 
@@ -431,18 +437,18 @@ void ae_update_histogram_zone_weights( histogram_fsm_const_ptr_t p_fsm, int inpu
     const uint32_t ae_zone_wght_ver_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AE_ZONE_WGHT_VER );
 
     if ( ( horz_zones * vert_zones ) > ISP_METERING_HISTOGRAM_ZONES_MAX ) {
-        LOG( LOG_CRIT, "AE zone weights update failed. Number of zones configured (%d * %d = %d) is out of range (%d)",
+        LOG_CAT( ALOG_CAT_AE, LOG_CRIT, "AE zone weights update failed. Number of zones configured (%d * %d = %d) is out of range (%d)",
              horz_zones, vert_zones, ( horz_zones * vert_zones ), ISP_METERING_HISTOGRAM_ZONES_MAX );
         return;
     }
 
     if ( horz_zones > ae_zone_wght_hor_len ) {
-        LOG( LOG_CRIT, "AE zone weight update failed. Nodes Used Horiz > ae_zone_wght_hor_len (%u > %u)", horz_zones, ae_zone_wght_hor_len );
+        LOG_CAT( ALOG_CAT_AE, LOG_CRIT, "AE zone weight update failed. Nodes Used Horiz > ae_zone_wght_hor_len (%u > %u)", horz_zones, ae_zone_wght_hor_len );
         return;
     }
 
     if ( vert_zones > ae_zone_wght_ver_len ) {
-        LOG( LOG_CRIT, "AE zone weight update failed. Nodes Used Vert > ae_zone_wght_ver_len (%u > %u)", vert_zones, ae_zone_wght_ver_len );
+        LOG_CAT( ALOG_CAT_AE, LOG_CRIT, "AE zone weight update failed. Nodes Used Vert > ae_zone_wght_ver_len (%u > %u)", vert_zones, ae_zone_wght_ver_len );
         return;
     }
 
@@ -502,7 +508,11 @@ void configure_histogram_neq_lut( histogram_fsm_const_ptr_t p_fsm, int input )
     if ( !calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL ) )
         return;
 
-    const decompander_ctrl *p_decompander_ctrl = (const decompander_ctrl *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL );
+    const decompander_ctrl *p_decompander_ctrl = (const decompander_ctrl *)calib_mgr_lut_get_sized(
+        ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL, sizeof( decompander_ctrl ) );
+
+    if ( p_decompander_ctrl == NULL )
+        return;
 
     // If we enable here for BE_FS, BE_DECOMPANDER or BE_SHADING, we need to add input_port = 0;
     // TODO: should check on decompanding happening in inputFormatter or gammaFE.
@@ -513,7 +523,7 @@ void configure_histogram_neq_lut( histogram_fsm_const_ptr_t p_fsm, int input )
 #endif
 
     if ( enable == 0 ) {
-        LOG( LOG_INFO, "Hist Neq lut OFF" );
+        LOG_CAT( ALOG_CAT_AE, LOG_INFO, "Hist Neq lut OFF" );
         /* coverity[const]*/
         switch ( input ) {
         case 0:
@@ -530,7 +540,7 @@ void configure_histogram_neq_lut( histogram_fsm_const_ptr_t p_fsm, int input )
             break;
         }
     } else {
-        LOG( LOG_INFO, "Hist Neq lut ON" );
+        LOG_CAT( ALOG_CAT_AE, LOG_INFO, "Hist Neq lut ON" );
 #ifdef ACAMERA_ISP_METERING_HIST_1_NEQ_LUT_POSITION_DEFAULT
         const uint8_t hist_neq_lut_pos = p_decompander_ctrl->hist_neq_lut_pos;
 #endif
@@ -583,7 +593,7 @@ void configure_histogram_neq_lut( histogram_fsm_const_ptr_t p_fsm, int input )
         }
     }
 #else
-    LOG( LOG_WARNING, "Histogram NEQ LUT is not present in Morgan ISP Revision 0!" );
+    LOG_CAT( ALOG_CAT_AE, LOG_WARNING, "Histogram NEQ LUT is not present in Morgan ISP Revision 0!" );
 #endif
 #endif // defined(ISP_HAS_DECOMPANDER_FSM)
 }
@@ -620,23 +630,23 @@ void histogram_configure_position( histogram_fsm_const_ptr_t p_fsm )
         acamera_isp_pipeline_histogram2_isp_switch_write( isp_base, 0 );
         acamera_isp_pipeline_histogram3_isp_switch_write( isp_base, 0 );
         acamera_isp_pipeline_histogram4_isp_switch_write( isp_base, 0 );
-        LOG( LOG_DEBUG, "AE_HISTOGRAM_TAP_AFTER_WDRGAIN" );
+        LOG_CAT( ALOG_CAT_AE, LOG_DEBUG, "AE_HISTOGRAM_TAP_AFTER_WDRGAIN" );
         break;
     case AE_HISTOGRAM_TAP_AFTER_FS:
         acamera_isp_pipeline_histogram1_isp_switch_write( isp_base, 1 );
-        LOG( LOG_DEBUG, "AE_HISTOGRAM_TAP_AFTER_FS" );
+        LOG_CAT( ALOG_CAT_AE, LOG_DEBUG, "AE_HISTOGRAM_TAP_AFTER_FS" );
         break;
     case AE_HISTOGRAM_TAP_AFTER_DECOMPANDER:
         acamera_isp_pipeline_histogram1_isp_switch_write( isp_base, 2 );
-        LOG( LOG_DEBUG, "AE_HISTOGRAM_TAP_AFTER_DECOMPANDER" );
+        LOG_CAT( ALOG_CAT_AE, LOG_DEBUG, "AE_HISTOGRAM_TAP_AFTER_DECOMPANDER" );
         break;
     case AE_HISTOGRAM_TAP_AFTER_SHADING:
         acamera_isp_pipeline_histogram1_isp_switch_write( isp_base, 3 );
-        LOG( LOG_DEBUG, "AE_HISTOGRAM_TAP_AFTER_SHADING" );
+        LOG_CAT( ALOG_CAT_AE, LOG_DEBUG, "AE_HISTOGRAM_TAP_AFTER_SHADING" );
         break;
     // Skip case AE_HISTOGRAM_TAP_AFTER_COMPAND: as hist needs to be squared (gamma_sqrt).
     default:
-        LOG( LOG_ERR, "Unsupported hist be value %#x.", ISP_HISTOGRAM_BE_POSITION );
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "Unsupported hist be value %#x.", ISP_HISTOGRAM_BE_POSITION );
         break;
     }
 }

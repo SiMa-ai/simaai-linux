@@ -204,13 +204,13 @@ int frame_stream_register_notify_callback( frame_stream_notify_callback callback
     if ( owner_id < 0 ) {
         // New callback registration mode
         if ( callback == NULL ) {
-            LOG( LOG_ERR, "Invalid parameter. Callback function pointer is NULL" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Callback function pointer is NULL" );
             return -1;
         } else if ( !events ) {
-            LOG( LOG_ERR, "Invalid parameter. Events mask is zero" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Events mask is zero" );
             return -1;
         } else if ( !contexts ) {
-            LOG( LOG_ERR, "Invalid parameter. Contexts mask is zero" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Contexts mask is zero" );
             return -1;
         }
 
@@ -230,20 +230,20 @@ int frame_stream_register_notify_callback( frame_stream_notify_callback callback
             }
         }
 
-        LOG( LOG_ERR, "Failed to register callback. Callback list is full" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to register callback. Callback list is full" );
         return -1;
 
     } else {
         // Update/Deregister existing callback mode
         if ( owner_id >= FRAME_STREAMER_CALLBACKS_MAX ) {
-            LOG( LOG_ERR, "Invalid parameter. Owner id (%d) is out of range [0;%d]",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Owner id (%d) is out of range [0;%d]",
                  owner_id, ( ( FRAME_STREAMER_CALLBACKS_MAX > 0 ) ? FRAME_STREAMER_CALLBACKS_MAX - 1 : 0 ) );
             return -1;
         }
 
         // Check if it is an update
         if ( ( callback != NULL ) && ( ( events == 0 ) || ( contexts == 0 ) ) ) {
-            LOG( LOG_ERR, "Invalid parameter. Events mask or contexts mask is zero" );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Events mask or contexts mask is zero" );
             return -1;
         }
 
@@ -271,24 +271,24 @@ int frame_stream_register_notify_callback( frame_stream_notify_callback callback
 int frame_stream_get_frame( const unsigned int ctx_id, const aframe_type_t type, const aframe_state_t state, aframe_t **frame )
 {
     if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Invalid parameter. Context id (%u) is out of range (0-%d).",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Context id (%u) is out of range (0-%d).",
              ctx_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? ( FIRMWARE_CONTEXT_NUMBER - 1 ) : 0 ) );
         return -1;
     } else if ( ( type <= AFRAME_TYPE_UNKNOWN ) || ( type >= AFRAME_TYPE_MAX ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", type );
         return -1;
     } else if ( ( state != AFRAME_STATE_EMPTY ) && ( state != AFRAME_STATE_FULL ) ) {
-        LOG( LOG_ERR, "Invalid parameter. State (%d) doesn't belong to any valid state.", state );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. State (%d) doesn't belong to any valid state.", state );
         return -1;
     } else if ( frame == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame pointer is NULL." );
         return -1;
     }
 
     int32_t is_stream_enabled;
     if ( frame_stream_get_param( ctx_id, type, FRAME_STREAM_PARAM_IS_ENABLED, &is_stream_enabled ) ) {
         is_stream_enabled = 1;
-        LOG( LOG_ERR, "Failed to get FRAME_STREAM_PARAM_IS_ENABLED parameter. Using default value (%d).", is_stream_enabled );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get FRAME_STREAM_PARAM_IS_ENABLED parameter. Using default value (%d).", is_stream_enabled );
     }
 
 	//LOG (LOG_INFO, "is stream enabled %d", is_stream_enabled);
@@ -300,7 +300,7 @@ int frame_stream_get_frame( const unsigned int ctx_id, const aframe_type_t type,
         if ( primary->get_frame ) {
             primary->get_frame( ctx_id, type, state, frame );
         } else {
-            LOG( LOG_ERR, "Failed to get frame (context id: %u, type: %d, state: %d). Primary streamer API <get_frame> is not initialised.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get frame (context id: %u, type: %d, state: %d). Primary streamer API <get_frame> is not initialised.",
                  ctx_id, type, state );
             return -1;
         }
@@ -308,7 +308,7 @@ int frame_stream_get_frame( const unsigned int ctx_id, const aframe_type_t type,
         if ( secondary->get_frame ) {
             secondary->get_frame( ctx_id, type, state, frame );
         } else {
-            LOG( LOG_ERR, "Failed to get frame (context id: %u, type: %d, state: %d). Secondary streamer API <get_frame> is not initialised.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get frame (context id: %u, type: %d, state: %d). Secondary streamer API <get_frame> is not initialised.",
                  ctx_id, type, state );
             return -1;
         }
@@ -320,18 +320,18 @@ int frame_stream_get_frame( const unsigned int ctx_id, const aframe_type_t type,
 int frame_stream_put_frame( aframe_t *frame )
 {
     if ( frame == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame pointer is NULL." );
         return -1;
     } else if ( frame->context_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame context id (%u) is out of range [0-%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame context id (%u) is out of range [0-%d].",
              frame->context_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? ( FIRMWARE_CONTEXT_NUMBER - 1 ) : 0 ) );
         return -1;
     } else if ( ( frame->type <= AFRAME_TYPE_UNKNOWN ) || ( frame->type >= AFRAME_TYPE_MAX ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame (context is: %u) type (%d) doesn't belong to any valid type.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame (context is: %u) type (%d) doesn't belong to any valid type.",
              frame->context_id, frame->type );
         return -1;
     } else if ( ( frame->state != AFRAME_STATE_EMPTY ) && ( frame->state != AFRAME_STATE_FULL ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame (context id: %u, type: %d) state (%d) doesn't belong to any valid state.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame (context id: %u, type: %d) state (%d) doesn't belong to any valid state.",
              frame->context_id, frame->type, frame->state );
         return -1;
     }
@@ -344,7 +344,7 @@ int frame_stream_put_frame( aframe_t *frame )
         if ( primary->put_frame ) {
             rc = primary->put_frame( frame );
         } else {
-            LOG( LOG_ERR, "Failed to put frame (context id: %u, type: %d, state: %d). Primary streamer API <put_frame> is not initialised.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to put frame (context id: %u, type: %d, state: %d). Primary streamer API <put_frame> is not initialised.",
                  frame->context_id, frame->type, frame->state );
             return -1;
         }
@@ -352,12 +352,12 @@ int frame_stream_put_frame( aframe_t *frame )
         if ( secondary->put_frame ) {
             rc = secondary->put_frame( frame );
         } else {
-            LOG( LOG_ERR, "Failed to put frame (context id: %u, type: %d, state: %d). Secondary streamer API <put_frame> is not initialised.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to put frame (context id: %u, type: %d, state: %d). Secondary streamer API <put_frame> is not initialised.",
                  frame->context_id, frame->type, frame->state );
             return -1;
         }
     } else {
-        LOG( LOG_ERR, "Invalid parameter. Frame (context id: %u, type: %d, state: %d) source (%d) doesn't belong to any valid source.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame (context id: %u, type: %d, state: %d) source (%d) doesn't belong to any valid source.",
              frame->context_id, frame->type, frame->state, frame->source );
         return -1;
     }
@@ -370,21 +370,21 @@ int frame_stream_put_frame( aframe_t *frame )
 int frame_stream_create( const frame_stream_cfg_t *stream_cfg )
 {
     if ( stream_cfg == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter. Frame stream configuration pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Frame stream configuration pointer is NULL." );
         return -1;
     } else if ( !stream_cfg->num_frames ) {
-        LOG( LOG_ERR, "Invalid parameter. Requested number of frames is zero." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Requested number of frames is zero." );
         return -1;
     } else if ( stream_cfg->context_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0-%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0-%d].",
              stream_cfg->context_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? ( FIRMWARE_CONTEXT_NUMBER - 1 ) : 0 ) );
         return -1;
     } else if ( ( stream_cfg->num_planes == 0 ) || ( stream_cfg->num_planes > AFRAME_MAX_PLANES ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Requested number of planes (%u) is out of range [1;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Requested number of planes (%u) is out of range [1;%d].",
              stream_cfg->num_planes, AFRAME_MAX_PLANES );
         return -1;
     } else if ( ( stream_cfg->type <= AFRAME_TYPE_UNKNOWN ) || ( stream_cfg->type >= AFRAME_TYPE_MAX ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", stream_cfg->type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", stream_cfg->type );
         return -1;
     }
 
@@ -393,11 +393,11 @@ int frame_stream_create( const frame_stream_cfg_t *stream_cfg )
 
     if ( primary->create ) {
         if ( primary->create( stream_cfg ) ) {
-            LOG( LOG_ERR, "Failed to create stream (context id: %u, type: %d, streamer: primary).", stream_cfg->context_id, stream_cfg->type );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create stream (context id: %u, type: %d, streamer: primary).", stream_cfg->context_id, stream_cfg->type );
             return -1;
         }
     } else {
-        LOG( LOG_ERR, "Failed to create stream (context id: %u, type: %d). Primary streamer API <create> is not initialised.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create stream (context id: %u, type: %d). Primary streamer API <create> is not initialised.",
              stream_cfg->context_id, stream_cfg->type );
         return -1;
     }
@@ -406,11 +406,11 @@ int frame_stream_create( const frame_stream_cfg_t *stream_cfg )
     if ( primary->create != secondary->create ) {
         if ( secondary->create ) {
             if ( secondary->create( stream_cfg ) ) {
-                LOG( LOG_ERR, "Failed to create stream (context id: %u, type: %d, streamer: secondary).", stream_cfg->context_id, stream_cfg->type );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create stream (context id: %u, type: %d, streamer: secondary).", stream_cfg->context_id, stream_cfg->type );
                 return -1;
             }
         } else {
-            LOG( LOG_ERR, "Failed to create stream (context id: %u, type: %d). Secondary streamer API <create> is not initialised.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to create stream (context id: %u, type: %d). Secondary streamer API <create> is not initialised.",
                  stream_cfg->context_id, stream_cfg->type );
             return -1;
         }
@@ -422,11 +422,11 @@ int frame_stream_create( const frame_stream_cfg_t *stream_cfg )
 int frame_stream_destroy( const unsigned int ctx_id, const aframe_type_t type, const unsigned int force )
 {
     if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Invalid parameter. Context id (%u) is out of range (0-%d).",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Context id (%u) is out of range (0-%d).",
              ctx_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? ( FIRMWARE_CONTEXT_NUMBER - 1 ) : 0 ) );
         return -1;
     } else if ( ( type <= AFRAME_TYPE_UNKNOWN ) || ( type >= AFRAME_TYPE_MAX ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", type );
         return -1;
     }
 
@@ -436,11 +436,11 @@ int frame_stream_destroy( const unsigned int ctx_id, const aframe_type_t type, c
     int rc = 0;
     if ( primary->destroy ) {
         if ( primary->destroy( ctx_id, type, force ) ) {
-            LOG( LOG_ERR, "Failed to destroy stream (context id: %u, type: %d, streamer: primary).", ctx_id, type );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy stream (context id: %u, type: %d, streamer: primary).", ctx_id, type );
             rc = -1;
         }
     } else {
-        LOG( LOG_ERR, "Failed to destroy stream (context id: %u, type: %d). Primary streamer API <destroy> is not initialised.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy stream (context id: %u, type: %d). Primary streamer API <destroy> is not initialised.",
              ctx_id, type );
         return -1;
     }
@@ -449,11 +449,11 @@ int frame_stream_destroy( const unsigned int ctx_id, const aframe_type_t type, c
     if ( primary->destroy != secondary->destroy ) {
         if ( secondary->destroy ) {
             if ( secondary->destroy( ctx_id, type, force ) ) {
-                LOG( LOG_ERR, "Failed to destroy stream (context id: %u, type: %d, streamer: secondary).", ctx_id, type );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy stream (context id: %u, type: %d, streamer: secondary).", ctx_id, type );
                 rc = -1;
             }
         } else {
-            LOG( LOG_ERR, "Failed to destroy stream (context id: %u, type: %d). Secondary streamer API <destroy> is not initialised.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy stream (context id: %u, type: %d). Secondary streamer API <destroy> is not initialised.",
                  ctx_id, type );
             return -1;
         }
@@ -465,13 +465,13 @@ int frame_stream_destroy( const unsigned int ctx_id, const aframe_type_t type, c
 int frame_stream_set_param( const unsigned int ctx_id, const aframe_type_t type, const frame_stream_param_type_t param_id, const int32_t value )
 {
     if ( ( param_id < 0 ) || ( param_id >= FRAME_STREAM_PARAM_TYPE_MAX ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream parameter id (%d) is out of range [0;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Stream parameter id (%d) is out of range [0;%d].",
              param_id, ( ( FRAME_STREAM_PARAM_TYPE_MAX > 0 ) ? ( FRAME_STREAM_PARAM_TYPE_MAX - 1 ) : ( 0 ) ) );
         return -1;
     }
 
     if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0;%d]",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0;%d]",
              ctx_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? ( FIRMWARE_CONTEXT_NUMBER - 1 ) : ( 0 ) ) );
         return -1;
     }
@@ -492,7 +492,7 @@ int frame_stream_set_param( const unsigned int ctx_id, const aframe_type_t type,
         break;
 
     default:
-        LOG( LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", type );
         return -1;
     }
 
@@ -508,18 +508,18 @@ int frame_stream_set_param( const unsigned int ctx_id, const aframe_type_t type,
 int frame_stream_get_param( const unsigned int ctx_id, const aframe_type_t type, const frame_stream_param_type_t param_id, int32_t *value )
 {
     if ( value == NULL ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream parameter value pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Stream parameter value pointer is NULL." );
         return -1;
     }
 
     if ( ( param_id < 0 ) || ( param_id >= FRAME_STREAM_PARAM_TYPE_MAX ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream parameter id (%d) is out of range [0;%d].",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Stream parameter id (%d) is out of range [0;%d].",
              param_id, ( ( FRAME_STREAM_PARAM_TYPE_MAX > 0 ) ? ( FRAME_STREAM_PARAM_TYPE_MAX - 1 ) : ( 0 ) ) );
         return -1;
     }
 
     if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0;%d]",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Context id (%u) is out of range [0;%d]",
              ctx_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? ( FIRMWARE_CONTEXT_NUMBER - 1 ) : ( 0 ) ) );
         return -1;
     }
@@ -540,12 +540,12 @@ int frame_stream_get_param( const unsigned int ctx_id, const aframe_type_t type,
         break;
 
     default:
-        LOG( LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid parameter. Type (%d) doesn't belong to any valid type.", type );
         return -1;
     }
 
     if ( !params[param_id].flags.initialised ) {
-        LOG( LOG_ERR, "Uninitialised. Stream parameter (param_id: %u) has not been set.", param_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Uninitialised. Stream parameter (param_id: %u) has not been set.", param_id );
         return -1;
     }
 

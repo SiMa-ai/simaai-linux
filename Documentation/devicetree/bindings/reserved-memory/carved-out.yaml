@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/reserved-memory/carved-out.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Carved-out Memory Region
+
+description: |
+  Specifies that the reserved memory region has been carved out of the
+  main memory allocator, and is intended to be used by the OS as a
+  dedicated memory allocator.
+
+maintainers:
+  - Maxime Ripard <mripard@kernel.org>
+
+properties:
+  compatible:
+    const: carved-out
+
+  reg:
+    description: region of memory that is carved out.
+
+allOf:
+  - $ref: reserved-memory.yaml
+  - not:
+      required:
+        - reusable
+  - not:
+      required:
+        - no-map
+
+required:
+  - compatible
+  - reg
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    reserved-memory {
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        memory@12340000 {
+            compatible = "carved-out";
+            reg = <0x12340000 0x00800000>;
+        };
+    };

@@ -20,5 +20,6 @@
 #include "modalix-sio.dtsi"
 #include "modalix-vis.dtsi"
 #include "modalix-aux.dtsi"
+#include "modalix-thermal.dtsi"
 #include "modalix-noc.dtsi"
-#include "modalix-uio.dtsi"
+#include "modalix-mla.dtsi"

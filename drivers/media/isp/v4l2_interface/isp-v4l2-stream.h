@@ -89,6 +89,9 @@ typedef struct _isp_v4l2_stream_t {
     int stream_direction_started[V4L2_STREAM_DIRECTION_MAX];
     int stream_started;
 
+	/* V4L2 sequence is local to each queue and resets at STREAMON. */
+	u32 sequence[V4L2_STREAM_DIRECTION_MAX];
+
     /* Input stream */
     isp_v4l2_stream_common *stream_common;
 

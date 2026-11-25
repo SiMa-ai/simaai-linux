@@ -74,11 +74,19 @@ MODULE_PARM_DESC(fstrobe_delay, "Set fstrobe delay from end all lines starting t
 /* V_TIMING internal */
 #define IMX477_REG_FRAME_LENGTH		CCI_REG16(0x0340)
 #define IMX477_VBLANK_MIN		48
+/* 8- and 10-bit output stalls below about 52 lines */
+#define IMX477_VBLANK_MIN_8_10BIT	64
 #define IMX477_FRAME_LENGTH_MAX		0xffdc
 
 /* H_TIMING internal */
 #define IMX477_REG_LINE_LENGTH		CCI_REG16(0x0342)
 #define IMX477_LINE_LENGTH_MAX		0xfff0
+#define IMX477_LINE_LENGTH_MIN_8_10BIT	3100
+/* Unbinned line floors at the rated frame rates */
+#define IMX477_LINE_LENGTH_MIN_FULL_12BIT	6801
+#define IMX477_LINE_LENGTH_MIN_FULL_8_10BIT	4521
+/* Minimum line blanking the sensor reports */
+#define IMX477_HBLANK_MIN		440
 
 /* Long exposure multiplier */
 #define IMX477_LONG_EXP_SHIFT_MAX	7
@@ -87,7 +95,11 @@ MODULE_PARM_DESC(fstrobe_delay, "Set fstrobe delay from end all lines starting t
 /* Exposure control */
 #define IMX477_REG_EXPOSURE		CCI_REG16(0x0202)
 #define IMX477_EXPOSURE_OFFSET		22
-#define IMX477_EXPOSURE_MIN		4
+/*
+ * Below 8 lines the binned RAW10 modes emit malformed frames (every other
+ * line dropped, board-measured at 4 and 6 lines; 5/7 borderline).
+ */
+#define IMX477_EXPOSURE_MIN		8
 #define IMX477_EXPOSURE_STEP		1
 #define IMX477_EXPOSURE_DEFAULT		0x640
 #define IMX477_EXPOSURE_MAX		(IMX477_FRAME_LENGTH_MAX - \
@@ -109,10 +121,13 @@ MODULE_PARM_DESC(fstrobe_delay, "Set fstrobe delay from end all lines starting t
 
 #define IMX477_REG_IOP_PXCK_DIV		CCI_REG8(0x0309)
 #define IMX477_REG_IOP_SYSCK_DIV	CCI_REG8(0x030b)
-  #define IMX477_IOP_SYSCK_DIV		0x02
 #define IMX477_REG_IOP_PREDIV		CCI_REG8(0x030d)
   #define IMX477_IOP_PREDIV		0x02
 #define IMX477_REG_IOP_MPY		CCI_REG16(0x030e)
+/* Output PLL range */
+#define IMX477_IOP_PLL_MIN		1200000000ULL
+#define IMX477_IOP_PLL_MAX		2100000000ULL
+#define IMX477_IOP_MPY_MIN		105
 
 /* Test Pattern Control */
 #define IMX477_REG_TEST_PATTERN		CCI_REG16(0x0600)
@@ -140,6 +155,14 @@ MODULE_PARM_DESC(fstrobe_delay, "Set fstrobe delay from end all lines starting t
   #define IMX477_DPHY_CTRL_UI		1
   #define IMX477_DPHY_CTRL_REGISTER	2
 #define IMX477_REG_REQ_LINK_BIT_RATE	CCI_REG32(0x0820)
+
+/* Lane deskew enables */
+#define IMX477_REG_PERIODIC_DESKEW	CCI_REG8(0x0830)
+#define IMX477_REG_INITIAL_DESKEW	CCI_REG8(0x0832)
+/* D-PHY needs deskew above 1.5 Gbps per lane */
+#define IMX477_DESKEW_LANE_RATE		1500000000ULL
+
+#define IMX477_MAX_LINK_FREQS		8
 
 /* Trigger mode */
 #define IMX477_REG_MC_MODE		CCI_REG8(0x3f0b)
@@ -519,7 +542,6 @@ static const struct cci_reg_sequence mode_common_regs[] = {
 	{CCI_REG8(0x9e9f), 0x00},
 	{CCI_REG8(0x0301), 0x05},
 	{CCI_REG8(0x0303), 0x02},
-	{IMX477_REG_IOP_SYSCK_DIV, IMX477_IOP_SYSCK_DIV},
 	{IMX477_REG_IOP_PREDIV, IMX477_IOP_PREDIV},
 	{CCI_REG8(0x0310), 0x01},
 	{CCI_REG8(0x080a), 0x00},
@@ -671,6 +693,72 @@ static const struct cci_reg_sequence mode_4032x3040_regs[] = {
 	{CCI_REG8(0x3f57), 0xae},
 };
 
+/*
+ * 12MPix DIG_CROP'd to 3968 wide: RAW10 packed stride 3968*10/8 = 4960 =
+ * 155*32, 32-byte ISP-aligned.
+ */
+static const struct cci_reg_sequence mode_3968x3040_regs[] = {
+	{CCI_REG8(0x0344), 0x00},
+	{CCI_REG8(0x0345), 0x00},
+	{CCI_REG8(0x0346), 0x00},
+	{CCI_REG8(0x0347), 0x00},
+	{CCI_REG8(0x0348), 0x0f},
+	{CCI_REG8(0x0349), 0xd7},
+	{CCI_REG8(0x034a), 0x0b},
+	{CCI_REG8(0x034b), 0xdf},
+	{CCI_REG8(0x00e3), 0x00},
+	{CCI_REG8(0x00e4), 0x00},
+	{CCI_REG8(0x00fc), 0x0a},
+	{CCI_REG8(0x00fd), 0x0a},
+	{CCI_REG8(0x00fe), 0x0a},
+	{CCI_REG8(0x00ff), 0x0a},
+	{CCI_REG8(0x0900), 0x00},
+	{CCI_REG8(0x0901), 0x11},
+	{CCI_REG8(0x3c01), 0x03},
+	{CCI_REG8(0x3c02), 0xa2},
+	{CCI_REG8(0x5748), 0x07},
+	{CCI_REG8(0x5749), 0xff},
+	{CCI_REG8(0x574a), 0x00},
+	{CCI_REG8(0x574b), 0x00},
+	{CCI_REG8(0x7b75), 0x0a},
+	{CCI_REG8(0x7b76), 0x0c},
+	{CCI_REG8(0x7b77), 0x07},
+	{CCI_REG8(0x7b78), 0x06},
+	{CCI_REG8(0x7b79), 0x3c},
+	{CCI_REG8(0x7b53), 0x01},
+	{CCI_REG8(0x9369), 0x5a},
+	{CCI_REG8(0x936b), 0x55},
+	{CCI_REG8(0x936d), 0x28},
+	{CCI_REG8(0x9304), 0x00},
+	{CCI_REG8(0x9305), 0x00},
+	{CCI_REG8(0xa2a9), 0x60},
+	{CCI_REG8(0xa2b7), 0x00},
+	{CCI_REG8(0x0401), 0x00},
+	{CCI_REG8(0x0404), 0x00},
+	{CCI_REG8(0x0405), 0x10},
+	{CCI_REG8(0x0408), 0x00},
+	{CCI_REG8(0x0409), 0x2c},	/* DIG_CROP_X_OFFSET 44: centre in 4056 */
+	{CCI_REG8(0x040a), 0x00},
+	{CCI_REG8(0x040b), 0x00},
+	{CCI_REG8(0x040c), 0x0f},
+	{CCI_REG8(0x040d), 0x80},	/* DIG_CROP_IMAGE_WIDTH = 0x0f80 = 3968 */
+	{CCI_REG8(0x040e), 0x0b},
+	{CCI_REG8(0x040f), 0xe0},
+	{CCI_REG8(0x034c), 0x0f},
+	{CCI_REG8(0x034d), 0x80},	/* X_OUT_SIZE = 0x0f80 = 3968 */
+	{CCI_REG8(0x034e), 0x0b},
+	{CCI_REG8(0x034f), 0xe0},
+	{CCI_REG8(0x0305), 0x04},
+	{CCI_REG8(0x0306), 0x01},
+	{CCI_REG8(0x0307), 0x5e},
+	{CCI_REG8(0xe04c), 0x00},
+	{CCI_REG8(0xe04d), 0x7f},
+	{CCI_REG8(0xe04e), 0x00},
+	{CCI_REG8(0xe04f), 0x1f},
+	{CCI_REG8(0x3f56), 0x02},
+	{CCI_REG8(0x3f57), 0xae},
+};
+
 /* 12 mpix cropped to 16:9 10fps */
 static const struct cci_reg_sequence mode_4056x2160_regs[] = {
 	{CCI_REG8(0x0344), 0x00},
@@ -721,6 +809,69 @@ static const struct cci_reg_sequence mode_4056x2160_regs[] = {
 	{CCI_REG8(0x040f), 0x70},
 	{CCI_REG8(0x034c), 0x0f},
 	{CCI_REG8(0x034d), 0xd8},
+	{CCI_REG8(0x034e), 0x08},
+	{CCI_REG8(0x034f), 0x70},
+	{CCI_REG8(0x0305), 0x04},
+	{CCI_REG8(0x0306), 0x01},
+	{CCI_REG8(0x0307), 0x5e},
+	{CCI_REG8(0xe04c), 0x00},
+	{CCI_REG8(0xe04d), 0x7f},
+	{CCI_REG8(0xe04e), 0x00},
+	{CCI_REG8(0xe04f), 0x1f},
+	{CCI_REG8(0x3f56), 0x02},
+	{CCI_REG8(0x3f57), 0xae},
+};
+
+/* 4056x2160 cropped to 3840 wide for a 32-byte-aligned stride */
+static const struct cci_reg_sequence mode_3840x2160_regs[] = {
+	{CCI_REG8(0x0344), 0x00},
+	{CCI_REG8(0x0345), 0x00},
+	{CCI_REG8(0x0346), 0x01},
+	{CCI_REG8(0x0347), 0xb8},
+	{CCI_REG8(0x0348), 0x0f},
+	{CCI_REG8(0x0349), 0xd7},
+	{CCI_REG8(0x034a), 0x0a},
+	{CCI_REG8(0x034b), 0x27},
+	{CCI_REG8(0x00e3), 0x00},
+	{CCI_REG8(0x00e4), 0x00},
+	{CCI_REG8(0x00fc), 0x0a},
+	{CCI_REG8(0x00fd), 0x0a},
+	{CCI_REG8(0x00fe), 0x0a},
+	{CCI_REG8(0x00ff), 0x0a},
+	{CCI_REG8(0x0900), 0x00},
+	{CCI_REG8(0x0901), 0x11},
+	{CCI_REG8(0x3c01), 0x03},
+	{CCI_REG8(0x3c02), 0xa2},
+	{CCI_REG8(0x5748), 0x07},
+	{CCI_REG8(0x5749), 0xff},
+	{CCI_REG8(0x574a), 0x00},
+	{CCI_REG8(0x574b), 0x00},
+	{CCI_REG8(0x7b75), 0x0a},
+	{CCI_REG8(0x7b76), 0x0c},
+	{CCI_REG8(0x7b77), 0x07},
+	{CCI_REG8(0x7b78), 0x06},
+	{CCI_REG8(0x7b79), 0x3c},
+	{CCI_REG8(0x7b53), 0x01},
+	{CCI_REG8(0x9369), 0x5a},
+	{CCI_REG8(0x936b), 0x55},
+	{CCI_REG8(0x936d), 0x28},
+	{CCI_REG8(0x9304), 0x00},
+	{CCI_REG8(0x9305), 0x00},
+	{CCI_REG8(0xa2a9), 0x60},
+	{CCI_REG8(0xa2b7), 0x00},
+	{CCI_REG8(0x0401), 0x00},
+	{CCI_REG8(0x0404), 0x00},
+	{CCI_REG8(0x0405), 0x10},
+	{CCI_REG8(0x0408), 0x00},
+	{CCI_REG8(0x0409), 0x6c},
+	{CCI_REG8(0x040a), 0x00},
+	{CCI_REG8(0x040b), 0x00},
+	{CCI_REG8(0x040c), 0x0f},
+	{CCI_REG8(0x040d), 0x00},
+	{CCI_REG8(0x040e), 0x08},
+	{CCI_REG8(0x040f), 0x70},
+	{CCI_REG8(0x034c), 0x0f},
+	{CCI_REG8(0x034d), 0x00},
 	{CCI_REG8(0x034e), 0x08},
 	{CCI_REG8(0x034f), 0x70},
 	{CCI_REG8(0x0305), 0x04},
@@ -1061,6 +1212,93 @@ static const struct cci_reg_sequence mode_1332x990_regs[] = {
 	{CCI_REG8(0x3f57), 0xbf},
 };
 
+/* 1332x990 binned mode DIG_CROP'd to a 32-byte-stride-aligned 1280 wide (RAW10/RAW12). */
+static const struct cci_reg_sequence mode_1280x990_regs[] = {
+	{CCI_REG8(0x420b), 0x01},
+	{CCI_REG8(0x990c), 0x00},
+	{CCI_REG8(0x990d), 0x08},
+	{CCI_REG8(0x9956), 0x8c},
+	{CCI_REG8(0x9957), 0x64},
+	{CCI_REG8(0x9958), 0x50},
+	{CCI_REG8(0x9a48), 0x06},
+	{CCI_REG8(0x9a49), 0x06},
+	{CCI_REG8(0x9a4a), 0x06},
+	{CCI_REG8(0x9a4b), 0x06},
+	{CCI_REG8(0x9a4c), 0x06},
+	{CCI_REG8(0x9a4d), 0x06},
+	{CCI_REG8(0x0340), 0x04},
+	{CCI_REG8(0x0341), 0x1a},
+	{CCI_REG8(0x0344), 0x00},
+	{CCI_REG8(0x0345), 0x00},
+	{CCI_REG8(0x0346), 0x02},
+	{CCI_REG8(0x0347), 0x10},
+	{CCI_REG8(0x0348), 0x0f},
+	{CCI_REG8(0x0349), 0xd7},
+	{CCI_REG8(0x034a), 0x09},
+	{CCI_REG8(0x034b), 0xcf},
+	{CCI_REG8(0x00e3), 0x00},
+	{CCI_REG8(0x00e4), 0x00},
+	{CCI_REG8(0x00fc), 0x0a},
+	{CCI_REG8(0x00fd), 0x0a},
+	{CCI_REG8(0x00fe), 0x0a},
+	{CCI_REG8(0x00ff), 0x0a},
+	{CCI_REG8(0xe013), 0x00},
+	{CCI_REG8(0x0220), 0x00},
+	{CCI_REG8(0x0221), 0x11},
+	{CCI_REG8(0x0381), 0x01},
+	{CCI_REG8(0x0383), 0x01},
+	{CCI_REG8(0x0385), 0x01},
+	{CCI_REG8(0x0387), 0x01},
+	{CCI_REG8(0x0900), 0x01},
+	{CCI_REG8(0x0901), 0x22},
+	{CCI_REG8(0x0902), 0x02},
+	{CCI_REG8(0x3140), 0x02},
+	{CCI_REG8(0x3c00), 0x00},
+	{CCI_REG8(0x3c01), 0x01},
+	{CCI_REG8(0x3c02), 0x9c},
+	{CCI_REG8(0x5748), 0x00},
+	{CCI_REG8(0x5749), 0x00},
+	{CCI_REG8(0x574a), 0x00},
+	{CCI_REG8(0x574b), 0xa4},
+	{CCI_REG8(0x7b75), 0x0e},
+	{CCI_REG8(0x7b76), 0x09},
+	{CCI_REG8(0x7b77), 0x08},
+	{CCI_REG8(0x7b78), 0x06},
+	{CCI_REG8(0x7b79), 0x34},
+	{CCI_REG8(0x7b53), 0x00},
+	{CCI_REG8(0x9369), 0x73},
+	{CCI_REG8(0x936b), 0x64},
+	{CCI_REG8(0x936d), 0x5f},
+	{CCI_REG8(0x9304), 0x03},
+	{CCI_REG8(0x9305), 0x80},
+	{CCI_REG8(0xa2a9), 0x27},
+	{CCI_REG8(0xa2b7), 0x03},
+	{CCI_REG8(0x0401), 0x00},
+	{CCI_REG8(0x0404), 0x00},
+	{CCI_REG8(0x0405), 0x10},
+	{CCI_REG8(0x0408), 0x01},  // DIG_CROP_X_OFFSET = 374 (centre 1280 in 2028)
+	{CCI_REG8(0x0409), 0x76},
+	{CCI_REG8(0x040a), 0x00},
+	{CCI_REG8(0x040b), 0x00},
+	{CCI_REG8(0x040c), 0x05},  // DIG_CROP_IMAGE_WIDTH = 1280
+	{CCI_REG8(0x040d), 0x00},
+	{CCI_REG8(0x040e), 0x03},
+	{CCI_REG8(0x040f), 0xde},
+	{CCI_REG8(0x034c), 0x05},  // X_OUTPUT_SIZE = 1280
+	{CCI_REG8(0x034d), 0x00},
+	{CCI_REG8(0x034e), 0x03},
+	{CCI_REG8(0x034f), 0xde},
+	{CCI_REG8(0x0305), 0x02},
+	{CCI_REG8(0x0306), 0x00},
+	{CCI_REG8(0x0307), 0xaf},
+	{CCI_REG8(0xe04c), 0x00},
+	{CCI_REG8(0xe04d), 0x5f},
+	{CCI_REG8(0xe04e), 0x00},
+	{CCI_REG8(0xe04f), 0x1f},
+	{CCI_REG8(0x3f56), 0x00},
+	{CCI_REG8(0x3f57), 0xbf},
+};
+
 /* Mode configs */
 static const struct imx477_mode supported_modes[] = {
 	{
@@ -1096,6 +1334,22 @@ static const struct imx477_mode supported_modes[] = {
 		},
 	},
 	{
+		/* 12MPix DIG_CROP'd to 3968 wide: RAW10 32-byte ISP stride (no scaler) */
+		.width = 3968,
+		.height = 3040,
+		.crop = {
+			.left = IMX477_PIXEL_ARRAY_LEFT + 44,
+			.top = IMX477_PIXEL_ARRAY_TOP,
+			.width = 3968,
+			.height = 3040,
+		},
+		.frm_length_default = 3500,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(mode_3968x3040_regs),
+			.regs = mode_3968x3040_regs,
+		},
+	},
+	{
 		/* 12MPix DIG_CROP'd to 4032 wide for 32-byte ISP stride (no scaler) */
 		.width = 4032,
 		.height = 3040,
@@ -1125,6 +1379,22 @@ static const struct imx477_mode supported_modes[] = {
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_4056x2160_regs),
 			.regs = mode_4056x2160_regs,
+		},
+	},
+	{
+		/* 3840x2160 centred in 4056x2160 */
+		.width = 3840,
+		.height = 2160,
+		.crop = {
+			.left = IMX477_PIXEL_ARRAY_LEFT + 108,
+			.top = IMX477_PIXEL_ARRAY_TOP + 440,
+			.width = 3840,
+			.height = 2160,
+		},
+		.frm_length_default = 2600,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(mode_3840x2160_regs),
+			.regs = mode_3840x2160_regs,
 		},
 	},
 	{
@@ -1197,6 +1467,26 @@ static const struct imx477_mode supported_modes[] = {
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1332x990_regs),
 			.regs = mode_1332x990_regs,
+		}
+	},
+	{
+		/* 1280x990: 2x2 binned, aligned width for clean ISP RAW10/RAW12. */
+		.width = 1280,
+		.height = 990,
+		.crop = {
+			/*
+			 * DIG_CROP takes 1280 of 2028 binned columns at offset
+			 * 374, i.e. sensor columns 748..3307.
+			 */
+			.left = IMX477_PIXEL_ARRAY_LEFT + 748,
+			.top = IMX477_PIXEL_ARRAY_TOP + 528,
+			.width = 2560,
+			.height = 1980,
+		},
+		.frm_length_default = 1050,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(mode_1280x990_regs),
+			.regs = mode_1280x990_regs,
 		}
 	}
 };
@@ -1293,8 +1583,13 @@ struct imx477 {
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *hblank;
 
+	/* Usable link frequencies and their output PLL settings */
+	s64 link_freqs[IMX477_MAX_LINK_FREQS];
+	u16 iop_pll_mpy[IMX477_MAX_LINK_FREQS];
+	u8 iop_sysck_div[IMX477_MAX_LINK_FREQS];
+	unsigned int num_link_freqs;
+	unsigned int link_freq_index;
 	u64 link_freq_value;
-	u16 iop_pll_mpy;
 
 	/* Current mode */
 	const struct imx477_mode *mode;
@@ -1500,6 +1795,8 @@ static int imx477_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	return 0;
 }
 
+static void imx477_set_framing_limits(struct imx477 *imx477);
+
 static void imx477_adjust_exposure_range(struct imx477 *imx477)
 {
 	int exposure_max, exposure_def;
@@ -1543,6 +1840,17 @@ static int imx477_set_ctrl(struct v4l2_ctrl *ctrl)
 	 */
 	if (ctrl->id == V4L2_CID_VBLANK)
 		imx477_adjust_exposure_range(imx477);
+
+	/* The next stream rewrites the common registers for the new rate */
+	if (ctrl->id == V4L2_CID_LINK_FREQ) {
+		if (ctrl->val != imx477->link_freq_index) {
+			imx477->link_freq_index = ctrl->val;
+			imx477->link_freq_value = imx477->link_freqs[ctrl->val];
+			imx477->common_regs_written = false;
+			imx477_set_framing_limits(imx477);
+		}
+		return 0;
+	}
 
 	/*
 	 * Applying V4L2 control value only happens
@@ -1748,41 +2056,47 @@ static int imx477_get_pad_format(struct v4l2_subdev *sd,
 
 static void imx477_set_framing_limits(struct imx477 *imx477)
 {
-	unsigned int hblank_min;
+	unsigned int hblank_min, vblank_min;
 	u64 line_length_min;
-	int bpp;
+	int bpp, vblank_def;
 	const struct imx477_mode *mode = imx477->mode;
 
 	/* Default to no long exposure multiplier. */
 	imx477->long_exp_shift = 0;
 
+	bpp = imx477_get_bpp(imx477->fmt_code);
+	vblank_min = bpp == 12 ? IMX477_VBLANK_MIN : IMX477_VBLANK_MIN_8_10BIT;
+	vblank_def = max_t(int, mode->frm_length_default - mode->height,
+			   vblank_min);
+
 	/* Update limits and set FPS to default */
 	__v4l2_ctrl_modify_range(imx477->vblank,
-				 IMX477_VBLANK_MIN,
+				 vblank_min,
 				 ((1 << IMX477_LONG_EXP_SHIFT_MAX) *
 					IMX477_FRAME_LENGTH_MAX) - mode->height,
-				 1, mode->frm_length_default - mode->height);
+				 1, vblank_def);
 
 	/* Setting this will adjust the exposure limits as well. */
-	__v4l2_ctrl_s_ctrl(imx477->vblank,
-			   mode->frm_length_default - mode->height);
+	__v4l2_ctrl_s_ctrl(imx477->vblank, vblank_def);
 
-	bpp = imx477_get_bpp(imx477->fmt_code);
-
-	line_length_min = mode->width * bpp * (u64)IMX477_PIXEL_RATE;
-	do_div(line_length_min, imx477->link_freq_value * 2 * 2 /*LANES*/);
+	line_length_min = div64_u64(mode->width * bpp * (u64)IMX477_PIXEL_RATE,
+				    imx477->link_freq_value * 2 *
+				    imx477->num_data_lanes);
 	/* Allow 500pixel clocks for HS<>LP transitions (approx 0.6usecs) */
 	line_length_min += 500;
 
-	/*
-	 * 1332x990 12bit mode appears to need additional horizontal blanking
-	 * compared to all other modes. Empirically determined setting with
-	 * link freq of 750MHz where it still gives valid images. The limit
-	 * leaves all other modes unchanged as their line times are inherently
-	 * greater.
-	 */
-	if (bpp == 12)
-		line_length_min = max(line_length_min, 1332 + 4600);
+	/* Binned readout breaks below these line lengths */
+	line_length_min = max_t(u64, line_length_min,
+				bpp == 12 ? 1332 + 4600 :
+				IMX477_LINE_LENGTH_MIN_8_10BIT);
+	/* Unbinned readout: hold the rated frame rate */
+	if (mode->crop.width == mode->width)
+		line_length_min = max_t(u64, line_length_min,
+					bpp == 12 ?
+					IMX477_LINE_LENGTH_MIN_FULL_12BIT :
+					IMX477_LINE_LENGTH_MIN_FULL_8_10BIT);
+	line_length_min = max_t(u64, line_length_min,
+				mode->width + IMX477_HBLANK_MIN);
 
 	hblank_min = line_length_min - mode->width;
 	__v4l2_ctrl_modify_range(imx477->hblank, hblank_min,
@@ -1900,6 +2214,7 @@ static int imx477_start_streaming(struct imx477 *imx477)
 	const struct imx477_reg_list *extra_regs;
 	unsigned int fst_width;
 	unsigned int fst_mult;
+	bool deskew;
 	int ret, tm, bpp;
 
 	if (!imx477->common_regs_written) {
@@ -1910,16 +2225,22 @@ static int imx477_start_streaming(struct imx477 *imx477)
 		cci_multi_reg_write(imx477->regmap, extra_regs->regs,
 				    extra_regs->num_of_regs, &ret);
 
-		/* Update the link frequency PLL multiplier register */
+		/* Output PLL for the link frequency */
 		cci_write(imx477->regmap, IMX477_REG_IOP_MPY,
-			  imx477->iop_pll_mpy, &ret);
+			  imx477->iop_pll_mpy[imx477->link_freq_index], &ret);
+		cci_write(imx477->regmap, IMX477_REG_IOP_SYSCK_DIV,
+			  imx477->iop_sysck_div[imx477->link_freq_index], &ret);
 
-		/*
-		 * Bit rate = link freq * 2 for DDR * 2 for num lanes.
-		 * 16p16 fixed point in the register. Ignore fractional part.
-		 */
+		/* Total bit rate over all lanes, Mbps in 16p16 */
 		cci_write(imx477->regmap, IMX477_REG_REQ_LINK_BIT_RATE,
-			  (((unsigned long)imx477->link_freq_value / 1000000) * 2 * 2) << 16,
+			  (u32)(div_u64(imx477->link_freq_value, 1000000) * 2 *
+				imx477->num_data_lanes) << 16,
+			  &ret);
+
+		deskew = imx477->link_freq_value * 2 > IMX477_DESKEW_LANE_RATE;
+		cci_write(imx477->regmap, IMX477_REG_INITIAL_DESKEW, deskew,
+			  &ret);
+		cci_write(imx477->regmap, IMX477_REG_PERIODIC_DESKEW, deskew,
 			  &ret);
 		/*
 		 * DPHY timings are those specified for 450MHz. Switch to auto
@@ -1944,6 +2265,11 @@ static int imx477_start_streaming(struct imx477 *imx477)
 
 		imx477->common_regs_written = true;
 	}
+
+	/* The first usable rate is the default; any other was set by userspace */
+	if (imx477->link_freq_index)
+		dev_info(&client->dev, "link frequency %llu Hz, set by userspace\n",
+			 imx477->link_freq_value);
 
 	/* Apply default values of current mode */
 	reg_list = &imx477->mode->reg_list;
@@ -2064,9 +2390,10 @@ static int imx477_set_stream(struct v4l2_subdev *sd, int enable)
 
 	imx477->streaming = enable;
 
-	/* vflip and hflip cannot change during streaming */
+	/* The flips and the link frequency cannot change during streaming */
 	__v4l2_ctrl_grab(imx477->vflip, enable);
 	__v4l2_ctrl_grab(imx477->hflip, enable);
+	__v4l2_ctrl_grab(imx477->link_freq, enable);
 
 	mutex_unlock(&imx477->mutex);
 
@@ -2254,13 +2581,12 @@ static int imx477_init_controls(struct imx477 *imx477)
 	if (imx477->pixel_rate)
 		imx477->pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	/* LINK_FREQ is also read only */
 	imx477->link_freq =
 		v4l2_ctrl_new_int_menu(ctrl_hdlr, &imx477_ctrl_ops,
-				       V4L2_CID_LINK_FREQ, 0, 0,
-				       &imx477->link_freq_value);
-	if (imx477->link_freq)
-		imx477->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+				       V4L2_CID_LINK_FREQ,
+				       imx477->num_link_freqs - 1,
+				       imx477->link_freq_index,
+				       imx477->link_freqs);
 
 	/*
 	 * Create the controls here, but mode specific limits are setup
@@ -2357,23 +2683,32 @@ static void imx477_free_controls(struct imx477 *imx477)
 	mutex_destroy(&imx477->mutex);
 }
 
-static int imx477_check_link_freq(u64 link_frequency, u16 *mpy_out)
+/* Lane-rate divider and multiplier that keep the output PLL in range */
+static int imx477_check_link_freq(u64 link_frequency, u16 *mpy_out,
+				  u8 *sysck_div_out)
 {
-	u64 mpy = link_frequency * 2 * IMX477_IOP_SYSCK_DIV * IMX477_IOP_PREDIV;
-	u64 tmp;
+	static const u8 sysck_divs[] = { 1, 2, 4 };
+	u32 pll_in = IMX477_XCLK_FREQ / IMX477_IOP_PREDIV;
+	unsigned int i;
 
-	do_div(mpy, IMX477_XCLK_FREQ);
+	for (i = 0; i < ARRAY_SIZE(sysck_divs); i++) {
+		u64 pll = link_frequency * 2 * sysck_divs[i];
+		u64 mpy;
+		u32 rem;
 
-	tmp = mpy * (IMX477_XCLK_FREQ / IMX477_IOP_PREDIV);
-	do_div(tmp, IMX477_IOP_SYSCK_DIV * 2);
+		if (pll < IMX477_IOP_PLL_MIN || pll > IMX477_IOP_PLL_MAX)
+			continue;
 
-	if (tmp != link_frequency)
-		return -EINVAL;
+		mpy = div_u64_rem(pll, pll_in, &rem);
+		if (rem || mpy < IMX477_IOP_MPY_MIN)
+			continue;
 
-	if (mpy_out)
 		*mpy_out = mpy;
+		*sysck_div_out = sysck_divs[i];
+		return 0;
+	}
 
-	return 0;
+	return -EINVAL;
 }
 
 static int imx477_check_hwcfg(struct device *dev, struct imx477 *imx477)
@@ -2383,7 +2718,7 @@ static int imx477_check_hwcfg(struct device *dev, struct imx477 *imx477)
 		.bus_type = V4L2_MBUS_CSI2_DPHY
 	};
 	int ret = -EINVAL;
-	int i;
+	unsigned int i, n = 0;
 
 	endpoint = fwnode_graph_get_next_endpoint(dev_fwnode(dev), NULL);
 	if (!endpoint) {
@@ -2396,9 +2731,11 @@ static int imx477_check_hwcfg(struct device *dev, struct imx477 *imx477)
 		goto error_out;
 	}
 
-	/* Check the number of MIPI CSI2 data lanes */
-	if ((ep_cfg.bus.mipi_csi2.num_data_lanes) == 0 || (ep_cfg.bus.mipi_csi2.num_data_lanes) > 4) {
-		dev_err(dev, "invalid lanes configured\n");
+	/* The sensor drives 2 or 4 data lanes */
+	if (ep_cfg.bus.mipi_csi2.num_data_lanes != 2 &&
+	    ep_cfg.bus.mipi_csi2.num_data_lanes != 4) {
+		dev_err(dev, "%u data lanes configured, 2 or 4 supported\n",
+			ep_cfg.bus.mipi_csi2.num_data_lanes);
 		goto error_out;
 	}
 	imx477->num_data_lanes = ep_cfg.bus.mipi_csi2.num_data_lanes;
@@ -2409,19 +2746,30 @@ static int imx477_check_hwcfg(struct device *dev, struct imx477 *imx477)
 		goto error_out;
 	}
 
+	/* Keep every listed rate the output PLL can make */
 	for (i = 0; i < ep_cfg.nr_of_link_frequencies; i++) {
-		if (!imx477_check_link_freq(ep_cfg.link_frequencies[i],
-					    &imx477->iop_pll_mpy)) {
-			imx477->link_freq_value = ep_cfg.link_frequencies[i];
+		u64 freq = ep_cfg.link_frequencies[i];
+
+		if (n == IMX477_MAX_LINK_FREQS) {
+			dev_warn(dev, "ignoring link frequencies after %u usable ones\n",
+				 n);
 			break;
 		}
+		if (imx477_check_link_freq(freq, &imx477->iop_pll_mpy[n],
+					   &imx477->iop_sysck_div[n])) {
+			dev_warn(dev, "link frequency %llu Hz not supported\n",
+				 freq);
+			continue;
+		}
+		imx477->link_freqs[n++] = freq;
 	}
 
-	if (i == ep_cfg.nr_of_link_frequencies) {
+	if (!n) {
 		dev_err(dev, "No supported link frequency configured\n");
-			ret = -EINVAL;
-			goto error_out;
+		goto error_out;
 	}
+	imx477->num_link_freqs = n;
+	imx477->link_freq_value = imx477->link_freqs[0];
 
 	ret = 0;
 

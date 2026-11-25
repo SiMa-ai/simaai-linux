@@ -114,7 +114,7 @@ void raw_fe_reload_calibration( raw_fe_fsm_ptr_t p_fsm )
         acamera_isp_raw_frontend_ge_enable_write( isp_base, 1 );
         acamera_isp_raw_frontend_dp_enable_write( isp_base, 1 );
     } else {
-        LOG( LOG_ERR, "Cannot configure raw_fe, calibration table MODALIX_ISP_CALIB_RAW_FRONTEND_CONFIG not found!" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Cannot configure raw_fe, calibration table MODALIX_ISP_CALIB_RAW_FRONTEND_CONFIG not found!" );
         acamera_isp_raw_frontend_ge_enable_write( isp_base, 0 );
         acamera_isp_raw_frontend_dp_enable_write( isp_base, 0 );
     }

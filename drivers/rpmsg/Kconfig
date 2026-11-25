@@ -81,4 +81,15 @@ config RPMSG_VIRTIO
 	select RPMSG_NS
 	select VIRTIO
 
+config RPMSG_SIMAAI_CVU
+	tristate "SiMa.ai CVU/EV74 job submission driver"
+	depends on RPMSG
+	depends on DMA_SHARED_BUFFER
+	depends on SIMAAI_STU
+	help
+	  Say y here to enable the SiMa.ai CVU/EV74 job submission driver.
+	  It exposes /dev/cvu, resolving dma-buf fds to EV74 bus addresses
+	  through the EVXX STU and dispatching graph jobs to the remote core
+	  over rpmsg. Userspace passes dma-buf fds only, never addresses.
+
 endmenu

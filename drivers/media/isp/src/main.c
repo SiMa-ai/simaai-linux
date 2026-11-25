@@ -50,6 +50,7 @@
 // Include V4L2 specific headers, define structs and names
 #if V4L2_INTERFACE_BUILD
 #include "isp-v4l2.h"
+#include "isp-sensor-subdev.h"
 #define ISP_V4L2_MODULE_NAME "isp-v4l2"
 static struct v4l2_device v4l2_dev;
 #else
@@ -113,7 +114,7 @@ static int isp_fw_process( void *data )
     semaphore_t sem = data;
 
     int32_t ret = 1;
-	LOG(LOG_INFO, "ISP : fw process thread %d", current->pid);
+	LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "ISP : fw process thread %d", current->pid);
     while ( !kthread_should_stop() || ret ) {
 
         /* no timeout needed as it will be wokenup when packet arrives.
@@ -123,12 +124,12 @@ static int isp_fw_process( void *data )
 
 	if (pm_runtime_resume_and_get(&g_pdev->dev) >=0) {
             ret = acamera_process_event();
-            pm_runtime_put(&g_pdev->dev);
+            pm_runtime_put_autosuspend(&g_pdev->dev);
         } else {
             ret = 0;
         }
     }
-    LOG( LOG_INFO, "isp_fw_process stop" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isp_fw_process stop" );
     return 0;
 }
 
@@ -150,9 +151,9 @@ static void isp_cdma_init( void )
     int i, result;
 
     // Initialize CDMA address.
-    LOG( LOG_NOTICE, "Copying default register space to CDMA spaces..." );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "Copying default register space to CDMA spaces..." );
     if ( PHY_ADDR_ISP == 0 || PHY_ADDR_CDMA == 0 ) {
-        LOG( LOG_CRIT, "- Error, NULL address base. (ISP=%x, CDMA=%x)", PHY_ADDR_ISP, PHY_ADDR_CDMA );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "- Error, NULL address base. (ISP=%x, CDMA=%x)", PHY_ADDR_ISP, PHY_ADDR_CDMA );
     }
 
     // Load product ID on back-up space to check if it's loaded.
@@ -168,7 +169,7 @@ static void isp_cdma_init( void )
     api_reg = acamera_isp_id_api_read( PHY_ADDR_ISP );
     revision_reg =  acamera_isp_id_revision_read( PHY_ADDR_ISP );
 
-    LOG( LOG_NOTICE, "- Product ID: REG = %x, BACKUP = %x", pid_reg, pid_backup );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "- Product ID: REG = %x, BACKUP = %x", pid_reg, pid_backup );
 
     if ( pid_reg != pid_backup ) {
         // Make back-up of register init to ctx_backup_physaddr.
@@ -177,7 +178,7 @@ static void isp_cdma_init( void )
 			LOG (LOG_CRIT, "ERROR : getting dev address for bus address, %#lx", PHY_ADDR_ISP);
 			return;
 		}
-        LOG( LOG_NOTICE, "- Preparing CDMA base with default ISP registers on %llx...", ctx_backup_physaddr );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "- Preparing CDMA base with default ISP registers on %llx...", ctx_backup_physaddr );
 		LOG (LOG_INFO, "phys isp address %#x, dev address %#llx", PHY_ADDR_ISP, phys_isp_addr);
 		system64_memcpy_phy2phy( ctx_backup_physaddr, (uint64_t)phys_isp_addr, LEN_ADDR_ISP );
     }
@@ -191,7 +192,7 @@ static void isp_cdma_init( void )
 			LOG (LOG_CRIT, "ERROR : getting bus address for phys address, %#llx", base_addr);
 			return;
 		}
-	    LOG( LOG_NOTICE, "- Base address for CTX#%02d to %#llx - %llx...", i, base_addr, settings[i].isp_base );
+	    LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "- Base address for CTX#%02d to %#llx - %llx...", i, base_addr, settings[i].isp_base );
     }
 #endif
     // Otherwise, do nothing if MFCE fsm is not present
@@ -257,7 +258,7 @@ static struct devfreq_dev_profile isp_devfreq_profile = {
 static int isp_fw_init_kthread_func( void *pdev )
 {
     int result = 0;
-    LOG( LOG_INFO, "isp_fw_init start" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isp_fw_init start" );
     // The firmware supports multicontext.
     // It means that the customer can use the same firmware for controlling
     // several instances of different sensors/ISP. To initialize a context,
@@ -285,9 +286,9 @@ static int isp_fw_init_kthread_func( void *pdev )
         isp_cdma_init();
 
         result = acamera_init( settings, FIRMWARE_CONTEXT_NUMBER, isp_sync_semaphore );
-        LOG( LOG_INFO, "isp_fw_init::acamera_init() result %d", result );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isp_fw_init::acamera_init() result %d", result );
     }
-    LOG( LOG_INFO, "isp_fw_init result %d", result );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isp_fw_init result %d", result );
 
 // V4L2 builds do not require automatic context start
 #if !V4L2_INTERFACE_BUILD
@@ -302,19 +303,19 @@ static int isp_fw_init_kthread_func( void *pdev )
 #endif
 
     if ( result == 0 ) {
-        LOG( LOG_INFO, "Start firmware process thread." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Start firmware process thread." );
         isp_fw_process_thread = kthread_run( isp_fw_process, isp_sync_semaphore, "isp_process" );
         if ( isp_fw_process_thread == NULL ) {
-            LOG( LOG_CRIT, "Failed to start firmware processing thread." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to start firmware processing thread." );
         } else {
-            LOG( LOG_DEBUG, "isp_fw_process_thread pid: %d", isp_fw_process_thread->pid );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "isp_fw_process_thread pid: %d", isp_fw_process_thread->pid );
         }
     }
 
 // V4L2 device and instance initialisation
 #if V4L2_INTERFACE_BUILD
     if ( pdev == NULL ) {
-        LOG( LOG_ERR, "Failed to register V4L2 device. Platform device pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to register V4L2 device. Platform device pointer is NULL." );
         goto release_pm;
     }
 
@@ -323,23 +324,28 @@ static int isp_fw_init_kthread_func( void *pdev )
     v4l2_device_set_name( &v4l2_dev, ISP_V4L2_MODULE_NAME, &drv_instance );
     result = v4l2_device_register( &( ( (struct platform_device *)pdev )->dev ), &v4l2_dev );
     if ( result == 0 ) {
-        LOG( LOG_INFO, "V4L2 device successfully registered." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "V4L2 device successfully registered." );
     } else {
-        LOG( LOG_ERR, "Failed to register V4L2 device (%d).", result );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to register V4L2 device (%d).", result );
         goto release_pm;
     }
 
     result = isp_v4l2_create_instance( &v4l2_dev );
     if ( result < 0 ) {
-        LOG( LOG_ERR, "Failed to register ISP V4L2 driver (%d).", result );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to register ISP V4L2 driver (%d).", result );
         goto release_pm;
     }
+
+    // Async-bind the real per-context sensor subdevs (mainline V4L2 path).
+    // Non-fatal: file-replay / unpopulated contexts simply stay unbound.
+    result = isp_sensor_subdev_register( &v4l2_dev );
+    if ( result < 0 )
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "ISP sensor subdev acquisition unavailable (%d).", result );
 #endif
 
 release_pm:
-    pm_runtime_put(&g_pdev->dev);
-
-    LOG( LOG_INFO, "isp_fw_init_thread exit" );
+    pm_runtime_put_autosuspend(&g_pdev->dev);
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "isp_fw_init_thread exit" );
     isp_fw_init_thread = NULL;
     return PTR_ERR_OR_ZERO( isp_fw_process_thread );
 }
@@ -357,7 +363,7 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
     // Init DMA memory
     rc = of_reserved_mem_device_init( &pdev->dev );
     if ( rc ) {
-        LOG( LOG_ERR, "Error, Could not get reserved memory" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, Could not get reserved memory" );
         return -1;
     }
 
@@ -367,31 +373,31 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
     // get device node
     resmem_node = of_parse_phandle( pdev->dev.of_node, "memory-region", 0 );
     if ( resmem_node == NULL ) {
-        LOG( LOG_ERR, "No 'memory-region' node, please check your DTB file" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "No 'memory-region' node, please check your DTB file" );
         return -1;
     }
     // convert to resource
     rc = of_address_to_resource( resmem_node, 0, &resmem );
     of_node_put( resmem_node );
     if ( rc != 0 ) {
-        LOG( LOG_ERR, "Failed to convert memory-region node into a resource" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to convert memory-region node into a resource" );
         return -1;
     }
     g_resmem_remaining = (size_t)resource_size( &resmem );
-    LOG( LOG_NOTICE, "CMA region: start = 0x%zx, size = 0x%zx", (size_t)resmem.start, g_resmem_remaining );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "CMA region: start = 0x%zx, size = 0x%zx", (size_t)resmem.start, g_resmem_remaining );
 
   if (dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64))) {
-      LOG(LOG_ERR, "Could not set DMA mask\n");
+      LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Could not set DMA mask\n");
       return -1;
     }
 
     // Initialize IRQs
     irq = platform_get_irq_byname( pdev, "ISP" );
     if ( irq > 0 ) {
-        LOG( LOG_NOTICE, "ISP irq = %d, flags = 0x%x, %s id: %d!", irq, IRQF_TRIGGER_HIGH, pdev->name, pdev->id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "ISP irq = %d, flags = 0x%x, %s id: %d!", irq, IRQF_TRIGGER_HIGH, pdev->name, pdev->id );
         system_interrupts_set_irq( (void *)pdev, irq, IRQF_TRIGGER_HIGH);
     } else {
-        LOG( LOG_ERR, "Error, no irq found from DT" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, no irq found from DT" );
         return -1;
     }
 
@@ -402,7 +408,7 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
 		else
 			return PTR_ERR(stu);
 	} else
-		LOG( LOG_NOTICE, "SUCCESS getting STU handle");
+		LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "SUCCESS getting STU handle");
 
     ispclk = devm_clk_get(&pdev->dev, "gate");
     if (IS_ERR(ispclk))
@@ -415,6 +421,8 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
     if (rc) return rc;
 
     pm_runtime_set_active(&pdev->dev);
+    pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
+    pm_runtime_use_autosuspend(&pdev->dev);
     pm_runtime_enable(&pdev->dev);
 
      /* OPP table defines the frequencies the PLL may run at. */
@@ -442,13 +450,13 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
     if ( rc == 0 ) {
         isp_fw_init_thread = kthread_run( isp_fw_init_kthread_func, pdev, "isp_fw_init" );
         if ( isp_fw_init_thread == NULL ) {
-            LOG( LOG_CRIT, "Failed to start firmware init thread." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to start firmware init thread." );
         } else {
-            LOG( LOG_DEBUG, "isp_fw_init_thread pid: %d", isp_fw_init_thread->pid );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "isp_fw_init_thread pid: %d", isp_fw_init_thread->pid );
         }
     }
 
-	LOG( LOG_INFO, "ISP driver probe complete !!!");
+	LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "ISP driver probe complete !!!");
 
     return PTR_ERR_OR_ZERO( isp_fw_init_thread );
 
@@ -468,7 +476,7 @@ static int __init fw_module_init( void )
 {
     int32_t rc = 0;
 
-    LOG( LOG_INFO, "ISP %s", __FUNCTION__ );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "ISP %s", __FUNCTION__ );
 
     rc = platform_driver_probe( &isp_platform_driver,
                                 isp_platform_probe );
@@ -480,7 +488,7 @@ static int __init fw_module_init( void )
  */
 static void __exit fw_module_exit( void )
 {
-    LOG( LOG_INFO, "ISP %s", __FUNCTION__ );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "ISP %s", __FUNCTION__ );
 
     if ( isp_fw_init_thread ) {
         kthread_stop( isp_fw_init_thread );
@@ -505,13 +513,14 @@ static void __exit fw_module_exit( void )
 
 // V4L2 device and instance deinitialization
 #if V4L2_INTERFACE_BUILD
-    // Destroy V4L2 instances and unregister device
+    // Tear down sensor async notifier, then destroy V4L2 instances
+    isp_sensor_subdev_unregister();
     isp_v4l2_destroy_instance();
 #endif
 
     system_cma_print_tracking_info();
     if ( g_resmem_nodes_allocated > 0 ) {
-        LOG( LOG_WARNING, "system_cma: memory leak detected (%zu nodes)!", g_resmem_nodes_allocated );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "system_cma: memory leak detected (%zu nodes)!", g_resmem_nodes_allocated );
     }
 
     bsp_destroy();
@@ -523,7 +532,6 @@ static void __exit fw_module_exit( void )
 
     if (g_pdev)
         pm_runtime_disable(&g_pdev->dev);
-
 }
 
 module_init( fw_module_init );

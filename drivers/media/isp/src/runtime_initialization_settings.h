@@ -21,26 +21,13 @@
 #include "acamera_settings.h"
 
 
-extern void sensor_init_common( void **, uint8_t location, sensor_control_t *ctrl, const sensor_options_t *const );
-
-/* All contexts are identical at init time — sensor and calibrations are
- * resolved later from libcamera. Stamp the same entry FIRMWARE_CONTEXT_NUMBER
- * times so every slot in [0, FIRMWARE_CONTEXT_NUMBER) has a non-NULL
- * sensor_init; missing entries would crash acamera_init() the moment a
- * high-numbered ctx_id is used. .get_calibrations is intentionally NULL
- * here — ctrl_channel_init() overwrites every slot with the per-ctx
- * cbs[i] dispatcher that pulls calibrations from the IPA-pushed blob
- * (V4L2 MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB). The kernel-baked
- * acamera_calibrations_<sensor>.c data and acamera_get_calibrations_<sensor>()
- * helpers were removed in the same change. */
+/* All contexts are identical at init time — the sensor is resolved later
+ * from the real V4L2 subdev and calibrations from the IPA-pushed blob
+ * (V4L2 MODALIX_ISP_V4L2_CID_CALIBRATION_BLOB; ctrl_channel_init()
+ * overwrites .get_calibrations per ctx). */
 #define ACAMERA_CTX_SETTINGS_DEFAULT \
     {                                                       \
-        .sensor_init = sensor_init_common,                  \
         .sensor_name = "COMMON",                            \
-        .sensor_options = {                                 \
-            .is_remote = 0,                                 \
-            .preset_mode = 0,                               \
-        },                                                  \
         .get_calibrations = NULL,                           \
         .context_options = {                                \
             .cmd_if_is_passive_mode = 1,                    \

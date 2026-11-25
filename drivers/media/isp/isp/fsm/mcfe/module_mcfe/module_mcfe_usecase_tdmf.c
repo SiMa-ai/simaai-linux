@@ -33,7 +33,7 @@ static int release_streams_frames_bufsets( module_mcfe_usecase_config_t *config,
 {
     // Check configuration pointer
     if ( !config ) {
-        LOG( LOG_ERR, "Failed to release streams, frames and buffer sets. Use-case configuration data pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to release streams, frames and buffer sets. Use-case configuration data pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -42,7 +42,7 @@ static int release_streams_frames_bufsets( module_mcfe_usecase_config_t *config,
         module_mcfe_bufset_frames_t frames = {0};
 
         if ( module_mcfe_bufset_get_frames( config->bufset_raw, &frames ) != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Failed to get frame description structure from raw buffer set." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get frame description structure from raw buffer set." );
         } else {
             int i;
             for ( i = 0; i < frames.num_frames; i++ ) {
@@ -52,7 +52,7 @@ static int release_streams_frames_bufsets( module_mcfe_usecase_config_t *config,
         }
 
         if ( module_mcfe_bufset_destroy( config->bufset_raw ) != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Failed to destroy buffer raw buffer set." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy buffer raw buffer set." );
         }
 
         config->bufset_raw = NULL;
@@ -63,7 +63,7 @@ static int release_streams_frames_bufsets( module_mcfe_usecase_config_t *config,
         module_mcfe_bufset_frames_t frames = {0};
 
         if ( module_mcfe_bufset_get_frames( config->bufset_out, &frames ) != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Failed to get frame description structure from out buffer set." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get frame description structure from out buffer set." );
         } else {
             int i;
             for ( i = 0; i < frames.num_frames; i++ ) {
@@ -73,7 +73,7 @@ static int release_streams_frames_bufsets( module_mcfe_usecase_config_t *config,
         }
 
         if ( module_mcfe_bufset_destroy( config->bufset_out ) != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Failed to destroy buffer out buffer set." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy buffer out buffer set." );
         }
 
         config->bufset_out = NULL;
@@ -83,7 +83,7 @@ static int release_streams_frames_bufsets( module_mcfe_usecase_config_t *config,
     // Destroy frame streams
     if ( config->config_states.curr & MODULE_MCFE_USECASE_RAW_STREAM_CONFIGURED ) {
         if ( frame_stream_destroy( config->slot_id, AFRAME_TYPE_RAW, force ) ) {
-            LOG( LOG_ERR, "Failed to destroy raw frame stream." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy raw frame stream." );
         }
 
         config->config_states.curr &= ( ~MODULE_MCFE_USECASE_RAW_STREAM_CONFIGURED );
@@ -91,7 +91,7 @@ static int release_streams_frames_bufsets( module_mcfe_usecase_config_t *config,
 
     if ( config->config_states.curr & MODULE_MCFE_USECASE_OUT_STREAM_CONFIGURED ) {
         if ( frame_stream_destroy( config->slot_id, AFRAME_TYPE_OUT, force ) ) {
-            LOG( LOG_ERR, "Failed to destroy output frame stream." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy output frame stream." );
         }
 
         config->config_states.curr &= ( ~MODULE_MCFE_USECASE_OUT_STREAM_CONFIGURED );
@@ -116,7 +116,7 @@ static int release_inputs_slot( module_mcfe_usecase_config_t *config )
 
     // Check configuration pointer
     if ( !config ) {
-        LOG( LOG_ERR, "Failed to release inputs and slot. Use-case configuration data pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to release inputs and slot. Use-case configuration data pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -126,13 +126,13 @@ static int release_inputs_slot( module_mcfe_usecase_config_t *config )
         // Stop input videos.
         rc = module_mcfe_input_stop_video( config->video_input_idx );
         if ( rc != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Failed to stop video input %d (context id: %u).", config->video_input_idx, config->slot_id );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to stop video input %d (context id: %u).", config->video_input_idx, config->slot_id );
             return rc;
         }
 
         rc = module_mcfe_input_remove_video( config->video_input_idx, &( config->input_port_ids ), &( config->input_config ) );
         if ( rc != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Failed to remove video inputs (context id: %u).", config->slot_id );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to remove video inputs (context id: %u).", config->slot_id );
             return rc;
         }
 
@@ -143,7 +143,7 @@ static int release_inputs_slot( module_mcfe_usecase_config_t *config )
     if ( config->config_states.curr & MODULE_MCFE_USECASE_SLOT_CONFIGURED ) {
         rc = module_mcfe_slot_destroy( config->slot_id );
         if ( rc != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Failed to destroy slot (context id: %u).", config->slot_id );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy slot (context id: %u).", config->slot_id );
             return rc;
         } else {
             config->config_states.curr &= ( ~MODULE_MCFE_USECASE_SLOT_CONFIGURED );
@@ -205,27 +205,27 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
 
     // Check configuration pointers
     if ( !config || !sensor_config || !output_config ) {
-        LOG( LOG_ERR, "Failed to configure TDMF use-case. Input parameter pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to configure TDMF use-case. Input parameter pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
     // Check if usecase configuration initialised
     if ( !config->initialized ) {
-        LOG( LOG_ERR, "Failed to configure TDMF use-case. Use-case configuration data is not initialised." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to configure TDMF use-case. Use-case configuration data is not initialised." );
         return MCFE_ERR_NOT_INIT;
     }
 
     // Check if there is enough MCFE input channels available
     int free_input_count = module_mcfe_slot_get_free_inputs( config->slot_id );
     if ( sensor_config->num_channel > free_input_count ) {
-        LOG( LOG_ERR, "Failed to configure TDMF use-case. Not enough free MCFE input channels available (required: %d, available: %d).",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to configure TDMF use-case. Not enough free MCFE input channels available (required: %d, available: %d).",
              sensor_config->num_channel,
              free_input_count );
 
         return MCFE_ERR_GENERAL;
     }
 
-    LOG( LOG_INFO, "Configuring TDMF use-case (context id: %u, channels: %d)", config->slot_id, sensor_config->num_channel );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Configuring TDMF use-case (context id: %u, channels: %d)", config->slot_id, sensor_config->num_channel );
 
     // Output frame stream config header
     frame_stream_cfg.num_planes = output_config->num_planes;
@@ -294,7 +294,7 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
     }
 
     if ( frame_stream_create( &frame_stream_cfg ) != 0 ) {
-        LOG( LOG_ERR, "Error, failed to create output frame stream." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to create output frame stream." );
         return MCFE_ERR_GENERAL;
     } else {
         config->config_states.curr |= MODULE_MCFE_USECASE_OUT_STREAM_CONFIGURED;
@@ -333,7 +333,7 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
     }
 
     if ( frame_stream_create( &frame_stream_cfg ) != 0 ) {
-        LOG( LOG_ERR, "Error, failed to create raw frame stream." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to create raw frame stream." );
         return MCFE_ERR_GENERAL;
     } else {
         config->config_states.curr |= MODULE_MCFE_USECASE_RAW_STREAM_CONFIGURED;
@@ -342,7 +342,7 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
     // Get raw frames from the raw frame stream ( 2 raw frames)
     for ( i = 0; i < BUFSET_RAW_FRAME_COUNT; i++ ) {
         if ( frame_stream_get_frame( config->slot_id, AFRAME_TYPE_RAW, AFRAME_STATE_EMPTY, &raw_frames[i] ) ) {
-            LOG( LOG_ERR, "Error, failed to get frame %d from the raw frame stream.", i );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to get frame %d from the raw frame stream.", i );
             return MCFE_ERR_GENERAL;
         }
     }
@@ -350,14 +350,14 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
     // Get output frames from the output frame stream ( 2 output frames )
     for ( i = 0; i < BUFSET_OUT_FRAME_COUNT; i++ ) {
         if ( frame_stream_get_frame( config->slot_id, AFRAME_TYPE_OUT, AFRAME_STATE_EMPTY, &out_frames[i] ) ) {
-            LOG( LOG_ERR, "Error, failed to get frame %d from the out frame stream.", i );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to get frame %d from the out frame stream.", i );
             return MCFE_ERR_GENERAL;
         }
     }
 
     // Create raw buffer set
     if ( module_mcfe_bufset_create( raw_frames, &( config->bufset_raw ), BUFSET_RAW_FRAME_COUNT, 0 ) ) {
-        LOG( LOG_ERR, "Error, failed to create raw buffer set." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to create raw buffer set." );
         return MCFE_ERR_GENERAL;
     } else {
         config->config_states.curr |= MODULE_MCFE_USECASE_RAW_BUFSET_CONFIGURED;
@@ -368,7 +368,7 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
 
     // Create out buffer set
     if ( module_mcfe_bufset_create( out_frames, &( config->bufset_out ), BUFSET_OUT_FRAME_COUNT, 0 ) ) {
-        LOG( LOG_ERR, "Error, failed to create out buffer set." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to create out buffer set." );
         return MCFE_ERR_GENERAL;
     } else {
         config->config_states.curr |= MODULE_MCFE_USECASE_OUT_BUFSET_CONFIGURED;
@@ -380,7 +380,7 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
     // Add videos to inputs.
     rc = module_mcfe_input_add_video( config->video_input_idx, &( config->input_port_ids ), &input_cfg );
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Error, fail to add video to input." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, fail to add video to input." );
         return rc;
     } else {
         config->config_states.curr |= MODULE_MCFE_USECASE_INPUT_CONFIGURED;
@@ -389,7 +389,7 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
     // Add buffers to inputs.
     rc = module_mcfe_input_config_buffer( &( config->input_port_ids ), config->bufset_raw );
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Error, fail to configure input's buffers." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, fail to configure input's buffers." );
         return rc;
     }
 
@@ -413,7 +413,7 @@ static int module_mcfe_usecase_config_impl( module_mcfe_usecase_config_t *config
 
     rc = module_mcfe_slot_create( config->slot_id, &slot_cfg );
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Error, failed to create slot." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to create slot." );
         return rc;
     } else {
         config->config_states.curr |= MODULE_MCFE_USECASE_SLOT_CONFIGURED;
@@ -434,7 +434,7 @@ static int module_mcfe_usecase_start_impl( module_mcfe_usecase_config_t *config 
 
     // Check configuration pointer
     if ( !config ) {
-        LOG( LOG_ERR, "Failed to start TDMF use-case. Use-case configuration data pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to start TDMF use-case. Use-case configuration data pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -446,7 +446,7 @@ static int module_mcfe_usecase_start_impl( module_mcfe_usecase_config_t *config 
     // Check if usecase configured
     if ( config->config_states.curr != config->config_states.reqd ) {
         if ( config->config_states.curr != config->config_states.last ) {
-            LOG( LOG_ERR, "Failed to start TDMF use-case (context id: %u, current config: %u, required config: %u). Use-case is not fully configured.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to start TDMF use-case (context id: %u, current config: %u, required config: %u). Use-case is not fully configured.",
                  config->slot_id,
                  config->config_states.curr,
                  config->config_states.reqd );
@@ -458,14 +458,14 @@ static int module_mcfe_usecase_start_impl( module_mcfe_usecase_config_t *config 
     // Start slot
     rc = module_mcfe_slot_start( config->slot_id );
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Error, failed to start slot (context id: %u).", config->slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to start slot (context id: %u).", config->slot_id );
         return rc;
     }
 
     // Start input videos.
     rc = module_mcfe_input_start_video( config->video_input_idx );
     if ( rc != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Error, failed to start video %d (context id: %u).", config->video_input_idx, config->slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to start video %d (context id: %u).", config->video_input_idx, config->slot_id );
     }
 
     config->started = 1;
@@ -479,7 +479,7 @@ static int module_mcfe_usecase_stop_impl( module_mcfe_usecase_config_t *config )
 
     // Check configuration pointer
     if ( !config ) {
-        LOG( LOG_ERR, "Failed to stop TDMF use-case. Use-case configuration data pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to stop TDMF use-case. Use-case configuration data pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -491,7 +491,7 @@ static int module_mcfe_usecase_stop_impl( module_mcfe_usecase_config_t *config )
     // Check if usecase configured
     if ( config->config_states.curr != config->config_states.reqd ) {
         if ( config->config_states.curr != config->config_states.last ) {
-            LOG( LOG_WARNING, "Stopping TDMF use-case (context id: %u, current config: %u, required config: %u). Use-case is not fully configured.",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "Stopping TDMF use-case (context id: %u, current config: %u, required config: %u). Use-case is not fully configured.",
                  config->slot_id,
                  config->config_states.curr,
                  config->config_states.reqd );
@@ -500,15 +500,15 @@ static int module_mcfe_usecase_stop_impl( module_mcfe_usecase_config_t *config )
     }
 
     if ( release_inputs_slot( config ) != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Failed to inputs and slot of TDMF use-case (context id: %u).", config->slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to inputs and slot of TDMF use-case (context id: %u).", config->slot_id );
     }
 
     if ( release_streams_frames_bufsets( config, 0 ) != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Failed to release streams, frames and buffer sets of TDMF use-case (context id: %u).", config->slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to release streams, frames and buffer sets of TDMF use-case (context id: %u).", config->slot_id );
     }
 
     if ( config->config_states.curr ) {
-        LOG( LOG_WARNING, "Stopping TDMF use-case (context id: %u). Some components have not been stopped / deinitialised (current config: %u).",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_WARNING, "Stopping TDMF use-case (context id: %u). Some components have not been stopped / deinitialised (current config: %u).",
              config->slot_id,
              config->config_states.curr );
     }
@@ -524,7 +524,7 @@ static int module_mcfe_usecase_release_resources_impl( module_mcfe_usecase_confi
 
     // Check configuration pointer
     if ( !config ) {
-        LOG( LOG_ERR, "Failed to release resources of TDMF use-case. Use-case configuration data pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to release resources of TDMF use-case. Use-case configuration data pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -548,19 +548,19 @@ static int module_mcfe_usecase_process_event( module_mcfe_usecase_config_t *conf
 
     // Check configuration pointer
     if ( !config ) {
-        LOG( LOG_ERR, "Failed process event for TDMF use-case. Use-case configuration data pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed process event for TDMF use-case. Use-case configuration data pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
     // Check if usecase already started
     if ( !config->started ) {
-        LOG( LOG_ERR, "Failed to process TDMF use-case event (context id: %u). Use-case is not started.", config->slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to process TDMF use-case event (context id: %u). Use-case is not started.", config->slot_id );
         return MCFE_ERR_NOT_RUN;
     }
 
     // Check if usecase configured
     if ( config->config_states.curr != config->config_states.reqd ) {
-        LOG( LOG_ERR, "Failed to process TDMF use-case event (context id: %u, current config: %u, required config: %u). Use-case is not fully configured.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to process TDMF use-case event (context id: %u, current config: %u, required config: %u). Use-case is not fully configured.",
              config->slot_id,
              config->config_states.curr,
              config->config_states.reqd );
@@ -574,20 +574,20 @@ static int module_mcfe_usecase_process_event( module_mcfe_usecase_config_t *conf
 
         int32_t raw_stream_enabled = 0;
         if ( frame_stream_get_param( config->slot_id, AFRAME_TYPE_RAW, FRAME_STREAM_PARAM_IS_ENABLED, &raw_stream_enabled ) ) {
-            LOG( LOG_ERR, "Failed to get raw stream parameter FRAME_STREAM_PARAM_IS_ENABLED (context id: %u).", config->slot_id );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get raw stream parameter FRAME_STREAM_PARAM_IS_ENABLED (context id: %u).", config->slot_id );
         }
 
         // If raw stream is enabled then external frame consumer is awaiting for raw frames to come.
         // Otherwise disable raw buffer handling
         if ( raw_stream_enabled > 0 ) {
             if ( frame_stream_get_frame( config->slot_id, AFRAME_TYPE_RAW, AFRAME_STATE_EMPTY, &raw_empty_frame ) ) {
-                LOG( LOG_ERR, "Failed to get empty raw buffer from the frame streamer (context id: %u). Current buffers will be reused.", config->slot_id );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get empty raw buffer from the frame streamer (context id: %u). Current buffers will be reused.", config->slot_id );
 
                 // Update the status information struct
                 module_mcfe_usecase_update_frame_status_info( MODULE_MCFE_USECASE_FRAME_SET_SWAP_ERROR, raw_empty_frame, &( status_info->raw ) );
             } else {
                 if ( module_mcfe_bufset_swap( raw_empty_frame, &raw_filled_frame, config->bufset_raw, MCFE_BUFSET_SWAP_EMPTY_IN_EMPTY_OUT ) != MCFE_ERR_NONE ) {
-                    LOG( LOG_ERR, "Failed to swap raw buffers (context id: %u).", config->slot_id );
+                    LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to swap raw buffers (context id: %u).", config->slot_id );
 
                     raw_empty_frame->state = AFRAME_STATE_EMPTY;
                     raw_empty_frame->sequence = config->frame_sequence;
@@ -608,17 +608,17 @@ static int module_mcfe_usecase_process_event( module_mcfe_usecase_config_t *conf
 
         // No special requirements for output buffers
         if ( frame_stream_get_frame( config->slot_id, AFRAME_TYPE_OUT, AFRAME_STATE_EMPTY, &out_empty_frame ) ) {
-            LOG( LOG_ERR, "Failed to get empty output buffer from the frame streamer (context id: %u). Current buffers will be reused.", config->slot_id );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get empty output buffer from the frame streamer (context id: %u). Current buffers will be reused.", config->slot_id );
 
             if ( module_mcfe_bufset_set_buf_status( config->bufset_out, MCFE_BUFSET_STATUS_EMPTY ) != MCFE_ERR_NONE ) {
-                LOG( LOG_ERR, "Failed to set buffers of the output buffer set to empty state (context id: %u, stream is enabled).", config->slot_id );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to set buffers of the output buffer set to empty state (context id: %u, stream is enabled).", config->slot_id );
             }
 
             // Update the status information struct
             module_mcfe_usecase_update_frame_status_info( MODULE_MCFE_USECASE_FRAME_SET_SWAP_ERROR, out_empty_frame, &( status_info->out ) );
         } else {
             if ( module_mcfe_bufset_swap( out_empty_frame, &out_filled_frame, config->bufset_out, MCFE_BUFSET_SWAP_EMPTY_IN_FILLED_OUT ) != MCFE_ERR_NONE ) {
-                LOG( LOG_ERR, "Failed to swap output buffers (context id: %u).", config->slot_id );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to swap output buffers (context id: %u).", config->slot_id );
 
                 out_empty_frame->state = AFRAME_STATE_EMPTY;
                 out_empty_frame->sequence = config->frame_sequence;
@@ -649,7 +649,7 @@ int module_mcfe_usecase_init_tdmf( module_mcfe_usecase_config_t *config, mcfe_sl
 {
     // Check configuration pointer
     if ( !config ) {
-        LOG( LOG_ERR, "Failed to initialise TDMF use-case. Use-case configuration data pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to initialise TDMF use-case. Use-case configuration data pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -685,18 +685,18 @@ int module_mcfe_usecase_deinit_tdmf( module_mcfe_usecase_config_t *config )
 {
     // Check configuration pointer
     if ( !config ) {
-        LOG( LOG_ERR, "Failed to deinitialize TDMF use-case. Use-case configuration data pointer is NULL." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to deinitialize TDMF use-case. Use-case configuration data pointer is NULL." );
         return MCFE_ERR_INV_PARM;
     }
 
     // Release inputs and slot
     if ( release_inputs_slot( config ) != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Failed to inputs and slot of TDMF use-case (context id: %u).", config->slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to inputs and slot of TDMF use-case (context id: %u).", config->slot_id );
     }
 
     // Release frames and buffer sets
     if ( release_streams_frames_bufsets( config, 1 ) != MCFE_ERR_NONE ) {
-        LOG( LOG_ERR, "Failed to release streams, frames and buffer sets of TDMF use-case (context id: %u).", config->slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to release streams, frames and buffer sets of TDMF use-case (context id: %u).", config->slot_id );
     }
 
     // Initialize use-case instance

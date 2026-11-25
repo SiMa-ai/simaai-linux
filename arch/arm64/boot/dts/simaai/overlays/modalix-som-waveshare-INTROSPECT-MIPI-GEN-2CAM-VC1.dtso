@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ *
+ * cam1 overlay for the Introspect Technology SV3C-DPTX MIPI generator -
+ * VC1 test variant.
+ *
+ * Identical to modalix-som-waveshare-INTROSPECT-MIPI-GEN-2CAM.dtso except:
+ *   - the generator's single physical link is repointed from csi20in (VC0)
+ *     to csi21in (VC1), since this is one physical device/cable and can
+ *     only be linked to whichever sink pad matches the VC its packets are
+ *     actually tagged with.
+ *   - sima,virtual-channel = <1> is set on the generator's endpoint, so
+ *     introspect_mipi_generator.c's .get_frame_desc reports VC1 instead of
+ *     the VC0 default - this MUST match whatever Pinetree's
+ *     csiImagePattern.virtualChannel is actually set to for this run.
+ *   - v4l2video2's VC1 capture node (raw21in) is enabled; VC0's (raw20in)
+ *     is left at its base-dtsi default (enabled) since it's harmless with
+ *     no link feeding it - not disabled here to keep this diff minimal.
+ *
+ * Depends on:
+ *   - dwc-mipi-csi2.c's async-registration-loop fix (loops over all 4 VC
+ *     sink ports instead of only port 0) - without it, csi21in's
+ *     remote-endpoint below is never looked up at all.
+ *   - introspect_mipi_generator.c's sima,virtual-channel property support.
+ *
+ * Confirmed generator-side config this overlay must match (Introspect
+ * Pinetree, SV3C_4L6G_MIPI_DPHY_GENERATOR) - same as the VC0 overlay,
+ * except virtualChannel:
+ *   - dataLanes        = [1, 2]        -> data-lanes = <1 2> below
+ *   - continuousClock  = True          -> clock-continuous; below
+ *   - mipiClockConfig2.dataRate = 900.0 (Mbps/lane) -> link-frequencies
+ *     = 450000000 below
+ *   - virtualChannel   = 1             -> VC1 (this is the field being
+ *     tested here - set csiImagePattern.virtualChannel = 1 in Pinetree)
+ *   - imageFormat      = CSI_RAW8, rawFormatBayerCell = RGGB
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+	xclk20: xclk20 {
+		status = "okay";
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+
+	i2cmux0: i2cmux@0 {
+		compatible = "i2c-mux-gpio";
+		i2c-parent = <&i2c52>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		/* Set port6 gpio6 to GPIO_ACTIVE_LOW mode */
+		mux-gpios = <&port6 6 0>;
+		i2cmux0p1: i2c@1 {
+		    reg = <1>;
+		    #address-cells = <1>;
+		    #size-cells = <0>;
+		};
+	};
+};
+
+&port5 {
+	cam-hog1 {
+		gpio-hog;
+		/* Set port5 gpio7 to GPIO_ACTIVE_HIGH mode */
+		gpios = <7 0>;
+		output-high;
+		line-name = "cam1_powdn";
+	};
+};
+
+&i2c52 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+};
+
+&csi2 {
+    status = "okay";
+};
+
+&axi_vdma2 {
+    status = "okay";
+};
+
+&mipi_dphy_rx2 {
+    status = "okay";
+};
+
+&v4l2video2 {
+    status = "okay";
+};
+
+&v4l2vdma2 {
+    status = "okay";
+};
+
+/* VC1's video capture node (disabled by default in the base dtsi) */
+&raw21in {
+    status = "okay";
+};
+
+/* Generator now wired to VC1's sink pad, not VC0's csi20in. */
+&csi21in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <450000000>;
+    remote-endpoint = <&cam21out>;
+    clock-continuous;
+};
+
+&i2cmux0p1 {
+	introspect_gen: introspect_gen@1a {
+		/*
+		 * compatible = "sima,mipi-gen" - see the VC0 overlay's
+		 * identity-decision comment for the full reasoning; unchanged
+		 * here.
+		 */
+		compatible = "sima,mipi-gen";
+		reg = <0x1a>;
+
+		clocks = <&xclk20>;
+		clock-names = "xclk";
+
+		port@1 {
+			cam21out: endpoint@0 {
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				link-frequencies = /bits/ 64 <450000000>;
+				remote-endpoint = <&csi21in>;
+				clock-continuous;
+				/*
+				 * Must match Pinetree's
+				 * csiImagePattern.virtualChannel for this
+				 * run. Read by introspect_mipi_generator.c's
+				 * check_hwcfg(); defaults to 0 if omitted.
+				 */
+				sima,virtual-channel = <1>;
+			};
+		};
+	};
+};

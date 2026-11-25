@@ -20,3 +20,11 @@
 #include "acamera_isp_ctx.h"
 
 uint8_t ae_check_metering_stats_crc( histogram_fsm_ptr_t p_fsm );
+
+/*
+ * ae_read_aexp_zone_bins - snapshot, CRC-check and decode the aexp
+ * per-zone metering block into p_fsm->aexp_zone_bins (four 16-bit
+ * bins per zone) + aexp_nodes_h/v. Returns the zone count, 0 when
+ * the block is unconfigured or the CRC does not match.
+ */
+uint32_t ae_read_aexp_zone_bins( histogram_fsm_ptr_t p_fsm );

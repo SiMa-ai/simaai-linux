@@ -73,12 +73,23 @@ static void ca_filter_mem_reload( cac_fsm_ptr_t p_fsm )
     const uint32_t ca_filter_mem_len = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CA_FILTER_MEM );
     const uint32_t *p_ca_filter_mem = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CA_FILTER_MEM );
 
-    LOG( LOG_DEBUG, "ca_filter_mem_len: %d", ca_filter_mem_len );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "ca_filter_mem_len: %d", ca_filter_mem_len );
 
+    const uint32_t ca_filter_hw_len =
+        ACAMERA_CA_FILTER_MEM_SIZE / ( ACAMERA_CA_FILTER_MEM_ARRAY_DATA_DATASIZE >> 3 );
     int32_t i;
 
+    /* Indexed by the LUT's own length, so a longer LUT writes past the
+     * hardware array rather than merely over-reading the blob. */
+    if ( ca_filter_mem_len > ca_filter_hw_len ) {
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+             "ca_filter_mem is %d entries, hardware holds %d; not loading it",
+             ca_filter_mem_len, ca_filter_hw_len );
+        return;
+    }
+
     for ( i = 0; i < ca_filter_mem_len; i++ ) {
-        LOG( LOG_DEBUG, "%d): 0x%x.", i, p_ca_filter_mem[i] );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "%d): 0x%x.", i, p_ca_filter_mem[i] );
         acamera_ca_filter_mem_array_data_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, p_ca_filter_mem[i] );
     }
 }
@@ -89,17 +100,38 @@ static void cac_lut_reload( cac_fsm_ptr_t p_fsm )
     acamera_isp_ctx_t *ctx_p = ACAMERA_FSM2ICTX_PTR( p_fsm );
     const int32_t isp_base = ctx_p->settings.isp_base;
 
-    cac_mem_lut_t *p_calibration_ca_model = (cac_mem_lut_t *)calib_mgr_lut_get( cm_p, MODALIX_ISP_CALIB_CA_CORRECTION_MEM );
     const uint32_t cac_mem_len = calib_mgr_lut_len( cm_p, MODALIX_ISP_CALIB_CA_CORRECTION_MEM );
 
     const uint16_t *p_calibration_cac_cfg = calib_mgr_u16_lut_get( cm_p, MODALIX_ISP_CALIB_CA_CORRECTION );
+
+    /* A tuning that does not provide the slot leaves this NULL, and the three
+     * reads below are unconditional. Disable the mesh instead. */
+    if ( p_calibration_cac_cfg == NULL ) {
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+                 "MODALIX_ISP_CALIB_CA_CORRECTION is missing; disabling mesh" );
+        acamera_isp_ca_correction_enable_write( isp_base, 0 );
+        return;
+    }
 
     const uint16_t calibration_ca_min_correction = p_calibration_cac_cfg[0];
     const uint16_t calibration_ca_mesh_width = p_calibration_cac_cfg[1];
     const uint16_t calibration_ca_mesh_height = p_calibration_cac_cfg[2];
 
-    const uint8_t line_offset = calibration_ca_mesh_width;
-    const uint16_t plane_offset = calibration_ca_mesh_width * calibration_ca_mesh_height;
+    /* The blob is validated at install time, but this divides by the mesh
+     * width below and a division by zero here is a kernel exception. */
+    if ( !calibration_ca_mesh_width || !calibration_ca_mesh_height ) {
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+                 "Error, CAC mesh is %ux%u; disabling mesh",
+                 calibration_ca_mesh_width, calibration_ca_mesh_height );
+        acamera_isp_ca_correction_enable_write( isp_base, 0 );
+        return;
+    }
+
+    /* The mesh dimensions are 16-bit tuning values and the line-offset
+     * register is 13 bits wide, so the index math has to be wider than the
+     * mesh: a uint8_t counter cannot reach a height of 256 and spins. */
+    const uint16_t line_offset = calibration_ca_mesh_width;
+    const uint32_t plane_offset = (uint32_t)calibration_ca_mesh_width * calibration_ca_mesh_height;
 
     acamera_cmd_sensor_info sensor_info;
     WRAP_GENERAL_CMD( ctx_p, CMD_ID_SENSOR_INFO, CMD_DIRECTION_GET, NULL, (uint32_t *)&sensor_info );
@@ -114,13 +146,13 @@ static void cac_lut_reload( cac_fsm_ptr_t p_fsm )
     if ( sensor_info.active_width / calibration_ca_mesh_width < 30 ) {
 #endif
         // Disable mesh when width doesn't match.
-        LOG( LOG_ERR, "Error, CAC mesh width pixel number is too small (Frame width = %d, mesh width = %d)", sensor_info.active_width, calibration_ca_mesh_width );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Error, CAC mesh width pixel number is too small (Frame width = %d, mesh width = %d)", sensor_info.active_width, calibration_ca_mesh_width );
         acamera_isp_ca_correction_enable_write( isp_base, 0 );
         return;
     }
 
     if ( CAC_MEM_LUT_LEN != ( ACAMERA_CA_CORRECTION_MEM_SIZE >> 2 ) ) {
-        LOG( LOG_CRIT, "cac_mem_lut size mismatch, hw_size: %d, expected: %d.", ( ACAMERA_CA_CORRECTION_MEM_SIZE >> 2 ), CAC_MEM_LUT_LEN );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "cac_mem_lut size mismatch, hw_size: %d, expected: %d.", ( ACAMERA_CA_CORRECTION_MEM_SIZE >> 2 ), CAC_MEM_LUT_LEN );
         return;
     }
 
@@ -144,10 +176,43 @@ static void cac_lut_reload( cac_fsm_ptr_t p_fsm )
         break;
     }
 
-    LOG( LOG_DEBUG, "cfa_pattern: %d, plane_count: %d, cac_mem_len: %d", cfa_pattern, plane_count, cac_mem_len );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "cfa_pattern: %d, plane_count: %d, cac_mem_len: %d", cfa_pattern, plane_count, cac_mem_len );
+
+    /* The model is read as plane_count * 2 rows of ten coefficients, so how
+     * much of it the loop below touches is only known once the CFA pattern
+     * has been resolved. Four rows covers every sensor supported today,
+     * all of them RGB Bayer; an RGBIr sensor adjusts three planes and needs
+     * six. Ask for the extent this pass needs, so that case turns into a
+     * disabled block and a log line rather than a read past the table. */
+    cac_mem_lut_t *p_calibration_ca_model = (cac_mem_lut_t *)calib_mgr_lut_get_sized(
+        cm_p, MODALIX_ISP_CALIB_CA_CORRECTION_MEM,
+        plane_count * 2 * 10 * sizeof( uint16_t ) );
+
+    if ( p_calibration_ca_model == NULL ) {
+        acamera_isp_ca_correction_enable_write( isp_base, 0 );
+        return;
+    }
 
     // ca_correction_mem_array size in 32-bit registers
     const uint32_t mem_size_regs = ACAMERA_CA_CORRECTION_MEM_SIZE / ( ACAMERA_CA_CORRECTION_MEM_ARRAY_DATA_DATASIZE >> 3 );
+
+    /* Each dimension is bounded by the line-offset register, but their
+     * product is what has to land inside the correction memory: two mesh
+     * entries share a register, and every plane needs its own block. A mesh
+     * that does not fit is walked anyway and its indices alias under the
+     * mask below, so refuse it here instead - the loop is per-entry MMIO and
+     * an oversized mesh is millions of writes. */
+    if ( ( ( (uint64_t)plane_count * calibration_ca_mesh_width * calibration_ca_mesh_height ) + 1 ) / 2
+         > mem_size_regs ) {
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+                 "CAC mesh %ux%u over %u planes needs %llu registers but the array holds %u; disabling mesh",
+                 calibration_ca_mesh_width, calibration_ca_mesh_height, plane_count,
+                 ( ( (uint64_t)plane_count * calibration_ca_mesh_width * calibration_ca_mesh_height ) + 1 ) / 2,
+                 mem_size_regs );
+        acamera_isp_ca_correction_enable_write( isp_base, 0 );
+        return;
+    }
+
     uint32_t index;
 
     // Reset ca correction memory to default values
@@ -165,7 +230,7 @@ static void cac_lut_reload( cac_fsm_ptr_t p_fsm )
                            CMD_DIRECTION_GET,
                            NULL,
                            &raw_scaler_invert_ratio ) ) {
-        LOG( LOG_ERR, "CMD_ID_RAW_SCALER_RATIO command failed" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "CMD_ID_RAW_SCALER_RATIO command failed" );
         return;
     }
 #endif
@@ -188,8 +253,8 @@ static void cac_lut_reload( cac_fsm_ptr_t p_fsm )
         const uint32_t plane_offset_val = plane_offset * bit_shift( component, -1 );
         const uint16_t vh_shift = ( component % 2 ) * 8;
 
-        uint8_t x;
-        uint8_t y;
+        uint16_t x;
+        uint16_t y;
 
         for ( x = 0; x < calibration_ca_mesh_width; x++ ) {
             for ( y = 0; y < calibration_ca_mesh_height; y++ ) {
@@ -199,7 +264,7 @@ static void cac_lut_reload( cac_fsm_ptr_t p_fsm )
                 int32_t product = 0;
                 uint8_t z_sign = 0;
                 uint32_t zu32 = 0;
-                uint16_t lut_index = 0;
+                uint32_t lut_index = 0;
                 uint8_t lut_shift = 0;
                 uint32_t old_value = 0;
                 uint32_t new_value = 0;

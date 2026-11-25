@@ -14,11 +14,27 @@
 	memory@1000000000 {
 		device_type = "memory";
 		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
-				0x00000010 0x75000000 0x00000000 0xAB000000>;
+				0x00000010 0x75000000 0x00000001 0x4B000000>;
 	};
 };
 
 &dms0_reserved {
-	reg = <0x00000011 0x20000000 0x00000000 0xA0000000>;
+	/* Opt-in reusable: CMA may lend unallocated MLA DMA pages back to Linux.
+	 * Switch the heap ABI from the carveout default to the reusable SiMa DMS
+	 * pool and drop no-map; the memory node above is extended to cover this
+	 * range. mla-rt still matches the "dms@" child by name, so the inherited
+	 * node name is left unchanged.
+	 */
+	compatible = "simaai,mla-cma", "shared-dma-pool";
+	/delete-property/ no-map;
+	reusable;
+	/* DMS sits ABOVE the secure window: [0x11_2000_0000, 0x11_7000_0000)
+	 * stays ordinary RAM so it can hold BL31/OP-TEE/FIP (@0x11_6000_0000)
+	 * when secure-boot.dtbo adds its no-map nodes. A reusable pool spanning
+	 * that window would be freed to the buddy allocator at boot, no-map and
+	 * all. 16+ GiB boards keep their DMS above the window already, so only
+	 * the 8 GiB boards move.
+	 */
+	reg = <0x00000011 0x70000000 0x00000000 0x50000000>;
 };
 

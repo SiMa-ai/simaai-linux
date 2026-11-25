@@ -68,6 +68,9 @@
 #define MAX96724_BACKTOP32_BPP10DBL1		BIT(6)
 #define MAX96724_BACKTOP32_BPP10DBL1_MODE	BIT(7)
 
+#define MAX96724_N_VS_BLOCK			0x435
+#define MAX96724_N_VS_BLOCK_N			GENMASK(3, 0)
+
 #define MAX96724_MIPI_PHY0			0x8a0
 #define MAX96724_MIPI_PHY0_PHY_CONFIG		GENMASK(4, 0)
 #define MAX96724_MIPI_PHY0_PHY_4X2		BIT(0)
@@ -115,6 +118,9 @@
 
 #define MAX96724_MIPI_TX4(x)			(0x904 + (x) * 0x40)
 #define MAX96724_MIPI_TX4_DESKEW_PER_2K		FIELD_PREP(GENMASK(2, 0), 0b001)
+#define MAX96724_MIPI_TX4_DESKEW_PER_8K		FIELD_PREP(GENMASK(2, 0), 0b111)
+#define MAX96724_MIPI_TX4_DESKEW_PER_64F	FIELD_PREP(GENMASK(5, 3), 0b110)
+#define MAX96724_MIPI_TX4_DESKEW_PER_128F	FIELD_PREP(GENMASK(5, 3), 0b111)
 #define MAX96724_MIPI_TX4_DESKEW_PER_AUTO	BIT(7)
 
 #define MAX96724_MIPI_TX10(x)			(0x90a + (x) * 0x40)
@@ -252,11 +258,35 @@ static int max96724_reg_write(struct max_des *des, unsigned int reg,
 	return regmap_write(priv->regmap, reg, val);
 }
 
+static bool max96724_phy_uses_alt_clock(struct max_des *des,
+					struct max_des_phy *phy);
+
+/*
+ * Hardware lane width of the port this PHY belongs to.
+ *
+ * An alternate-clock port is a combined 4-lane port in hardware even though
+ * its config vector only declares the lanes it actually uses, so the lane
+ * map, the polarity map and the standby mask must all use the 4-lane forms.
+ */
+static unsigned int max96724_phy_hw_data_lanes(struct max_des *des,
+					       struct max_des_phy *phy)
+{
+	if (max96724_phy_uses_alt_clock(des, phy))
+		return 4;
+
+	return max_des_phy_hw_data_lanes(des, phy);
+}
+
 static unsigned int max96724_phy_id(struct max_des *des, struct max_des_phy *phy)
 {
-	unsigned int num_hw_data_lanes = max_des_phy_hw_data_lanes(des, phy);
+	unsigned int num_hw_data_lanes = max96724_phy_hw_data_lanes(des, phy);
 
-	/* PHY 1 is the master PHY when combining PHY 0 and PHY 1. */
+	/*
+	 * A combined port is owned by its master PHY: PHY 1 for PHY 0 + PHY 1,
+	 * PHY 2 for PHY 2 + PHY 3. Only the first pair needs remapping, since
+	 * its config entry names PHY 0 while the master is PHY 1; the second
+	 * pair names PHY 2, which is already the master.
+	 */
 	if (phy->index == 0 && num_hw_data_lanes == 4)
 		return 1;
 
@@ -380,6 +410,9 @@ static const struct max_phys_config max96724_phys_configs[] = {
 static int max96724_init(struct max_des *des)
 {
 	struct max96724_priv *priv = des_to_priv(des);
+	const struct max_phys_config *cfg;
+	unsigned int reg_val;
+	const char *mode;
 	unsigned int i;
 	int ret;
 
@@ -392,6 +425,16 @@ static int max96724_init(struct max_des *des)
 		}
 	}
 
+	/*
+	 * Block the first N frames after video lock so the host's CSI-2
+	 * receiver only ever sees complete frames. Reset default is 1.
+	 */
+	ret = regmap_update_bits(priv->regmap, MAX96724_N_VS_BLOCK,
+			MAX96724_N_VS_BLOCK_N,
+			FIELD_PREP(MAX96724_N_VS_BLOCK_N, 1));
+	if (ret)
+		return ret;
+
 	if (priv->info->supports_pipe_stream_autoselect) {
 		/* Enable stream autoselect. */
 		ret = regmap_update_bits(priv->regmap, MAX96724_VIDEO_PIPE_EN,
@@ -401,10 +444,39 @@ static int max96724_init(struct max_des *des)
 			return ret;
 	}
 
+	cfg = &des->ops->phys_configs.configs[des->phys_config];
+	reg_val = max96724_phys_configs_reg_val[des->phys_config];
+
+	switch (reg_val) {
+	case MAX96724_MIPI_PHY0_PHY_4X2:
+		mode = "4x2 (four 2-lane PHYs)";
+		break;
+	case MAX96724_MIPI_PHY0_PHY_2X4:
+		mode = "2x4 (two 4-lane PHYs)";
+		break;
+	case MAX96724_MIPI_PHY0_PHY_1X4A_2X2:
+		mode = "1x4a+2x2 (PHY0+PHY1 combined)";
+		break;
+	case MAX96724_MIPI_PHY0_PHY_1X4B_2X2:
+		mode = "1x4b+2x2 (PHY2+PHY3 combined)";
+		break;
+	default:
+		mode = "unknown";
+		break;
+	}
+
+	dev_info(priv->dev,
+		 "phys config %u selected: {%u, %u, %u, %u} clock_lane {%u, %u, %u, %u} -> %s, MIPI_PHY0=0x%02x\n",
+		 des->phys_config,
+		 cfg->lanes[0], cfg->lanes[1], cfg->lanes[2], cfg->lanes[3],
+		 cfg->clock_lane[0], cfg->clock_lane[1],
+		 cfg->clock_lane[2], cfg->clock_lane[3],
+		 mode, reg_val);
+
 	/* Set PHY mode. */
 	ret = regmap_update_bits(priv->regmap, MAX96724_MIPI_PHY0,
 				 MAX96724_MIPI_PHY0_PHY_CONFIG,
-				 max96724_phys_configs_reg_val[des->phys_config]);
+				 reg_val);
 	if (ret)
 		return ret;
 
@@ -425,7 +497,7 @@ static int max96724_init_phy(struct max_des *des, struct max_des_phy *phy)
 	int ret;
 
 	index = max96724_phy_id(des, phy);
-	num_hw_data_lanes = max_des_phy_hw_data_lanes(des, phy);
+	num_hw_data_lanes = max96724_phy_hw_data_lanes(des, phy);
 
 	ret = regmap_update_bits(priv->regmap, MAX96724_MIPI_TX10(index),
 				 MAX96724_MIPI_TX10_CSI2_LANE_CNT,
@@ -507,10 +579,12 @@ static int max96724_init_phy(struct max_des *des, struct max_des_phy *phy)
 		if (ret)
 			return ret;
 
-		/* Enable periodic deskew with 2 x 1k UI.. */
+		/* 8k UI every 128 frames: the DWC D-PHY Rx needs a 2^13 UI
+		 * burst, and a shorter interval still trips a PHY fatal. */
 		ret = regmap_write(priv->regmap, MAX96724_MIPI_TX4(index),
 				   MAX96724_MIPI_TX4_DESKEW_PER_AUTO |
-				   MAX96724_MIPI_TX4_DESKEW_PER_2K);
+				   MAX96724_MIPI_TX4_DESKEW_PER_128F |
+				   MAX96724_MIPI_TX4_DESKEW_PER_8K);
 		if (ret)
 			return ret;
 	} else {
@@ -603,6 +677,18 @@ static int max96724_set_phy_mode(struct max_des *des, struct max_des_phy *phy,
 	return 0;
 }
 
+static bool max96724_phy_uses_alt_clock(struct max_des *des,
+					struct max_des_phy *phy)
+{
+	const struct max_phys_configs *configs = &des->ops->phys_configs;
+
+	if (!configs->num_configs)
+		return false;
+
+	return configs->configs[des->phys_config].clock_lane[phy->index] ==
+	       MAX96724_PHY1_ALT_CLOCK;
+}
+
 static int max96724_set_phy_active(struct max_des *des, struct max_des_phy *phy,
 				   bool enable)
 {
@@ -611,7 +697,7 @@ static int max96724_set_phy_active(struct max_des *des, struct max_des_phy *phy,
 	unsigned int num_hw_data_lanes;
 	unsigned int mask;
 
-	num_hw_data_lanes = max_des_phy_hw_data_lanes(des, phy);
+	num_hw_data_lanes = max96724_phy_hw_data_lanes(des, phy);
 
 	if (num_hw_data_lanes == 4)
 		/* PHY 1 -> bits [1:0] */
@@ -943,6 +1029,13 @@ static void max96724_remove(struct i2c_client *client)
 	gpiod_set_value_cansleep(priv->gpiod_enable, 0);
 }
 
+static void max96724_shutdown(struct i2c_client *client)
+{
+	struct max96724_priv *priv = i2c_get_clientdata(client);
+
+	max_des_shutdown(&priv->des);
+}
+
 static const struct of_device_id max96724_of_table[] = {
 	{ .compatible = "maxim,max96712", .data = &max96712_info },
 	{ .compatible = "maxim,max96724", .data = &max96724_info },
@@ -959,6 +1052,7 @@ static struct i2c_driver max96724_i2c_driver = {
 	},
 	.probe = max96724_probe,
 	.remove = max96724_remove,
+	.shutdown = max96724_shutdown,
 };
 
 module_i2c_driver(max96724_i2c_driver);

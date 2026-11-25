@@ -21,12 +21,23 @@
 #include <linux/of_gpio.h>
 #include <linux/gpio.h>
 #include <linux/firmware.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+#include <linux/uaccess.h>
 #include "econ_imx568_drv.h"
+#include "imx568-timing.h"
 
 // Define EN_DEBUG_PRINTS Macro to enable debug prints
 #define EN_DEBUG_PRINTS
 // Default controls added to meet libcamera requirements
-#define IMX568_DEFAULT_CONTROLS (7)
+#define IMX568_DEFAULT_CONTROLS (9)
+
+/*
+ * Line timing for the CSI controller-mode IPI. The FPGA passes the sensor
+ * line timing through; HMAX depends on bit depth AND lane count (datasheet
+ * 1188 Mbps table). Reported in a K x 74.25MHz pixel domain (K = 3 at two
+ * lanes, 6 at four) so line lengths stay exact integers.
+ */
 
 
 unsigned char errorcheck(char *data, unsigned int len)
@@ -763,6 +774,23 @@ static u32 imx568_get_format_code(struct imx568 *imx568, u32 code)
 	return codes[i];
 }
 
+static bool imx568_variant_supports_size(const struct imx568 *imx568,
+					 u32 width, u32 height)
+{
+	const struct econ_imx568_variant *variant = imx568->variant;
+	u32 i;
+
+	if (!variant || !variant->num_frame_sizes)
+		return true;
+
+	for (i = 0; i < variant->num_frame_sizes; i++)
+		if (variant->frame_sizes[i].width == width &&
+		    variant->frame_sizes[i].height == height)
+			return true;
+
+	return false;
+}
+
 static const struct v4l2_ctrl_config imx568_ctrls[] = {
 	{ // Exposure
 		.ops = &imx568_ctrl_ops,
@@ -865,15 +893,15 @@ static int imx568_enum_frame_size(struct v4l2_subdev *sd,
 		if (fse->code != code)
 			return -EINVAL;
 
-		/* Skip modes above the ceiling; a hole would end enumeration. */
-		if (imx568->variant && imx568->variant->only_width) {
+		/* Keep variant policy in the sensor driver, not in the CSI receiver. */
+		if (imx568->variant && imx568->variant->num_frame_sizes) {
 			u32 seen = 0;
 
 			for (slot = 0; slot < imx568->nr_supported_formats; slot++) {
-				if (imx568->cam_frmfmt[slot].size.width !=
-					    imx568->variant->only_width ||
-				    imx568->cam_frmfmt[slot].size.height !=
-					    imx568->variant->only_height)
+				u32 width = imx568->cam_frmfmt[slot].size.width;
+				u32 height = imx568->cam_frmfmt[slot].size.height;
+
+				if (!imx568_variant_supports_size(imx568, width, height))
 					continue;
 				if (seen == fse->index)
 					break;
@@ -1086,17 +1114,18 @@ static int imx568_set_pad_format(struct v4l2_subdev *sd,
 	mutex_lock(&imx568->mutex);
 
 	if (fmt->pad == IMAGE_PAD) {
-		/* Pin to the one geometry that streams. */
-		if (imx568->variant && imx568->variant->only_width &&
-		    (fmt->format.width != imx568->variant->only_width ||
-		     fmt->format.height != imx568->variant->only_height)) {
+		/* Fall back to the variant's default geometry for unsupported sizes. */
+		if (!imx568_variant_supports_size(imx568, fmt->format.width,
+						  fmt->format.height)) {
+			const struct econ_imx568_frame_size *fallback =
+				&imx568->variant->frame_sizes[0];
+
 			dev_info(&client->dev,
 					"%ux%u not supported in this mode, using %ux%u\n",
 					fmt->format.width, fmt->format.height,
-					imx568->variant->only_width,
-					imx568->variant->only_height);
-			fmt->format.width = imx568->variant->only_width;
-			fmt->format.height = imx568->variant->only_height;
+					fallback->width, fallback->height);
+			fmt->format.width = fallback->width;
+			fmt->format.height = fallback->height;
 		}
 
 		fmt->format.code = imx568_get_format_code(imx568, fmt->format.code);
@@ -1118,6 +1147,16 @@ static int imx568_set_pad_format(struct v4l2_subdev *sd,
 				imx568->fmt_code = fmt->format.code;
 				break;
 			}
+		}
+
+		if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && imx568->hblank) {
+			u32 bpp = fmt->format.code == MEDIA_BUS_FMT_SRGGB10_1X10 ? 10 : 12;
+			int hb = imx568_timing_line_px(bpp, imx568->mipi_lane_config) -
+				 fmt->format.width;
+
+			if (hb > 0)
+				__v4l2_ctrl_modify_range(imx568->hblank, hb, hb,
+							 1, hb);
 		}
 
 		imx568_update_image_pad_format(imx568, fmt);
@@ -1241,15 +1280,29 @@ static int imx568_set_pad_format(struct v4l2_subdev *sd,
 
 		/* sensor_reg_read() is < 0 on failure, so this rejects both a failed
 		 * read and an out-of-range one. */
-		if (hmax <= 0 || hmax > 0xffff)
-			hmax = imx568->cam_frmfmt[imx568->frmfmt_mode].hmax;
+		if (hmax <= 0 || hmax > 0xffff) {
+			u32 hts = imx568->cam_frmfmt[imx568->frmfmt_mode].hmax;
+			u32 lanes = imx568->mipi_lane_config;
+
+			hmax = imx568_timing_hmax_from_hts(hts, lanes);
+		}
 		if ((vmax <= (int)h || vmax > 0xffff) && hmax && imx568->set_framerate)
 			vmax = div_u64((u64)SENSOR_PIXEL_CLOCK,
 				       (u64)hmax * imx568->set_framerate);
 
 		if (hmax > 0) {
-			rate = div_s64((s64)w * SENSOR_PIXEL_CLOCK, hmax);
+			u32 k = IMX568_TIMING_K(imx568->mipi_lane_config);
+
+			/* Report the probed HMAX in the same K x 74.25MHz domain the
+			 * HBLANK pinning uses; mixing domains skews the IPI line. */
+			rate = IMX568_TIMING_PIXEL_RATE(imx568->mipi_lane_config);
 			v4l2_ctrl_modify_range(imx568->pixel_rate, rate, rate, 1, rate);
+
+			if (imx568->hblank && (u32)hmax * k > w) {
+				s32 hb = (s32)((u32)hmax * k - w);
+
+				v4l2_ctrl_modify_range(imx568->hblank, hb, hb, 1, hb);
+			}
 
 			if (imx568->vblank && vmax > (int)h) {
 				s32 vb = vmax - h;
@@ -1586,10 +1639,37 @@ static const struct v4l2_subdev_video_ops imx568_video_ops = {
 	.s_stream = imx568_set_stream,
 };
 
+static int imx568_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+{
+	struct imx568 *imx568 = to_imx568(sd);
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP:
+		sel->r.left = 0;
+		sel->r.top = 0;
+		sel->r.width = imx568->cam_frmfmt[imx568->frmfmt_mode].size.width;
+		sel->r.height = imx568->cam_frmfmt[imx568->frmfmt_mode].size.height;
+		return 0;
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		sel->r.left = 0;
+		sel->r.top = 0;
+		sel->r.width = imx568->cam_frmfmt[0].size.width;
+		sel->r.height = imx568->cam_frmfmt[0].size.height;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
 static const struct v4l2_subdev_pad_ops imx568_pad_ops = {
 	.enum_mbus_code = imx568_enum_mbus_code,
 	.get_fmt = imx568_get_pad_format,
 	.set_fmt = imx568_set_pad_format,
+	.get_selection = imx568_get_selection,
 	.enum_frame_size = imx568_enum_frame_size,
 	.get_mbus_config = imx568_get_mbus_config,
 };
@@ -1622,13 +1702,16 @@ static int imx568_init_controls(struct imx568 *imx568)
 	/* By default, PIXEL_RATE is read only */
 	imx568->pixel_rate = v4l2_ctrl_new_std(ctrl_hdlr, &imx568_ctrl_ops     ,
                        V4L2_CID_PIXEL_RATE,
-                       SENSOR_PIXEL_CLOCK,
-                       SENSOR_PIXEL_CLOCK, 1,
-                       SENSOR_PIXEL_CLOCK);
+                       IMX568_TIMING_PIXEL_RATE(imx568->mipi_lane_config),
+                       IMX568_TIMING_PIXEL_RATE(imx568->mipi_lane_config), 1,
+                       IMX568_TIMING_PIXEL_RATE(imx568->mipi_lane_config));
 	if (imx568->pixel_rate)
 		imx568->pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	/* LINK_FREQ is also read only */
+	/* LINK_FREQ is also read only. Seed it before the menu is created:
+	 * a zero here makes v4l2_get_link_freq() return 0 and the CSI's
+	 * hactive_phy collapse. */
+	imx568->link_freq_value = IMX568_DEFAULT_LINK_FREQ;
 	imx568->link_freq =
 		v4l2_ctrl_new_int_menu(ctrl_hdlr, &imx568_ctrl_ops,
 				V4L2_CID_LINK_FREQ, 0, 0,
@@ -1647,8 +1730,14 @@ static int imx568_init_controls(struct imx568 *imx568)
 	imx568->vblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx568_ctrl_ops,
                        V4L2_CID_VBLANK, IMX568_VBLANK_MIN,
                        0xffff, 1, IMX568_VBLANK_MIN);
+    /* line = HMAX*K px at K x 74.25MHz; re-pinned per mode at set_fmt */
     imx568->hblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx568_ctrl_ops,
-                       V4L2_CID_HBLANK, 0, 0xffff, 1, 0);
+                       V4L2_CID_HBLANK,
+                       imx568_timing_line_px(12, imx568->mipi_lane_config) - 1920,
+                       imx568_timing_line_px(12, imx568->mipi_lane_config) - 1920, 1,
+                       imx568_timing_line_px(12, imx568->mipi_lane_config) - 1920);
+    if (imx568->hblank)
+        imx568->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	/* Advertise the DT window from probe: consumers snapshot it before stream-on. */
 	imx568->exposure = v4l2_ctrl_new_std(ctrl_hdlr, &imx568_ctrl_ops,
@@ -1683,6 +1772,16 @@ static int imx568_init_controls(struct imx568 *imx568)
 
 		v4l2_ctrl_new_custom(ctrl_hdlr, &cfg, NULL);
 	}
+
+	/* CAMERA_ORIENTATION + CAMERA_SENSOR_ROTATION from the DT node */
+	ret = v4l2_fwnode_device_parse(&client->dev, &props);
+	if (ret)
+		goto error;
+
+	ret = v4l2_ctrl_new_fwnode_properties(ctrl_hdlr, &imx568_ctrl_ops,
+					      &props);
+	if (ret)
+		goto error;
 
 	if (ctrl_hdlr->error) {
 		ret = ctrl_hdlr->error;
@@ -1760,11 +1859,19 @@ error_out:
 	return ret;
 }
 
-/* Controller mode: the fixed IPI porches only fit 1920x1080 at 30 fps. */
+/* First entry is the fallback for unsupported requests. */
+static const struct econ_imx568_frame_size econ_imx568_controller_sizes[] = {
+	{ 1920, 1080 },
+	{ 2432, 2048 },
+	{ 1280, 720 },
+	{ 640, 480 },
+};
+
+/* Controller mode: the MCU-advertised geometries qualified by this driver. */
 static const struct econ_imx568_variant econ_imx568_controller = {
 	.name		= "econ-imx568",
-	.only_width	= 1920,
-	.only_height	= 1080,
+	.frame_sizes	= econ_imx568_controller_sizes,
+	.num_frame_sizes = ARRAY_SIZE(econ_imx568_controller_sizes),
 	.max_fps	= 30,
 };
 
@@ -3006,10 +3113,12 @@ static int cam_list_fmts(struct i2c_client *client, struct imx568 *priv,
 				dev_info(&client->dev, "stream_info->frame_rate.disc.frame_rate_num = %d --------------\n",
 						stream_info->frame_rate.disc.frame_rate_num);
 #endif
-				/* vmax is the vendor seed; the live frame length follows the rate. */
+				/* Timing seeds are used when live sensor reads fail. */
 				if ((stream_info->fmt_fourcc == V4L2_PIX_FMT_SRGGB12) ||
 						(stream_info->fmt_fourcc == V4L2_PIX_FMT_SGBRG12)) {
-					priv->cam_frmfmt[mode].hmax = 965;
+					priv->cam_frmfmt[mode].hmax =
+						stream_info->width == 2432 &&
+						stream_info->height == 2048 ? 1100 : 965;
 					priv->cam_frmfmt[mode].vmax = 1192;
 				}
 				mode++;
@@ -3426,6 +3535,74 @@ exit:
 
 }
 
+/* debugfs sensor-register passthrough: "ADDR" selects, "ADDR VAL" writes, read returns ADDR. */
+static int econ_dbg_reg_show(struct seq_file *s, void *unused)
+{
+	struct imx568 *imx568 = s->private;
+	int val = sensor_reg_read(imx568->i2c_client, imx568, imx568->dbg_reg, 2);
+
+	if (val < 0)
+		seq_printf(s, "0x%04x = ERR %d\n", imx568->dbg_reg, val);
+	else
+		seq_printf(s, "0x%04x = 0x%04x\n", imx568->dbg_reg, val & 0xffff);
+	return 0;
+}
+
+static int econ_dbg_reg_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, econ_dbg_reg_show, inode->i_private);
+}
+
+static ssize_t econ_dbg_reg_write(struct file *file, const char __user *ubuf,
+		size_t len, loff_t *off)
+{
+	struct imx568 *imx568 = ((struct seq_file *)file->private_data)->private;
+	unsigned int addr, val;
+	char buf[64];
+	int n, ret;
+
+	if (len == 0 || len >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, ubuf, len))
+		return -EFAULT;
+	buf[len] = '\0';
+
+	n = sscanf(buf, "%x %x", &addr, &val);
+	if (n < 1 || addr > 0xffff)
+		return -EINVAL;
+
+	imx568->dbg_reg = addr;
+	if (n == 2) {
+		ret = sensor_reg_write(imx568->i2c_client, imx568, addr, val);
+		if (ret < 0)
+			return ret;
+	}
+
+	return len;
+}
+
+static const struct file_operations econ_dbg_reg_fops = {
+	.owner   = THIS_MODULE,
+	.open    = econ_dbg_reg_open,
+	.read    = seq_read,
+	.write   = econ_dbg_reg_write,
+	.llseek  = seq_lseek,
+	.release = single_release,
+};
+
+static void econ_debugfs_init(struct imx568 *imx568)
+{
+	/* Instrumentation-only, like the other camera debug knobs. */
+	if (!IS_ENABLED(CONFIG_SIMAAI_CAMERA_INSTRUMENTATION))
+		return;
+
+	imx568->dbg_reg = 0x3240;	/* SHS */
+	imx568->debugfs_dir = debugfs_create_dir(dev_name(&imx568->i2c_client->dev),
+						 NULL);
+	debugfs_create_file("sensor_reg", 0600, imx568->debugfs_dir, imx568,
+			    &econ_dbg_reg_fops);
+}
+
 static int imx568_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -3589,6 +3766,8 @@ static int imx568_probe(struct i2c_client *client)
 
 	dev_info(dev, "Detected IMX%d camera\n", sensor_id);
 
+	econ_debugfs_init(imx568);
+
 	return 0;
 
 error_subdev_cleanup:
@@ -3619,6 +3798,7 @@ static void imx568_remove(struct i2c_client *client)
 	struct imx568 *imx568 = to_imx568(sd);
 	int loop = 0;
 
+	debugfs_remove_recursive(imx568->debugfs_dir);
 	v4l2_async_unregister_subdev(sd);
 	media_entity_cleanup(&sd->entity);
 	imx568_free_controls(imx568);

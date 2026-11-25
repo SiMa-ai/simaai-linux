@@ -42,7 +42,7 @@ static void radial_shading_lut_reload( radial_shading_fsm_ptr_t p_fsm )
 #if ( ISP_RTL_VERSION_R != 2 )
     const uint32_t radial_shading_lut_ir_sz = calib_mgr_lut_len( cm_ptr, MODALIX_ISP_CALIB_SHADING_RADIAL_IR );
     if ( radial_shading_lut_ir_sz != 33 ) {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_SHADING_RADIAL_IR has wrong size %d", radial_shading_lut_ir_sz );
+        LOG_CAT( ALOG_CAT_SHADING, LOG_ERR, "MODALIX_ISP_CALIB_SHADING_RADIAL_IR has wrong size %d", radial_shading_lut_ir_sz );
     } else {
         const uint32_t *radial_shading_lut_ir = calib_mgr_u32_lut_get( cm_ptr, MODALIX_ISP_CALIB_SHADING_RADIAL_IR );
         for ( i = 0; i < radial_shading_lut_ir_sz; i++ )
@@ -55,7 +55,7 @@ static void radial_shading_lut_reload( radial_shading_fsm_ptr_t p_fsm )
 
     const uint32_t radial_shading_lut_cm_sz = calib_mgr_lut_len( cm_ptr, MODALIX_ISP_CALIB_SHADING_RADIAL_CENTRE_AND_MULT );
     if ( radial_shading_lut_r_sz != 33 || radial_shading_lut_g_sz != 33 || radial_shading_lut_b_sz != 33 ) {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_SHADING_RADIAL_R/G/B have wrong sizes R %d, G %d, B %d", radial_shading_lut_r_sz, radial_shading_lut_g_sz, radial_shading_lut_b_sz );
+        LOG_CAT( ALOG_CAT_SHADING, LOG_ERR, "MODALIX_ISP_CALIB_SHADING_RADIAL_R/G/B have wrong sizes R %d, G %d, B %d", radial_shading_lut_r_sz, radial_shading_lut_g_sz, radial_shading_lut_b_sz );
     } else {
         for ( i = 0; i < radial_shading_lut_r_sz; i++ )
             acamera_radial_shading_mem_array_data_write( isp_base, 0 + i, radial_shading_lut_r[i] );
@@ -68,7 +68,7 @@ static void radial_shading_lut_reload( radial_shading_fsm_ptr_t p_fsm )
     // New 16 elements format used:
     // RX RY MULTRX MULTRY GX GY MULTGX MULTGY BX BY MULTBX MULTBY IRX IRY MULTIRX MULTIRY
     if ( radial_shading_lut_cm_sz != expected_radial_shading_lut_cm_sz ) {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_SHADING_RADIAL_CENTRE_AND_MULT has wrong size: expected %d got %d", expected_radial_shading_lut_cm_sz, radial_shading_lut_cm_sz );
+        LOG_CAT( ALOG_CAT_SHADING, LOG_ERR, "MODALIX_ISP_CALIB_SHADING_RADIAL_CENTRE_AND_MULT has wrong size: expected %d got %d", expected_radial_shading_lut_cm_sz, radial_shading_lut_cm_sz );
     } else {
         acamera_isp_radial_shading_centerr_x_write( isp_base, radial_shading_lut_cm[0] );
         acamera_isp_radial_shading_centerr_y_write( isp_base, radial_shading_lut_cm[1] );

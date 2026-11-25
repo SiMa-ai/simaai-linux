@@ -58,7 +58,7 @@
 #define ISP_HAS_ML_BIST_FSM 1
 #define ISP_HAS_RAW_FE_FSM 1
 #define KERNEL_MODULE 1
-/* Retired with the V4L2 control plane (SOCSW-5578): the firmware
+/* Retired with the V4L2 control plane: the firmware
  * command-buffer ring is no longer fed — control goes through V4L2 CIDs
  * which call acamera_command() synchronously. Disabling it stops the
  * 30 ms connection_thread idle poll. */
@@ -101,4 +101,13 @@
 #define FRAME_STREAM_OUT_FRAME_COUNT_M2M 5
 #define FRAME_STREAM_META_FRAME_COUNT 1
 #define V4L2_INTERFACE_BUILD 1
+/*
+ * Size of the whole mapped ISP register aperture. The register map spreads its
+ * blocks from 0x0 (frontend) to 0x18000 (CA correction memory); ACAMERA_ISP_SIZE
+ * is only the size of the one block at ACAMERA_ISP_BASE_ADDR and is not a bound
+ * on any of the others. Must match ISP_PHYS_ADDRESS_SPACE_SIZE in the platform
+ * I/O layer, which is what actually gets mapped.
+ */
+#define ACAMERA_ISP_REG_APERTURE_SIZE ( 0x20000 )
+
 #endif

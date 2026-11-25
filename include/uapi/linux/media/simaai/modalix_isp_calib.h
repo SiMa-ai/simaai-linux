@@ -25,10 +25,31 @@
  * both 8-byte values on the supported architectures), so the same
  * struct definition serves both wire and in-memory roles.
  *
- * Skipping empty slots in user-space is supported: the kernel
- * deserializer guards every offset with an "if (offset)" check, so
- * setting calibrations[i] = 0 simply means "this LUT is absent". The
- * dense 124-entry layout is preserved for ABI stability — slot IDs are
+ * A zero in calibrations[i] means "this LUT is absent", and most slots
+ * may be left out: that is what makes a per-WDR-mode overlay possible,
+ * and a partially populated base document has always been legal.
+ *
+ * It is not unconditional, and this note used to say it was. Some slots
+ * are read by the ISP firmware without it first asking whether they
+ * arrived, because there is nothing sensible for those blocks to do
+ * without them. A blob that omits one of those is rejected outright,
+ * naming the slot — which is a better answer than an FSM reading a LUT
+ * that is not there. Every tuning file in tree populates the whole
+ * required set, so this describes existing producers rather than
+ * constraining them; a producer that hits it is told exactly what to
+ * add. The set is recorded in the driver, not here, because it follows
+ * the firmware's own read sites rather than the wire format.
+ *
+ * The root array's size is likewise part of the wire format: it is the
+ * slot count times eight, so a producer built against a different
+ * MODALIX_ISP_CALIB_TOTAL_SIZE places every descriptor where this kernel
+ * does not look, and the blob is refused. There is no version field to
+ * make that self-describing. It does not need one: the ISP driver and
+ * the libcamera IPA that feeds it are built and released together, so a
+ * mismatch is a deployment mistake, not a compatibility case. Deploy
+ * both halves or neither.
+ *
+ * The dense layout is preserved for ABI stability — slot IDs are
  * indices into this array and must never be renumbered. New LUTs add
  * to the end; existing slot IDs are versioned by convention.
  *
@@ -69,9 +90,9 @@ struct modalix_isp_lookup_table {
  *
  * Treat this as a versioned constant: never renumber existing slot
  * IDs, never shrink this. New LUTs append to the end (current next
- * free slot id is 0x87).
+ * free slot id is 0x89).
  */
-#define MODALIX_ISP_CALIB_TOTAL_SIZE 136
+#define MODALIX_ISP_CALIB_TOTAL_SIZE 137
 
 /**
  * struct modalix_isp_calibrations - the blob's pointer-table root.
@@ -257,5 +278,18 @@ struct modalix_isp_calibrations {
  * uses its compiled defaults. Opaque ordered blob; the field meaning lives in
  * the IPA AWB source, not here. */
 #define MODALIX_ISP_CALIB_AWB_TUNING                          0x00000087
+
+/* Bit depth the black-level / stats calibration values were authored at (u16[1]).
+ * Used to align native-domain calib values (sensor offset, AE/AWB black-white
+ * levels) independently of the sensor's operating bit depth.
+ *
+ * A slot left unset reads back as 12, the depth every pre-existing tuning was
+ * authored at. That default is for a tuning that predates this slot, not a
+ * licence to ship a blob shorter than TOTAL_SIZE: the blob layout is fixed and
+ * the kernel and the IPA must always be built from the same header. A tuning
+ * authored above 12 bits MUST set this slot, or its pedestal is read against
+ * the wrong full scale.
+ */
+#define MODALIX_ISP_CALIB_CALIBRATION_BIT_DEPTH               0x00000088
 
 #endif /* _UAPI_MODALIX_ISP_CALIB_H */

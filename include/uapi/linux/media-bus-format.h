@@ -160,10 +160,16 @@
 /* JPEG compressed formats - next is	0x4002 */
 #define MEDIA_BUS_FMT_JPEG_1X8			0x4001
 
-/* Vendor specific formats - next is	0x5002 */
+/* Vendor specific formats - next is	0x5003 */
 
 /* S5C73M3 sensor specific interleaved UYVY and JPEG */
 #define MEDIA_BUS_FMT_S5C_UYVY_JPEG_1X8		0x5001
+
+/*
+ * Metoak S315 SIMOR stereo payload: 12-bit disparity packed with a reference
+ * YUV image, three 8-bit samples per pixel. See V4L2_PIX_FMT_METOAK_RGBD.
+ */
+#define MEDIA_BUS_FMT_METOAK_RGBD_3X8		0x5002
 
 /* HSV - next is	0x6002 */
 #define MEDIA_BUS_FMT_AHSV8888_1X32		0x6001

@@ -26,7 +26,7 @@
 	memory@1000000000 {
 		device_type = "memory";
 		reg = < 0x00000010 0x00000000 0x00000000 0x6FC00000
-				0x00000010 0x75000000 0x00000002 0x8B000000>;
+				0x00000010 0x75000000 0x00000006 0x8B000000>;
 	};
 
 	thermal-zones {
@@ -77,6 +77,15 @@
 };
 
 &dms0_reserved {
+	/* Opt-in reusable: CMA may lend unallocated MLA DMA pages back to Linux.
+	 * Switch the heap ABI from the carveout default to the reusable SiMa DMS
+	 * pool and drop no-map; the memory node above is extended to cover this
+	 * range. mla-rt still matches the "dms@" child by name, so the inherited
+	 * node name is left unchanged.
+	 */
+	compatible = "simaai,mla-cma", "shared-dma-pool";
+	/delete-property/ no-map;
+	reusable;
 	reg = <0x00000013 0x00000000 0x00000004 0x00000000>;
 };
 

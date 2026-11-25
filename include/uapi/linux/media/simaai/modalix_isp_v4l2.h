@@ -29,6 +29,9 @@
 
 #include <linux/types.h>
 #include <linux/videodev2.h>
+/* The sensor half of the contract, re-exported so every existing consumer
+ * of this header keeps seeing MODALIX_SENSOR_*. */
+#include <linux/media/simaai/modalix_sensor_v4l2.h>
 
 /* ============================================================================
  * Vendor pixel formats
@@ -234,6 +237,20 @@ enum modalix_isp_v4l2_cid {
 
 	/* i2c bus of the sensor feeding this m2m context; -1 = unset. */
 	MODALIX_ISP_V4L2_CID_SENSOR_SOURCE_BUS,
+
+	/* IPA -> sensor: how many exposures the mode should combine.
+	 *
+	 * The IPA decides which mode runs, so it needs to be able to say so,
+	 * not only to observe it. Writing here forwards to the sensor's own
+	 * MODALIX_SENSOR_V4L2_CID_EXPOSURES; the ISP is only the broker,
+	 * because the IPA already talks to this node and has no handle on the
+	 * sensor subdev - that belongs to the pipeline handler.
+	 *
+	 * A sensor in a mode whose exposure count is fixed reports the control
+	 * read-only and the write fails, which is the right answer: a linear
+	 * mode cannot be asked for three exposures. */
+	MODALIX_ISP_V4L2_CID_SENSOR_SET_EXPOSURES,
+
 };
 
 /* Hard upper bound on a single calibration blob the kernel will

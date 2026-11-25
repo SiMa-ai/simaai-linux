@@ -140,7 +140,7 @@ static int if_configure_input_channel_switch( decompander_fsm_ptr_t p_fsm, chann
         }
 
         if ( max_cap_index == CAP_MIN ) {
-            LOG( LOG_CRIT, "Failed to find channel with highest capability requirement!\n" );
+            LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_CRIT, "Failed to find channel with highest capability requirement!\n" );
             return -1;
         }
         apool_add( &blocked_input_channel, (void *)max_cap_index_id );
@@ -178,7 +178,7 @@ static int if_configure_input_channel_switch( decompander_fsm_ptr_t p_fsm, chann
         }
 
         if ( !channel_conf_flag ) {
-            LOG( LOG_CRIT, "Failed to configure input formatter channels!\n" );
+            LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_CRIT, "Failed to configure input formatter channels!\n" );
             return -1;
         }
     }
@@ -205,6 +205,11 @@ static int if_configure_input_channel_switch( decompander_fsm_ptr_t p_fsm, chann
  * @p_ictx: Pointer to isp calibration data.
  * @isp_base: ISP hw context memory base address.
  *
+ * Whether the expander runs at all is a calibration value, not a decision made
+ * here: the calibration manager already handed this FSM the set belonging to
+ * the mode now streaming, so a mode that does not compand simply arrives with
+ * the block disabled.
+ *
  * Return: None
  */
 static void configure_input_formatter(
@@ -213,7 +218,14 @@ static void configure_input_formatter(
 {
     const uint32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
     const input_formatter_ctrl *p_in_fmt = (const input_formatter_ctrl *)
-        calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_INPUT_FORMATTER );
+        calib_mgr_lut_get_sized( ACAMERA_FSM2CM_PTR( p_fsm ),
+                                 MODALIX_ISP_CALIB_INPUT_FORMATTER,
+                                 sizeof( input_formatter_ctrl ) );
+
+    if ( p_in_fmt == NULL ) {
+        LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_ERR, "input formatter calibration is unusable; not configuring it" );
+        return;
+    }
 
     channel_processing_level cv[4] = {0};
     input_formatter_initial_capabilities( cv );
@@ -259,7 +271,18 @@ static void configure_gamma_fe(
     if ( ctrl->gamma_fe_lut_enable ) {
         const uint32_t gamma_fe_size = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_FE );
         const uint32_t *gamma_fe_lut = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_FE );
+        const uint32_t gamma_fe_hw_size =
+            ( ACAMERA_GAMMA_FE_MEM_SIZE / ( ACAMERA_GAMMA_FE_MEM_ARRAY_DATA_DATASIZE >> 3 ) ) + 1;
         size_t i;
+
+        /* Indexes the hardware array by the LUT's own length - too long and
+         * it writes past the array, as the gamma back-end path guards. */
+        if ( gamma_fe_size != gamma_fe_hw_size ) {
+            LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_ERR,
+                 "Wrong elements number in gamma_fe_lut: expected %d got %d.",
+                 gamma_fe_hw_size, gamma_fe_size );
+            return;
+        }
         for ( i = 0; i < gamma_fe_size - 1; i++ )
             acamera_gamma_fe_mem_array_data_write( isp_base, i, gamma_fe_lut[i] );
         acamera_isp_gamma_fe_data_last_write( isp_base, gamma_fe_lut[gamma_fe_size - 1] );
@@ -267,6 +290,14 @@ static void configure_gamma_fe(
 
     if ( ctrl->gamma_fe_sqrt_enable ) {
         const uint32_t *gamma_black_levels = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_BLACK_LEVELS );
+
+        /* The enable comes from the control block, the levels from a slot the
+         * tuning may not provide - the two are independent. */
+        if ( gamma_black_levels == NULL ) {
+            LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_ERR,
+                     "gamma_fe sqrt is enabled but GAMMA_BLACK_LEVELS is missing; skipping" );
+            return;
+        }
 #if DECOMPANDER_HAS_SQ
         acamera_isp_gamma_fe_black_level_in_sq_write( isp_base, *gamma_black_levels++ );
         acamera_isp_gamma_fe_black_level_out_sq_write( isp_base, *gamma_black_levels++ );
@@ -312,11 +343,11 @@ static void configure_gamma_be( decompander_fsm_ptr_t p_fsm,
         const uint32_t gamma_be_1_hw_len = ( ACAMERA_GAMMA_BE1_MEM_SIZE / ( ACAMERA_GAMMA_BE1_MEM_ARRAY_DATA_DATASIZE >> 3 ) ) + 1;
 
         if ( gamma_be_0_len != gamma_be_0_hw_len ) {
-            LOG( LOG_ERR, "Wrong elements number in gamma_be_0_lut: expected %d got %d.", gamma_be_0_hw_len, gamma_be_0_len );
+            LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_ERR, "Wrong elements number in gamma_be_0_lut: expected %d got %d.", gamma_be_0_hw_len, gamma_be_0_len );
             return;
         }
         if ( gamma_be_1_len != gamma_be_1_hw_len ) {
-            LOG( LOG_ERR, "Wrong elements number in gamma_be_1_lut: expected %d got %d.", gamma_be_1_hw_len, gamma_be_1_len );
+            LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_ERR, "Wrong elements number in gamma_be_1_lut: expected %d got %d.", gamma_be_1_hw_len, gamma_be_1_len );
             return;
         }
 
@@ -332,13 +363,19 @@ static void configure_gamma_be( decompander_fsm_ptr_t p_fsm,
         acamera_isp_gamma_be_data_last_1_write( isp_base, gamma_be_1_lut[gamma_be_1_len - 1] );
 
 
-        LOG( LOG_DEBUG, "gamma_be_0_lut length: %d.", gamma_be_0_len );
-        LOG( LOG_DEBUG, "gamma_be_1_lut length: %d.", gamma_be_1_len );
+        LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_DEBUG, "gamma_be_0_lut length: %d.", gamma_be_0_len );
+        LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_DEBUG, "gamma_be_1_lut length: %d.", gamma_be_1_len );
     }
 
 
     if ( ctrl->gamma_be_sq_enable ) {
         const uint32_t *gamma_black_levels = calib_mgr_u32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_BLACK_LEVELS );
+
+        if ( gamma_black_levels == NULL ) {
+            LOG_CAT( ALOG_CAT_BLACKLEVEL, LOG_ERR,
+                     "gamma_be sq is enabled but GAMMA_BLACK_LEVELS is missing; skipping" );
+            return;
+        }
 #if DECOMPANDER_HAS_SQ
         acamera_isp_gamma_be_black_level_out_sq_write( isp_base, *gamma_black_levels++ );
         acamera_isp_gamma_be_black_level_in_sq_write( isp_base, *gamma_black_levels++ );
@@ -410,9 +447,14 @@ void decompander_reload_calibration( decompander_fsm_ptr_t p_fsm )
 {
     /* If tuning is missing, do nothing with input formatter. */
     if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL ) ) {
-        assert( calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL ) ==
-                sizeof( decompander_ctrl ) );
-        const decompander_ctrl *p_decompander_ctrl = (const decompander_ctrl *)calib_mgr_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL );
+        /* the getter checks the extent and says so if the tuning is short,
+         * which is worth a skipped reload rather than a spin in assert() */
+        const decompander_ctrl *p_decompander_ctrl = (const decompander_ctrl *)calib_mgr_lut_get_sized(
+            ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_DECOMPANDER_CONTROL, sizeof( decompander_ctrl ) );
+
+        if ( p_decompander_ctrl == NULL ) {
+            return;
+        }
         configure_input_formatter( p_fsm, p_decompander_ctrl );
         configure_gamma_fe( p_fsm, p_decompander_ctrl );
         configure_gamma_be( p_fsm, p_decompander_ctrl );

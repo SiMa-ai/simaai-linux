@@ -125,6 +125,10 @@ unsigned char g_bload_buf[MAX_BUF_LEN] = { 0 };
 #define IMX678_DEFAULT_LINK_FREQ	450000000
 #define IMX678_2LANE_1080P_LINK_FREQ	720000000
 #define IMX678_2LANE_4K_LINK_FREQ	1040000000
+/* Longest wait for the MCU to confirm a command */
+#define IMX678_MCU_CMD_TIMEOUT_MS	1000
+/* Consecutive failed status reads before giving up */
+#define IMX678_MCU_STATUS_READ_TRIES	3
 
 /* Embedded metadata stream structure - Not Implemented */
 #define IMX678_EMBEDDED_LINE_WIDTH 16384

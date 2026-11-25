@@ -15,7 +15,11 @@ description: |
 
 properties:
   compatible:
-    const: snps,dphy-rx
+    oneOf:
+      - const: snps,dphy-rx
+      - items:
+          - const: simaai,modalix-dphy-rx
+          - const: snps,dphy-rx
 
   reg:
     minItems: 2
@@ -42,6 +46,24 @@ properties:
       Configuration value for the Tearing Effect (TE) length.
       Specific to the integration of the D-PHY in the SoC.
 
+  snps,rx-hs-gain-mode:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1, 2, 3]
+    description:
+      Force the HS receiver gain mode instead of the one the start-up machine
+      derives from the hsfreqrange band (1 below 1.5 Gbps, 3 above), for a
+      transmitter whose signal is too small for the band's setting. Gen3
+      12-bit integration (simaai,modalix-dphy-rx) only.
+
+  snps,rx-hs-eq-strength:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 0
+    maximum: 7
+    default: 7
+    description:
+      HS equalizer strength for every active data lane, from 0 (weakest) to
+      7 (strongest). Gen3 12-bit integration (simaai,modalix-dphy-rx) only.
+
   snps,config-gpios:
     maxItems: 1
     description:
@@ -53,6 +75,18 @@ required:
   - reg
   - "#phy-cells"
   - snps,dphy-te-len
+
+allOf:
+  - if:
+      not:
+        properties:
+          compatible:
+            contains:
+              const: simaai,modalix-dphy-rx
+    then:
+      properties:
+        snps,rx-hs-gain-mode: false
+        snps,rx-hs-eq-strength: false
 
 additionalProperties: false
 

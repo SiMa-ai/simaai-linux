@@ -60,7 +60,7 @@ static void i2c_io_write_sample( acamera_sbus_t *p_bus, uint32_t addr, uint32_t 
     system_interrupts_disable();
     i = system_i2c_write_register( (system_i2c_controller_ctx_t *)p_bus->ctx, p_bus->device, addrbuf, addr_size, databuf, sample_size );
     if ( i != I2C_OK ) {
-        LOG( LOG_ERR, "I2C not ok" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "I2C not ok" );
         p_bus->last_error_code = i;
     }
     system_interrupts_enable();
@@ -75,13 +75,13 @@ static uint32_t i2c_io_read_sample( acamera_sbus_t *p_bus, uint32_t addr, uint8_
     int i;
 
     if ( p_bus->bus == 0 ) {
-        LOG( LOG_ERR, "I2C bus address is zero. Please check the configuration of sensor connection " );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "I2C bus address is zero. Please check the configuration of sensor connection " );
     }
 
     system_interrupts_disable();
     i = system_i2c_read_register( (system_i2c_controller_ctx_t *)p_bus->ctx, p_bus->device, addrbuf, addr_size, databuf, sample_size );
     if ( i != I2C_OK ) {
-        LOG( LOG_ERR, "I2C not ok" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "I2C not ok" );
         p_bus->last_error_code = i;
     }
     system_interrupts_enable();
@@ -109,6 +109,6 @@ void acamera_sbus_i2c_deinit( acamera_sbus_t *p_bus )
 
 void i2c_init_access( void )
 {
-    LOG( LOG_ERR, "I2C INIT ACCESS IS DISABLED" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "I2C INIT ACCESS IS DISABLED" );
     //system_i2c_init(32);
 }

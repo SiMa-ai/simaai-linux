@@ -58,7 +58,7 @@ void metadata_config( metadata_fsm_ptr_t p_fsm )
     frame_stream_cfg.planes[0].line_offset = sizeof( isp_metadata_t );
 
     if ( frame_stream_create( &frame_stream_cfg ) != 0 ) {
-        LOG( LOG_ERR, "Error, failed to create metadata frame stream." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to create metadata frame stream." );
     }
 #endif
 }
@@ -68,9 +68,9 @@ void metadata_update_meta( metadata_fsm_t *p_fsm )
     isp_metadata_t *md = &p_fsm->cur_metadata;
     acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
     uint32_t isp_base_addr = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
-    const sensor_param_t *s_param = p_ictx->fsmgr.sensor_fsm.ctrl.get_parameters( p_ictx->fsmgr.sensor_fsm.drv_priv );
+    const acamera_cmd_sensor_info *s_info = &p_ictx->fsmgr.sensor_fsm.general_sensor_info;
 
-    LOG( LOG_DEBUG, "updating metadata ( isp_base_addr = 0x%x)", isp_base_addr );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "updating metadata ( isp_base_addr = 0x%x)", isp_base_addr );
 
     // Reset everything
     system_memset( md, 0x0, sizeof( isp_metadata_t ) );
@@ -79,18 +79,18 @@ void metadata_update_meta( metadata_fsm_t *p_fsm )
     md->sequence = p_ictx->frame_sequence;
 
     // Basic info
-    md->sensor_total_width = s_param->total.width;
-    md->sensor_total_height = s_param->total.height;
-    md->sensor_active_width = s_param->active.width;
-    md->sensor_active_height = s_param->active.height;
-    md->sensor_data_width = s_param->data_width;
+    md->sensor_total_width = s_info->total_width;
+    md->sensor_total_height = s_info->total_height;
+    md->sensor_active_width = s_info->active_width;
+    md->sensor_active_height = s_info->active_height;
+    md->sensor_data_width = s_info->sensor_output_bits;
     md->rggb_start = acamera_isp_top_rggb_start_read( isp_base_addr );
 
     md->isp_mode = get_context_param( p_ictx, SENSOR_WDR_MODE_PARAM );
 
 #if defined( ISP_HAS_CMOS_FSM )
     exposure_set_t exp_set;
-    int32_t frame = s_param->integration_time_apply_delay;
+    int32_t frame = s_info->integration_time_apply_delay;
     system_memset( &exp_set, 0x0, sizeof( exposure_set_t ) );
 
     WRAP_GENERAL_CMD( p_ictx, CMD_ID_FRAME_EXPOSURE_SET, CMD_DIRECTION_GET, (const uint32_t *)&frame, (uint32_t *)&exp_set );
@@ -186,78 +186,78 @@ static void dump_gain( const char *name, int32_t gain_log2 )
     uint16_t gain_dec = ( uint16_t )( ( ( ACAMERA_ABS( gain_log10 ) & ( ( 1 << LOG2_GAIN_SHIFT ) - 1 ) ) * 1000 ) >> LOG2_GAIN_SHIFT );
     int32_t gain_ones = math_exp2( gain_log2, LOG2_GAIN_SHIFT, LOG2_GAIN_SHIFT ); // 1% error
     uint16_t gain_ones_dec = ( uint16_t )( ( ( ACAMERA_ABS( gain_ones ) & ( ( 1 << LOG2_GAIN_SHIFT ) - 1 ) ) * 1000 ) >> LOG2_GAIN_SHIFT );
-    LOG( LOG_INFO, "%s gain: %d.%03d (%d.%03d dB)", name, gain_ones >> LOG2_GAIN_SHIFT, gain_ones_dec, gain_log10 >> LOG2_GAIN_SHIFT, gain_dec );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "%s gain: %d.%03d (%d.%03d dB)", name, gain_ones >> LOG2_GAIN_SHIFT, gain_ones_dec, gain_log10 >> LOG2_GAIN_SHIFT, gain_dec );
 }
 
 static void metadata_dump( const isp_metadata_t *md )
 {
     const char *modes[WDR_MODE_COUNT] = {"WDR_MODE_LINEAR", "WDR_MODE_NATIVE", "WDR_MODE_FS_HDR", "WDR_MODE_FS_LIN"};
 
-    LOG( LOG_INFO, "Frame sequence: %d", md->sequence );
-    LOG( LOG_INFO, "Sensor total width: %d", md->sensor_total_width );
-    LOG( LOG_INFO, "Sensor total height: %d", md->sensor_total_height );
-    LOG( LOG_INFO, "Sensor active width: %d", md->sensor_active_width );
-    LOG( LOG_INFO, "Sensor active height: %d", md->sensor_active_height );
-    LOG( LOG_INFO, "Sensor data width: %d", md->sensor_data_width );
-    LOG( LOG_INFO, "RGGB start: %d", md->rggb_start );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Frame sequence: %d", md->sequence );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sensor total width: %d", md->sensor_total_width );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sensor total height: %d", md->sensor_total_height );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sensor active width: %d", md->sensor_active_width );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sensor active height: %d", md->sensor_active_height );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sensor data width: %d", md->sensor_data_width );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "RGGB start: %d", md->rggb_start );
 
-    LOG( LOG_INFO, "ISP mode: %s", modes[md->isp_mode] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "ISP mode: %s", modes[md->isp_mode] );
 
-    LOG( LOG_INFO, "FPS: %u.%02u", md->fps >> 8, ( md->fps & 0xFF ) * (uint32_t)1000 / 256 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "FPS: %u.%02u", md->fps >> 8, ( md->fps & 0xFF ) * (uint32_t)1000 / 256 );
 
-    LOG( LOG_INFO, "Integration time: %d lines %lld.%02lld ms", md->int_time, md->int_time_ms / 100, md->int_time_ms % 100 );
-    LOG( LOG_INFO, "Integration time medium: %d", md->int_time_medium );
-    LOG( LOG_INFO, "Integration time long: %d", md->int_time_long );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Integration time: %d lines %lld.%02lld ms", md->int_time, md->int_time_ms / 100, md->int_time_ms % 100 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Integration time medium: %d", md->int_time_medium );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Integration time long: %d", md->int_time_long );
     dump_gain( "A", md->again );
     dump_gain( "D", md->dgain );
     dump_gain( "ISP", md->isp_dgain );
-    LOG( LOG_INFO, "Exposure_log2: %d", md->exposure );
-    LOG( LOG_INFO, "Equivalent Exposure: %u lines", math_exp2( md->exposure, LOG2_GAIN_SHIFT, 0 ) );
-    LOG( LOG_INFO, "Gain_log2: %d", md->gain_log2 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Exposure_log2: %d", md->exposure );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Equivalent Exposure: %u lines", math_exp2( md->exposure, LOG2_GAIN_SHIFT, 0 ) );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Gain_log2: %d", md->gain_log2 );
 
-    LOG( LOG_INFO, "Antiflicker: %s", md->anti_flicker ? "on" : "off" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Antiflicker: %s", md->anti_flicker ? "on" : "off" );
 
-    LOG( LOG_INFO, "Gain 00: %d", md->gain_00 );
-    LOG( LOG_INFO, "Gain 01: %d", md->gain_01 );
-    LOG( LOG_INFO, "Gain 10: %d", md->gain_10 );
-    LOG( LOG_INFO, "Gain 11: %d", md->gain_11 );
-    LOG( LOG_INFO, "Black Level 00: %d", md->black_level_00 );
-    LOG( LOG_INFO, "Black Level 01: %d", md->black_level_01 );
-    LOG( LOG_INFO, "Black Level 10: %d", md->black_level_10 );
-    LOG( LOG_INFO, "Black Level 11: %d", md->black_level_11 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Gain 00: %d", md->gain_00 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Gain 01: %d", md->gain_01 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Gain 10: %d", md->gain_10 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Gain 11: %d", md->gain_11 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Black Level 00: %d", md->black_level_00 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Black Level 01: %d", md->black_level_01 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Black Level 10: %d", md->black_level_10 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Black Level 11: %d", md->black_level_11 );
 
-    LOG( LOG_INFO, "LSC table: %d", md->lsc_table );
-    LOG( LOG_INFO, "LSC blend: %d", md->lsc_blend );
-    LOG( LOG_INFO, "LSC Mesh strength: %d", md->lsc_mesh_strength );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "LSC table: %d", md->lsc_table );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "LSC blend: %d", md->lsc_blend );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "LSC Mesh strength: %d", md->lsc_mesh_strength );
 
-    LOG( LOG_INFO, "AWB rg: %lld", md->awb_rgain );
-    LOG( LOG_INFO, "AWB bg: %lld", md->awb_bgain );
-    LOG( LOG_INFO, "AWB temperature: %lld", md->awb_cct );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "AWB rg: %lld", md->awb_rgain );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "AWB bg: %lld", md->awb_bgain );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "AWB temperature: %lld", md->awb_cct );
 
-    LOG( LOG_INFO, "Sinter strength: %d", md->sinter_strength );
-    LOG( LOG_INFO, "Sinter strength1: %d", md->sinter_strength1 );
-    LOG( LOG_INFO, "Sinter strength4: %d", md->sinter_strength4 );
-    LOG( LOG_INFO, "Sinter thresh1h: %d", md->sinter_thresh_1h );
-    LOG( LOG_INFO, "Sinter thresh4h: %d", md->sinter_thresh_4h );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sinter strength: %d", md->sinter_strength );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sinter strength1: %d", md->sinter_strength1 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sinter strength4: %d", md->sinter_strength4 );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sinter thresh1h: %d", md->sinter_thresh_1h );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sinter thresh4h: %d", md->sinter_thresh_4h );
 
-    LOG( LOG_INFO, "Iridix strength: %d", md->iridix_strength );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Iridix strength: %d", md->iridix_strength );
 
-    LOG( LOG_INFO, "Raw frontend DP threshold: %d", md->raw_frontend_dp_thresh );
-    LOG( LOG_INFO, "Raw frontend DP slope: %d", md->raw_frontend_dp_slope );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Raw frontend DP threshold: %d", md->raw_frontend_dp_thresh );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Raw frontend DP slope: %d", md->raw_frontend_dp_slope );
 
-    LOG( LOG_INFO, "Sharpening directional: %d", md->sharpening_directional );
-    LOG( LOG_INFO, "Sharpening unidirectional: %d", md->sharpening_unidirectional );
-    LOG( LOG_INFO, "Demosaic NP offset: %d", md->demosaic_np_offset );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sharpening directional: %d", md->sharpening_directional );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Sharpening unidirectional: %d", md->sharpening_unidirectional );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Demosaic NP offset: %d", md->demosaic_np_offset );
 
-    LOG( LOG_INFO, "CCM R_R: 0x%X", md->ccm[CCM_R][CCM_R] );
-    LOG( LOG_INFO, "CCM R_G: 0x%X", md->ccm[CCM_R][CCM_G] );
-    LOG( LOG_INFO, "CCM R_B: 0x%X", md->ccm[CCM_R][CCM_B] );
-    LOG( LOG_INFO, "CCM G_R: 0x%X", md->ccm[CCM_G][CCM_R] );
-    LOG( LOG_INFO, "CCM G_G: 0x%X", md->ccm[CCM_G][CCM_G] );
-    LOG( LOG_INFO, "CCM G_B: 0x%X", md->ccm[CCM_G][CCM_B] );
-    LOG( LOG_INFO, "CCM B_R: 0x%X", md->ccm[CCM_B][CCM_R] );
-    LOG( LOG_INFO, "CCM B_G: 0x%X", md->ccm[CCM_B][CCM_G] );
-    LOG( LOG_INFO, "CCM B_B: 0x%X", md->ccm[CCM_B][CCM_B] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM R_R: 0x%X", md->ccm[CCM_R][CCM_R] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM R_G: 0x%X", md->ccm[CCM_R][CCM_G] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM R_B: 0x%X", md->ccm[CCM_R][CCM_B] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM G_R: 0x%X", md->ccm[CCM_G][CCM_R] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM G_G: 0x%X", md->ccm[CCM_G][CCM_G] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM G_B: 0x%X", md->ccm[CCM_G][CCM_B] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM B_R: 0x%X", md->ccm[CCM_B][CCM_R] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM B_G: 0x%X", md->ccm[CCM_B][CCM_G] );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "CCM B_B: 0x%X", md->ccm[CCM_B][CCM_B] );
 }
 #endif
 
@@ -378,13 +378,13 @@ void metadata_post_meta( metadata_fsm_const_ptr_t p_fsm )
     const uint32_t context_id = ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id;
 
     if ( frame_stream_get_frame( context_id, AFRAME_TYPE_META, AFRAME_STATE_EMPTY, &frame ) ) {
-        LOG( LOG_ERR, "Failed to get empty metadata buffer from the frame streamer (context id: %u)", context_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to get empty metadata buffer from the frame streamer (context id: %u)", context_id );
     } else {
         if ( frame->planes[0].virt_addr != NULL ) {
 
             // Check frame buffer size
             if ( frame->planes[0].length < sizeof( isp_metadata_t ) ) {
-                LOG( LOG_ERR, "Metadata frame buffer size (%u) is less than required (%lu), truncating data. (context id: %u)",
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Metadata frame buffer size (%u) is less than required (%lu), truncating data. (context id: %u)",
                      frame->planes[0].length, sizeof( isp_metadata_t ), context_id );
                 system_memcpy( frame->planes[0].virt_addr, fw_meta, frame->planes[0].length );
             } else {
@@ -393,7 +393,7 @@ void metadata_post_meta( metadata_fsm_const_ptr_t p_fsm )
             frame->state = AFRAME_STATE_FULL;
         } else {
             frame->state = AFRAME_STATE_EMPTY;
-            LOG( LOG_ERR, "Empty metadata frame plane 0 virtual address is NULL (context id: %u)", context_id );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Empty metadata frame plane 0 virtual address is NULL (context id: %u)", context_id );
         }
 
         frame->sequence = fw_meta->sequence;
@@ -420,7 +420,7 @@ void metadata_stop( metadata_fsm_ptr_t p_fsm )
 {
 #if V4L2_INTERFACE_BUILD
     if ( frame_stream_destroy( ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id, AFRAME_TYPE_META, 1 ) ) {
-        LOG( LOG_ERR, "Failed to destroy metadata frame stream." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to destroy metadata frame stream." );
     }
 #endif
 }

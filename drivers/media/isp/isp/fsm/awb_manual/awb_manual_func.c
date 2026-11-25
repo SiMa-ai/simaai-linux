@@ -56,18 +56,18 @@ static void awb_zone_weights_update( AWB_fsm_ptr_t p_fsm )
     const uint32_t awb_zone_wght_ver_len = calib_mgr_lut_len( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_AWB_ZONE_WGHT_VER );
 
     if ( ( horz_zones * vert_zones ) > ISP_METERING_HISTOGRAM_ZONES_MAX ) {
-        LOG( LOG_CRIT, "AWB zone weights update failed. Number of zones configured (%d * %d = %d) is out of range (%d)",
+        LOG_CAT( ALOG_CAT_AWB, LOG_CRIT, "AWB zone weights update failed. Number of zones configured (%d * %d = %d) is out of range (%d)",
              horz_zones, vert_zones, ( horz_zones * vert_zones ), ISP_METERING_HISTOGRAM_ZONES_MAX );
         return;
     }
 
     if ( horz_zones > awb_zone_wght_hor_len ) {
-        LOG( LOG_CRIT, "AWB zone weight update failed. AWB Nodes Used Horiz > awb_zone_wght_hor_len (%u > %u)", horz_zones, awb_zone_wght_hor_len );
+        LOG_CAT( ALOG_CAT_AWB, LOG_CRIT, "AWB zone weight update failed. AWB Nodes Used Horiz > awb_zone_wght_hor_len (%u > %u)", horz_zones, awb_zone_wght_hor_len );
         return;
     }
 
     if ( vert_zones > awb_zone_wght_ver_len ) {
-        LOG( LOG_CRIT, "AWB zone weight update failed. AWB Nodes Used Vert > awb_zone_wght_ver_len (%u > %u)", vert_zones, awb_zone_wght_ver_len );
+        LOG_CAT( ALOG_CAT_AWB, LOG_CRIT, "AWB zone weight update failed. AWB Nodes Used Vert > awb_zone_wght_ver_len (%u > %u)", vert_zones, awb_zone_wght_ver_len );
         return;
     }
 
@@ -103,7 +103,7 @@ static void awb_zone_weights_update( AWB_fsm_ptr_t p_fsm )
         }
     }
 #else
-    LOG( LOG_WARNING, "AWB does not have zone weights" );
+    LOG_CAT( ALOG_CAT_AWB, LOG_WARNING, "AWB does not have zone weights" );
 #endif // ACAMERA_ISP_ZONES_AWB_WEIGHT_DEFAULT
 }
 
@@ -117,7 +117,7 @@ static void awb_process_light_source( AWB_fsm_t *p_fsm )
     acamera_cmd_ccm_info ccm_info;
     acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
 #ifdef AWB_PRINT_DEBUG
-    LOG( LOG_DEBUG, "p_high: %d, light_source_candidate: %d, temperature_detected: %d.\n",
+    LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "p_high: %d, light_source_candidate: %d, temperature_detected: %d.\n",
          p_fsm->p_high,
          p_fsm->light_source_candidate,
          p_fsm->temperature_detected );
@@ -134,8 +134,8 @@ static void awb_process_light_source( AWB_fsm_t *p_fsm )
         if ( p_fsm->detect_light_source_frames_count >= p_fsm->switch_light_source_detect_frames_quantity ) {
 #ifdef AWB_PRINT_DEBUG
             if ( ccm_info.light_source != AWB_LIGHT_SOURCE_D50) {
-                LOG( LOG_DEBUG, "Light source is changed." );
-                LOG( LOG_DEBUG, "p_high=%d, using AWB_LIGHT_SOURCE_D50.", p_fsm->p_high );
+                LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "Light source is changed." );
+                LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "p_high=%d, using AWB_LIGHT_SOURCE_D50.", p_fsm->p_high );
             }
 #endif
 
@@ -164,13 +164,13 @@ static void awb_process_light_source( AWB_fsm_t *p_fsm )
                 WRAP_GENERAL_CMD( ACAMERA_FSM2ICTX_PTR( p_fsm ), CMD_ID_CCM_INFO, CMD_DIRECTION_SET, (uint32_t *)&ccm_info, NULL );
 #ifdef AWB_PRINT_DEBUG
                 // These are rarer so can print wherever they are fired (i.e. not dependent on ittcount)
-                LOG( LOG_DEBUG, "Light source is changed" );
+                LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "Light source is changed" );
                 if ( ccm_info.light_source == AWB_LIGHT_SOURCE_A )
-                    LOG( LOG_DEBUG, "AWB_LIGHT_SOURCE_A" );
+                    LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "AWB_LIGHT_SOURCE_A" );
                 if ( ccm_info.light_source == AWB_LIGHT_SOURCE_D40 )
-                    LOG( LOG_DEBUG, "AWB_LIGHT_SOURCE_D40" );
+                    LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "AWB_LIGHT_SOURCE_D40" );
                 if ( ccm_info.light_source == AWB_LIGHT_SOURCE_D50 )
-                    LOG( LOG_DEBUG, "AWB_LIGHT_SOURCE_D50" );
+                    LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "AWB_LIGHT_SOURCE_D50" );
 #endif
             }
         }
@@ -211,8 +211,11 @@ static void awb_normalise( AWB_fsm_t *p_fsm )
             return;
         }
 
-        uint8_t isp_input_bits = sensor_info.sensor_output_bits;
-        int32_t diff = ( isp_input_bits << LOG2_GAIN_SHIFT ) - log2_fixed_to_fixed( ( 1 << isp_input_bits ) - sensor_info.black_level, 0, LOG2_GAIN_SHIFT ) - min_wb;
+        /* Full-scale/usable ratio in the domain the pedestal is expressed in;
+         * the ratio itself is bit-depth-independent. The producer publishes the
+         * pedestal and its depth together, so the subtraction cannot underflow. */
+        const uint8_t isp_input_bits = sensor_info.black_level_bits;
+        int32_t diff = ( isp_input_bits << LOG2_GAIN_SHIFT ) - log2_fixed_to_fixed( ( 1u << isp_input_bits ) - sensor_info.black_level, 0, LOG2_GAIN_SHIFT ) - min_wb;
         for ( i = 0; i < 4; ++i ) {
             int32_t _wb = wb[i] + diff;
             p_fsm->wb_log2[i] = _wb;
@@ -241,7 +244,7 @@ static void awb_postprocess( AWB_fsm_t *p_fsm )
 
 void awb_init( AWB_fsm_t *p_fsm )
 {
-    LOG( LOG_INFO, "awb_init E" );
+    LOG_CAT( ALOG_CAT_AWB, LOG_INFO, "awb_init E" );
 
     // Initial AWB (rg, bg) is the identity.
     p_fsm->rg_coef = 0x100;
@@ -255,14 +258,14 @@ void awb_init( AWB_fsm_t *p_fsm )
     p_fsm->repeat_irq_mask = BIT( ACAMERA_IRQ_AWB_STATS );
     AWB_request_interrupt( p_fsm, p_fsm->repeat_irq_mask );
 
-    LOG( LOG_INFO, "awb_init X" );
+    LOG_CAT( ALOG_CAT_AWB, LOG_INFO, "awb_init X" );
 }
 
 void awb_config( AWB_fsm_t *p_fsm )
 {
     // Set the default awb values
     if ( MAX_AWB_ZONES < acamera_isp_metering_awb_nodes_used_horiz_read( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base ) * acamera_isp_metering_awb_nodes_used_vert_read( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base ) ) {
-        LOG( LOG_CRIT, "MAX_AWB_ZONES is less than hardware reported zones" );
+        LOG_CAT( ALOG_CAT_AWB, LOG_CRIT, "MAX_AWB_ZONES is less than hardware reported zones" );
     }
 
     // awb_warming will not be reloaded on reload_calibration because it takes calibration for D50 as a starting value.
@@ -284,7 +287,7 @@ void awb_reload_calibration( AWB_fsm_t *p_fsm )
         p_fsm->min_temp_rg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_RG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_RG_POS_CALC ) - 1]; // division by zero is checked
         p_fsm->min_temp_bg = U16_MAX / calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_BG_POS_CALC )[calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_CT_BG_POS_CALC ) - 1]; // division by zero is checked
     } else {
-        LOG( LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
+        LOG_CAT( ALOG_CAT_AWB, LOG_WARNING, "AVOIDED DIVISION BY ZERO" );
     }
 
     awb_zone_weights_update( p_fsm );
@@ -354,7 +357,7 @@ static int awb_is_crc_valid( const uint32_t base_address )
     const uint32_t crc_hw = awb_get_data( base_address, AWB_STATS_CRC_INDEX );
 
     if ( crc16 != crc_hw ) {
-        LOG( LOG_DEBUG, "No CRC match for awb 0x%x read, 0x%x calced", crc_hw, crc16 );
+        LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "No CRC match for awb 0x%x read, 0x%x calced", crc_hw, crc16 );
         return 0;
     }
 
@@ -448,7 +451,7 @@ void AWB_fsm_process_interrupt( const AWB_fsm_t *p_fsm, uint8_t irq_event )
         if ( rc == 0 ) {
             fsm_raise_event( p_fsm, event_id_isphw_stats_ready_awb );
         } else {
-            LOG( LOG_DEBUG, "Failed to read statistics, error: %d", rc );
+            LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "Failed to read statistics, error: %d", rc );
         }
     } break;
     }

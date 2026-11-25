@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ *
+ * LI-AR0822-MIPI-126H on DVT CAM1 (csi1), two lanes.
+ *
+ * The same board and link frequency as the four-lane overlay; only the lane
+ * count differs. The driver derives the line length from it, so the frame
+ * rate follows without any other change. Use instead of
+ * modalix-dvt-LI-AR0822-1CAM.dtbo, never alongside it.
+ *
+ * The module is self-clocked from an on-board 27 MHz oscillator, so the
+ * fixed-clock below is a software placeholder the driver only range-checks;
+ * it never computes with it. Everything else the module needs - 3.3 V and its
+ * enable - is supplied by the carrier, so there is no reset or power GPIO.
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+    ar0822_vana_1: csi1_fixedregulator@0 {
+        compatible = "regulator-fixed";
+        regulator-name = "ar0822_vana_1";
+        regulator-min-microvolt = <2800000>;
+        regulator-max-microvolt = <2800000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+    ar0822_vdig_1: csi1_fixedregulator@1 {
+        compatible = "regulator-fixed";
+        regulator-name = "ar0822_vdig_1";
+        regulator-min-microvolt = <1050000>;
+        regulator-max-microvolt = <1050000>;
+        regulator-always-on;
+    };
+    ar0822_vddl_1: csi1_fixedregulator@2 {
+        compatible = "regulator-fixed";
+        regulator-name = "ar0822_vddl_1";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+    ar0822_clk_1: csi1_camera-clk {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <27000000>;
+    };
+};
+
+&csi1 {
+    status = "okay";
+};
+
+&axi_vdma1 {
+    status = "okay";
+};
+
+&mipi_dphy_rx1 {
+    status = "okay";
+};
+
+&v4l2video1 {
+    status = "okay";
+};
+
+&v4l2vdma1 {
+    status = "okay";
+};
+
+&csi10in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <492750000>;
+    remote-endpoint = <&cam10out>;
+    clock-continuous;
+};
+
+&i2c01 {
+        status = "okay";
+        clock-frequency = <400000>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        ar0822: ar0822@10 {
+                compatible = "onsemi,ar0822";
+                reg = <0x10>;
+
+                clocks = <&ar0822_clk_1>;
+                clock-names = "xclk";
+
+                rotation = <0>;
+                orientation = <2>;
+
+
+                VANA-supply = <&ar0822_vana_1>;
+                VDIG-supply = <&ar0822_vdig_1>;
+                VDDL-supply = <&ar0822_vddl_1>;
+
+                port@1 {
+                        cam10out: endpoint@0 {
+                                clock-lanes = <0>;
+                                data-lanes = <1 2>;
+                                link-frequencies = /bits/ 64 <492750000>;
+                                remote-endpoint = <&csi10in>;
+                                clock-continuous;
+                        };
+                };
+        };
+};

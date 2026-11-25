@@ -41,7 +41,7 @@ int fw_intf_isp_update_sensor_info_mode( uint32_t ctx_id, isp_v4l2_sensor_info *
 
 /* fw-interface per-stream control interface */
 int fw_intf_stream_start( uint32_t ctx_id, isp_v4l2_stream_type_t stream_type, unsigned long stream_open_mask );
-void fw_intf_stream_stop( uint32_t ctx_id, isp_v4l2_stream_type_t stream_type, unsigned long stream_on_mask );
+void fw_intf_stream_stop( uint32_t ctx_id, isp_v4l2_stream_type_t stream_type, unsigned long stream_on_mask, bool was_running );
 int fw_intf_m2m_process_request( uint32_t ctx_id );
 
 /* fw-interface per-stream config interface */

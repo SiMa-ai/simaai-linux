@@ -1,0 +1,153 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/i2c/sony,imx568.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Sony IMX568 CMOS Image Sensor
+
+maintainers:
+  - Punit Singh <punit.singh@sima.ai>
+
+description: |-
+  The Sony IMX568 is a 1/1.8-inch global-shutter CMOS image sensor with a
+  driver-exposed 2464 x 2064 native pixel array. Sony's all-pixel timing row
+  applies to ROI widths through 2472 pixels. The sensor is programmed through
+  I2C and outputs RAW data over a two- or four-lane MIPI CSI-2 interface.
+
+allOf:
+  - $ref: /schemas/media/video-interface-devices.yaml#
+
+$defs:
+  endpoint:
+    $ref: /schemas/media/video-interfaces.yaml#
+    unevaluatedProperties: false
+
+    properties:
+      data-lanes:
+        oneOf:
+          - items:
+              - const: 1
+              - const: 2
+          - items:
+              - const: 1
+              - const: 2
+              - const: 3
+              - const: 4
+
+      link-frequencies:
+        minItems: 1
+        maxItems: 3
+        items:
+          enum: [297000000, 445500000, 594000000]
+
+      clock-continuous:
+        type: boolean
+        description:
+          Downstream-only legacy compatibility marker with no effect on the
+          driver. It is not part of the generic video-interface binding. New
+          device trees omit both clock-continuous and clock-noncontinuous to
+          select continuous mode.
+
+      clock-noncontinuous: false
+
+    required:
+      - data-lanes
+      - link-frequencies
+
+  port:
+    $ref: /schemas/graph.yaml#/$defs/port-base
+    unevaluatedProperties: false
+
+    properties:
+      endpoint:
+        $ref: '#/$defs/endpoint'
+
+    required:
+      - endpoint
+
+properties:
+  compatible:
+    const: sony,imx568
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+    description:
+      Sensor INCK. The driver implements the Sony 37.125 MHz register profile.
+
+  clock-names:
+    items:
+      - const: inck
+
+  assigned-clocks:
+    maxItems: 1
+
+  assigned-clock-rates:
+    items:
+      - const: 37125000
+
+  avdd-supply:
+    description: Analog power supply (3.3 V).
+
+  dvdd-supply:
+    description: Digital core power supply (1.1 V).
+
+  dovdd-supply:
+    description: Digital I/O power supply (1.8 V).
+
+  reset-gpios:
+    description: Sensor reset (XCLR) GPIO.
+    maxItems: 1
+
+  simaai,ipi-enable-delay-ms:
+    default: 0
+    maximum: 5000
+    description:
+      Legacy downstream source-node delay consumed by the CSI-2 receiver in
+      either timing mode. New device trees put
+      simaai,ipi-controller-enable-delay-ms on the receiver node for an
+      explicitly controller-mode-only delay.
+
+  port:
+    $ref: '#/$defs/port'
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - avdd-supply
+  - dvdd-supply
+  - dovdd-supply
+  - port
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        camera@3d {
+            compatible = "sony,imx568";
+            reg = <0x3d>;
+            clocks = <&imx568_clk>;
+            clock-names = "inck";
+            avdd-supply = <&imx568_avdd>;
+            dvdd-supply = <&imx568_dvdd>;
+            dovdd-supply = <&imx568_dovdd>;
+            port {
+                imx568_out: endpoint {
+                    clock-lanes = <0>;
+                    data-lanes = <1 2 3 4>;
+                    link-frequencies = /bits/ 64 <594000000>;
+                    remote-endpoint = <&csi_in>;
+                };
+            };
+        };
+    };
+...

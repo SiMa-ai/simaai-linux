@@ -89,7 +89,7 @@ int16_t a_reg_to_twos_complement( uint16_t value )
 
     // Range check, value should within 0..4095 range (12-bit)
     if ( result > 4095u ) {
-        LOG( LOG_WARNING, "CCM A coefficient value (%s%u) is out of range (-4095..+4095) and will be truncated.",
+        LOG_CAT( ALOG_CAT_CCM, LOG_WARNING, "CCM A coefficient value (%s%u) is out of range (-4095..+4095) and will be truncated.",
              ( ( value & ( 1 << 15 ) ) ? "-" : "+" ), result );
         result = 4095u;
     }
@@ -113,7 +113,7 @@ int16_t b_reg_to_twos_complement( uint16_t value )
 {
     // Range check
     if ( value > 0x7FFFu ) {
-        LOG( LOG_WARNING, "CCM B coefficient value (%u) is out of range (0..32767) and will be truncated.", value );
+        LOG_CAT( ALOG_CAT_CCM, LOG_WARNING, "CCM B coefficient value (%u) is out of range (0..32767) and will be truncated.", value );
         value &= 0x7FFFu;
     }
 
@@ -143,7 +143,7 @@ uint16_t twos_complement_to_a_reg( int16_t value )
 
     // Range check, value should within 0..4095 range (12-bit)
     if ( result > ( ( 1 << 12 ) - 1 ) ) {
-        LOG( LOG_WARNING, "CCM A coefficient value (%d) is out of range (-4095..+4095) and will be truncated.", value );
+        LOG_CAT( ALOG_CAT_CCM, LOG_WARNING, "CCM A coefficient value (%d) is out of range (-4095..+4095) and will be truncated.", value );
         result = ( ( 1 << 12 ) - 1 );
     }
 
@@ -165,7 +165,7 @@ uint16_t twos_complement_to_b_reg( int16_t value )
 {
     // Range check
     if ( ( value > 16383 ) || ( value < -16384 ) ) {
-        LOG( LOG_WARNING, "CCM B coefficient value (%d) is out of range (-16384..16383) and will be truncated.", value );
+        LOG_CAT( ALOG_CAT_CCM, LOG_WARNING, "CCM B coefficient value (%d) is out of range (-16384..16383) and will be truncated.", value );
         if ( value > 0 ) {
             value = 16383;
         } else {
@@ -254,7 +254,7 @@ void color_matrix_setup( int16_t *p_matrix, const uint16_t *source_matrix, int16
     int i;
 
     if ( source_matrix == NULL ) {
-        LOG( LOG_WARNING, "color_matrix_setup: source NULL (size=%d), filling identity", size );
+        LOG_CAT( ALOG_CAT_CCM, LOG_WARNING, "color_matrix_setup: source NULL (size=%d), filling identity", size );
         color_matrix_fill_identity( p_matrix, size );
         return;
     }
@@ -270,7 +270,7 @@ void color_matrix_setup( int16_t *p_matrix, const uint16_t *source_matrix, int16
     int i;
 
     if ( source_matrix == NULL ) {
-        LOG( LOG_WARNING, "color_matrix_setup: source NULL (size=%d), filling identity", size );
+        LOG_CAT( ALOG_CAT_CCM, LOG_WARNING, "color_matrix_setup: source NULL (size=%d), filling identity", size );
         color_matrix_fill_identity( p_matrix, size );
         return;
     }
@@ -368,7 +368,7 @@ void color_matrix_write( color_matrix_fsm_ptr_t p_fsm )
         rgb2rgb_matrix_update( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, p_fsm->color_matrix_hs, p_fsm->color_matrix_hs_b );
     } else {
         // Default (rgb2rgb)
-        LOG( LOG_DEBUG, "p_fsm->manual_CCM %d %d %d %d", p_fsm->manual_CCM, *( p_cm_target + 0 ), *( p_cm_target + 1 ), *( p_cm_target + 2 ) );
+        LOG_CAT( ALOG_CAT_CCM, LOG_DEBUG, "p_fsm->manual_CCM %d %d %d %d", p_fsm->manual_CCM, *( p_cm_target + 0 ), *( p_cm_target + 1 ), *( p_cm_target + 2 ) );
 
         rgb2rgb_matrix_update( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, p_cm_target, NULL );
     }

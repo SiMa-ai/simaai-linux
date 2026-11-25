@@ -67,6 +67,11 @@
 #define ISP_DMA_BURST_BEATS 1u
 #define ISP_STRIDE_ALIGN    ( ISP_AXI_BEAT_BYTES * ISP_DMA_BURST_BEATS )
 
+/* Bytes reserved at the end of a capture buffer for the per-frame metadata
+ * trailer the CSI/VDMA writer appends (matches the VDMA driver's frame-meta
+ * size). Only used to decide whether the page round-up already leaves room. */
+#define ISP_BUF_TRAILER_HEADROOM 32u
+
 extern struct simaai_stu *stu;
 /**
  * @brief Struct describing stream supported format
@@ -280,12 +285,28 @@ static isp_v4l2_stream_fmt_list_t isp_v4l2_stream_supported_formats[V4L2_STREAM_
                 .description = "NV12",
                 .pixelformat = V4L2_PIX_FMT_NV12,
                 .data_width = 8,
-                .num_planes = 2,
+                .num_planes = 1,
                 .is_yuv = 1,
 				.mbus_code = 0, //TODO : Add correct code here
+            },
+            {
+                .description = "NV16",
+                .pixelformat = V4L2_PIX_FMT_NV16,
+                .data_width = 8,
+                .num_planes = 1,
+                .is_yuv = 1,
+                .mbus_code = 0,
+            },
+            {
+                .description = "NV24",
+                .pixelformat = V4L2_PIX_FMT_NV24,
+                .data_width = 8,
+                .num_planes = 1,
+                .is_yuv = 1,
+                .mbus_code = 0,
             }
         },
-        .num_formats = 3
+        .num_formats = 5
     },
     [V4L2_STREAM_TYPE_META] = {
         .formats = (isp_v4l2_fmt_t[]) {
@@ -458,7 +479,7 @@ static uint32_t isp_v4l2_stream_get_default_pixelformat( isp_v4l2_stream_t *pstr
 
             // Try to find best suitable pixel format based on data width difference
             int data_width_diff = isp_v4l2_stream_supported_formats[V4L2_STREAM_TYPE_RAW].formats[i].data_width - data_width;
-            LOG( LOG_INFO, "[Stream#%d-%s] Supported format #%u. pixelformat data width: %u, diff: %d, last data diff: %d",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Supported format #%u. pixelformat data width: %u, diff: %d, last data diff: %d",
                  pstream->stream_type,
                  isp_v4l2_stream_get_direction_string( stream_direction ),
                  i, isp_v4l2_stream_supported_formats[V4L2_STREAM_TYPE_RAW].formats[i].data_width, data_width_diff, last_data_width_diff );
@@ -474,12 +495,12 @@ static uint32_t isp_v4l2_stream_get_default_pixelformat( isp_v4l2_stream_t *pstr
             // Check if suitable pixelformat found
             if ( nearest_suitable < isp_v4l2_stream_supported_formats[V4L2_STREAM_TYPE_RAW].num_formats ) {
                 pixelformat = isp_v4l2_stream_supported_formats[V4L2_STREAM_TYPE_RAW].formats[nearest_suitable].pixelformat;
-                LOG( LOG_WARNING, "[Stream#%d-%s] Failed to find default pixelformat for sensor data width: %u. Substituted with: 0x%08x (%s).",
+                LOG_CAT( ALOG_CAT_V4L2,  LOG_WARNING, "[Stream#%d-%s] Failed to find default pixelformat for sensor data width: %u. Substituted with: 0x%08x (%s).",
                      pstream->stream_type,
                      isp_v4l2_stream_get_direction_string( stream_direction ),
                      data_width, pixelformat, isp_v4l2_stream_get_pixelformat_string( pixelformat ) );
             } else {
-                LOG( LOG_ERR, "[Stream#%d-%s] Failed to find default pixelformat for sensor data width: %u.",
+                LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d-%s] Failed to find default pixelformat for sensor data width: %u.",
                      pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), data_width );
             }
         }
@@ -503,6 +524,12 @@ static int isp_v4l2_stream_get_planes( struct vb2_buffer *vb,
 	int rc = 0;
     dma_addr_t phys_addr = 0; 
 	dma_addr_t bus_addr = 0;
+    /*
+     * Y-plane size of a single-buffer semi-planar frame. Used to synthesize
+     * the UV plane address (UV starts at Y_base + y_size) when the ISP
+     * frame carries more planes than the backing vb2 buffer.
+     */
+    uint32_t y_size = pix_mp->plane_fmt[0].bytesperline * pix_mp->height;
 
     for ( i = 0; i < frame->num_planes; i++ ) {
 
@@ -510,16 +537,36 @@ static int isp_v4l2_stream_get_planes( struct vb2_buffer *vb,
             frame->planes[i].address.low = 0;
             frame->planes[i].address.high = 0;
             frame->planes[i].virt_addr = vb2_plane_vaddr( vb, i );
+        } else if ( i >= vb->num_planes ) {
+            /*
+             * Synthesized plane: for single-fd semi-planar formats the UV
+             * data lives in the same contiguous vb2 buffer as Y, at offset
+             * y_size. There is no second vb2 plane to query, so derive the
+             * address from plane 0 (dma-contig guarantees physical
+             * contiguity, so the bus address is contiguous across Y and UV).
+             */
+            uint64_t y_base = ( ( (uint64_t)frame->planes[0].address.high ) << 32 )
+                            | frame->planes[0].address.low;
+            uint64_t uv_addr = y_base + y_size;
+
+            frame->planes[i].address.low = lower_32_bits( uv_addr );
+            frame->planes[i].address.high = upper_32_bits( uv_addr );
+            frame->planes[i].virt_addr = frame->planes[0].virt_addr
+                ? (void *)( (uintptr_t)frame->planes[0].virt_addr + y_size )
+                : NULL;
+
+            LOG( LOG_INFO, "single-fd semi-planar: plane %u UV synthesized at Y_base + %#x => low: %#x, high: %#x",
+                 i, y_size, frame->planes[i].address.low, frame->planes[i].address.high );
         } else {
             phys_addr = vb2_dma_contig_plane_dma_addr( vb, i );
 			if (stu) {
 				rc = simaai_stu_get_bus_address(stu, phys_addr, &bus_addr);
 				if (rc != 0) {
-					LOG(LOG_CRIT, "Failed to get bus address for phys address %#llx\n", phys_addr);
+					LOG_CAT( ALOG_CAT_V4L2, LOG_CRIT, "Failed to get bus address for phys address %#llx\n", phys_addr);
 					return rc;
 				}
 			} else {
-				LOG( LOG_CRIT, "STU is not initialized\n");
+				LOG_CAT( ALOG_CAT_V4L2,  LOG_CRIT, "STU is not initialized\n");
 				return -EINVAL;
 			}
 
@@ -534,21 +581,46 @@ static int isp_v4l2_stream_get_planes( struct vb2_buffer *vb,
                 frame->planes[i].address.low -= ISPAS_MINUS_SYSPHY;
             }
 	    
-	        LOG(LOG_DEBUG, "Buffer phy address : %#llx, bus addr: %#x[%#x], virt : %#llx", phys_addr,
+	        LOG_CAT( ALOG_CAT_V4L2, LOG_DEBUG, "Buffer phy address : %#llx, bus addr: %#x[%#x], virt : %#llx", phys_addr,
 				frame->planes[i].address.low, bus_addr, frame->planes[i].virt_addr);
         }
 
-        // Check if pixel format is NV12 and adjust UV plane resolution according to subsampling
-        if ( ( pix_mp->pixelformat == V4L2_PIX_FMT_NV12 ) && ( i == 1 ) ) {
-            frame->planes[i].width = pix_mp->width / 2;
-            frame->planes[i].height = pix_mp->height / 2;
+        // Semi-planar chroma grid per subsampling: NV12 (4:2:0) w/2 x h/2,
+        // NV16 (4:2:2) w/2 x h, NV24 (4:4:4) w x h.
+        if ( i == 1 && ( pix_mp->pixelformat == V4L2_PIX_FMT_NV12 ||
+                         pix_mp->pixelformat == V4L2_PIX_FMT_NV16 ||
+                         pix_mp->pixelformat == V4L2_PIX_FMT_NV24 ) ) {
+            frame->planes[i].width = ( pix_mp->pixelformat == V4L2_PIX_FMT_NV24 )
+                                         ? pix_mp->width : pix_mp->width / 2;
+            frame->planes[i].height = ( pix_mp->pixelformat == V4L2_PIX_FMT_NV12 )
+                                          ? pix_mp->height / 2 : pix_mp->height;
         } else {
             frame->planes[i].width = pix_mp->width;
             frame->planes[i].height = pix_mp->height;
         }
 
-        frame->planes[i].line_offset = pix_mp->plane_fmt[i].bytesperline;
-        frame->planes[i].length = pix_mp->plane_fmt[i].sizeimage;
+        if ( i >= vb->num_planes ) {
+            /*
+             * Synthesized UV plane: plane_fmt[i] is unset because the V4L2
+             * buffer has a single plane, so derive stride/length from the
+             * Y plane per subsampling — NV12 h/2 rows of Y-stride, NV16 h
+             * rows of Y-stride, NV24 h rows at twice the Y stride.
+             */
+            uint32_t uv_stride = pix_mp->plane_fmt[0].bytesperline;
+            uint32_t uv_len = y_size / 2;
+
+            if ( pix_mp->pixelformat == V4L2_PIX_FMT_NV16 ) {
+                uv_len = y_size;
+            } else if ( pix_mp->pixelformat == V4L2_PIX_FMT_NV24 ) {
+                uv_stride *= 2;
+                uv_len = y_size * 2;
+            }
+            frame->planes[i].line_offset = uv_stride;
+            frame->planes[i].length = uv_len;
+        } else {
+            frame->planes[i].line_offset = pix_mp->plane_fmt[i].bytesperline;
+            frame->planes[i].length = pix_mp->plane_fmt[i].sizeimage;
+        }
     }
 
     return 0;
@@ -560,10 +632,17 @@ static void isp_v4l2_stream_put_planes( struct vb2_buffer *vb, aframe_t *frame )
 	dma_addr_t bus_addr = 0;
 	int rc = 0;
     for ( i = 0; i < frame->num_planes; i++ ) {
+        /*
+         * Synthesized planes (e.g. the single-fd NV12 UV plane) are not
+         * backed by a dedicated vb2 plane, so there is nothing to validate
+         * or hand back here.
+         */
+        if ( i >= vb->num_planes )
+            continue;
         if ( frame->type == AFRAME_TYPE_META ) {
             void *addr = vb2_plane_vaddr( vb, i );
             if ( frame->planes[i].virt_addr != addr ) {
-                LOG( LOG_CRIT, "VB2 virtual address mismatch for frame, context id: %u, type: %u, plane: %u (VB2: %p, frame: %p)",
+                LOG_CAT( ALOG_CAT_V4L2,  LOG_CRIT, "VB2 virtual address mismatch for frame, context id: %u, type: %u, plane: %u (VB2: %p, frame: %p)",
                      frame->context_id, frame->type, i, addr, frame->planes[i].virt_addr );
                 return;
             }
@@ -572,11 +651,11 @@ static void isp_v4l2_stream_put_planes( struct vb2_buffer *vb, aframe_t *frame )
 			if (stu) {
 				rc = simaai_stu_get_bus_address(stu, addr, &bus_addr);
 				if (rc != 0) {
-					LOG(LOG_CRIT, "Failed to get bus address for phys address %#llx\n", addr);
+					LOG_CAT( ALOG_CAT_V4L2, LOG_CRIT, "Failed to get bus address for phys address %#llx\n", addr);
 					return ;
 				}
 			} else {
-				LOG( LOG_CRIT, "STU is not initialized\n");
+				LOG_CAT( ALOG_CAT_V4L2,  LOG_CRIT, "STU is not initialized\n");
 				return;
 			}
 
@@ -590,7 +669,7 @@ static void isp_v4l2_stream_put_planes( struct vb2_buffer *vb, aframe_t *frame )
             }
 
             if ( ( frame->planes[i].address.low != addr_low ) || ( frame->planes[i].address.high != addr_high ) ) {
-                LOG( LOG_CRIT, "VB2 DMA address mismatch for frame, context id: %u, type: %u, plane: %u (VB2: 0x%llx, frame: 0x%llx)",
+                LOG_CAT( ALOG_CAT_V4L2,  LOG_CRIT, "VB2 DMA address mismatch for frame, context id: %u, type: %u, plane: %u (VB2: 0x%llx, frame: 0x%llx)",
                      frame->context_id, frame->type, i,
                      (uint64_t)addr_low | ( ( (uint64_t)addr_high ) << 32 ),
                      (uint64_t)frame->planes[i].address.low | ( ( (uint64_t)frame->planes[i].address.high ) << 32 ) );
@@ -616,13 +695,13 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
     /* find stream pointer */
     int rc = isp_v4l2_find_stream( &pstream, ctx_id, stream_type );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "Error. Can't find stream matching to context id: %u, type: %d, rc: %d", ctx_id, stream_type, rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. Can't find stream matching to context id: %u, type: %d, rc: %d", ctx_id, stream_type, rc );
         return -1;
     }
 
     /* check if stream is on */
     if ( !pstream->stream_started ) {
-        LOG( LOG_ERR, "[Stream#%d] Stream has not yet started on context id: %d", pstream->stream_type, ctx_id );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d] Stream has not yet started on context id: %d", pstream->stream_type, ctx_id );
         return -1;
     }
 
@@ -634,11 +713,11 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
         } else if ( stream_type == V4L2_STREAM_TYPE_OUT ) {
             stream_direction = V4L2_STREAM_DIRECTION_CAP;
         } else {
-            LOG( LOG_ERR, "Error. Can't find stream direction matching m2m stream, context id: %u, stream type: %d", ctx_id, stream_type );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. Can't find stream direction matching m2m stream, context id: %u, stream type: %d", ctx_id, stream_type );
             return -1;
         }
 #if 0
-        LOG( LOG_INFO, "[Stream#%d-%s] Get frame, ready buffer queue size: %u, busy buffer queue size: %u",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Get frame, ready buffer queue size: %u, busy buffer queue size: %u",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
              ( ( stream_direction == V4L2_STREAM_DIRECTION_CAP ) ? v4l2_m2m_num_dst_bufs_ready( pstream->fh.m2m_ctx ) : v4l2_m2m_num_src_bufs_ready( pstream->fh.m2m_ctx ) ),
              pstream->buffer_list[stream_direction].busy.size );
@@ -647,7 +726,7 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
     } else {
         stream_direction = V4L2_STREAM_DIRECTION_CAP;
 #if 0
-        LOG( LOG_INFO, "[Stream#%d-%s] Get frame, ready buffer queue size: %u, busy buffer queue size: %u",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Get frame, ready buffer queue size: %u, busy buffer queue size: %u",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
              pstream->buffer_list[stream_direction].ready.size, pstream->buffer_list[stream_direction].busy.size );
 #endif
@@ -686,7 +765,7 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
 				
        		} else {
 #ifdef ENABLE_V4L2_STREAM_LOGS
-				LOG( LOG_DEBUG, "list is empty");
+				LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "list is empty");
 #endif
 			}
         	spin_unlock( &pstream->buffer_list[stream_direction].lock );
@@ -707,7 +786,7 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
     }
 
     if ( pbuf == NULL ) {
-        LOG( LOG_ERR, "[Stream#%d-%s] Stream has no empty buffers",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d-%s] Stream has no empty buffers",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ) );
         return -1;
     }
@@ -723,7 +802,7 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
         struct v4l2_pix_format_mplane *pix_mp = &v4l2_fmt->fmt.pix_mp;
 
         if ( pix_mp->num_planes != vb->num_planes ) {
-            LOG( LOG_CRIT, "[Stream#%d-%s] Stream number of planes (%u) doesn't match to VB2 buffer number of planes (%u)",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_CRIT, "[Stream#%d-%s] Stream number of planes (%u) doesn't match to VB2 buffer number of planes (%u)",
                  pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), pix_mp->num_planes, vb->num_planes );
             return -1;
         }
@@ -734,6 +813,20 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
         pbuf->frame.type = type;
         pbuf->frame.state = AFRAME_STATE_EMPTY;
         pbuf->frame.num_planes = pix_mp->num_planes;
+        /*
+         * NV12/NV16/NV24 are exposed to V4L2/userspace as a single
+         * contiguous plane (one dmabuf => one fd downstream), but the ISP
+         * output formatter (OF_MODE_Y8UV88*) writes Y and UV to two
+         * independent DMA base addresses, and the firmware buffer set is
+         * built with 2 planes. Present two planes to the ISP, both backed
+         * by the single vb2 buffer; the UV base is synthesized at
+         * Y_base + Y_size in isp_v4l2_stream_get_planes().
+         */
+        if ( ( pix_mp->pixelformat == V4L2_PIX_FMT_NV12 ||
+               pix_mp->pixelformat == V4L2_PIX_FMT_NV16 ||
+               pix_mp->pixelformat == V4L2_PIX_FMT_NV24 ) &&
+             pix_mp->num_planes == 1 )
+            pbuf->frame.num_planes = 2;
         pbuf->frame.frame_id = vb->index;
 
         // Set frame memory type based on VB2 buffer memory type
@@ -749,7 +842,7 @@ int isp_v4l2_stream_get_frame( const unsigned int ctx_id, const aframe_type_t ty
 		//LOG (LOG_INFO, "frame returned is %#llx, address : %#x", *frame, pbuf->frame.planes[0].address.low);
 
     } else {
-        LOG( LOG_CRIT, "[Stream#%d-%s] Stream has invalid v4l2_fmt->type: %d",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_CRIT, "[Stream#%d-%s] Stream has invalid v4l2_fmt->type: %d",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), v4l2_fmt->type );
         return -1;
     }
@@ -770,14 +863,14 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
     /* find stream pointer */
     int rc = isp_v4l2_find_stream( &pstream, frame->context_id, stream_type );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "Error. Can't find stream matching to context id: %u, type: %d, rc: %d",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. Can't find stream matching to context id: %u, type: %d, rc: %d",
              frame->context_id, stream_type, rc );
         return -1;
     }
 
     /* check if stream is on */
     if ( !pstream->stream_started ) {
-        LOG( LOG_ERR, "[Stream#%d] Stream has not yet started on context id: %d", pstream->stream_type, frame->context_id );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d] Stream has not yet started on context id: %d", pstream->stream_type, frame->context_id );
         return -1;
     }
 
@@ -789,7 +882,7 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
         } else if ( stream_type == V4L2_STREAM_TYPE_OUT ) {
             stream_direction = V4L2_STREAM_DIRECTION_CAP;
         } else {
-            LOG( LOG_ERR, "Error. Can't find stream direction matching m2m stream, context id: %u, stream type: %d", frame->context_id, stream_type );
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. Can't find stream direction matching m2m stream, context id: %u, stream type: %d", frame->context_id, stream_type );
             return -1;
         }
     } else {
@@ -833,12 +926,12 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
     spin_unlock( &pstream->buffer_list[stream_direction].lock );
 
     if ( !found ) {
-        LOG( LOG_ERR, "[Stream#%d-%s] Frame not found in the stream busy buffer list",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d-%s] Frame not found in the stream busy buffer list",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ) );
     }
 
     if ( !pbuf ) {
-        LOG( LOG_INFO, "[Stream#%d-%s] Stream has no filled buffers",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Stream has no filled buffers",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ) );
         return -1;
     }
@@ -846,16 +939,20 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION( 4, 4, 0 ) )
     struct vb2_v4l2_buffer *vvb = &pbuf->vvb;
     struct vb2_buffer *vb = &vvb->vb2_buf;
-    vvb->sequence = frame->sequence;
+	/*
+	 * frame->sequence is a shared ISP counter a second context resets;
+	 * V4L2 sequence must stay monotonic per queue until STREAMOFF.
+	 */
+	vvb->sequence = pstream->sequence[stream_direction]++;
     vvb->field = V4L2_FIELD_NONE;
 #else
     struct vb2_buffer *vb = &pbuf->vb;
-    vb->v4l2_buf.sequence = frame->sequence;
+	vb->v4l2_buf.sequence = pstream->sequence[stream_direction]++;
     vb->v4l2_buf.field = V4L2_FIELD_NONE;
 #endif
 
     if ( frame->num_planes < vb->num_planes ) {
-        LOG( LOG_CRIT, "[Stream#%d-%s] Stream number of planes (%u) doesn't match to VB2 buffer number of planes (%u)",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_CRIT, "[Stream#%d-%s] Stream number of planes (%u) doesn't match to VB2 buffer number of planes (%u)",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), frame->num_planes, vb->num_planes );
         return -1;
     }
@@ -887,7 +984,7 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
             vb2_buffer_done( vb, VB2_BUF_STATE_ERROR );
         }
 
-        LOG( LOG_DEBUG, "[Stream#%d-%s] set vb2 buffer status VB2_BUF_STATE_ERROR",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "[Stream#%d-%s] set vb2 buffer status VB2_BUF_STATE_ERROR",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ) );
     }
 
@@ -907,13 +1004,13 @@ int isp_v4l2_stream_put_frame( aframe_t *frame )
         const uint32_t out_buf_busy = pstream->buffer_list[V4L2_STREAM_DIRECTION_OUT].busy.size;
         spin_unlock( &pstream->buffer_list[V4L2_STREAM_DIRECTION_OUT].lock );
 
-        LOG( LOG_DEBUG, "[Stream#%d-%s] buffer queue status, cap-ready: %u, out-ready: %u, cap-busy: %u, out-busy: %u",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "[Stream#%d-%s] buffer queue status, cap-ready: %u, out-ready: %u, cap-busy: %u, out-busy: %u",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
              out_buf_ready, cap_buf_ready, cap_buf_busy, out_buf_busy );
 
         // Check if we have returned all the busy buffers
         if ( ( cap_buf_busy == 0 ) && ( out_buf_busy == 0 ) ) {
-            LOG( LOG_DEBUG, "[Stream#%d-%s] m2m job is done, calling v4l2_m2m_job_finish()",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "[Stream#%d-%s] m2m job is done, calling v4l2_m2m_job_finish()",
                  pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ) );
             v4l2_m2m_job_finish( pstream->fh.m2m_ctx->m2m_dev, pstream->fh.m2m_ctx );
         }
@@ -967,7 +1064,7 @@ static void work_queue_fn(struct work_struct *work) {
         fw_intf_process_input( pstream->ctx_id);
         //LOG( LOG_ERR, "MIPI buffer submitted ctx: %d", pstream->ctx_id);	    
     } else {
-        LOG( LOG_WARNING, "Dropped MIPI buffer from process ctx: %d", pstream->ctx_id);
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_WARNING, "Dropped MIPI buffer from process ctx: %d", pstream->ctx_id);
     }
 #endif
 
@@ -979,12 +1076,12 @@ int isp_v4l2_stream_init( isp_v4l2_stream_t **ppstream, int stream_type, int ctx
 {
     isp_v4l2_stream_t *new_stream = NULL;
     //int current_sensor_preset;
-    LOG( LOG_INFO, "[Stream#%d] Initializing stream .... ctx : %d", stream_type, ctx_id );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d] Initializing stream .... ctx : %d", stream_type, ctx_id );
 
     /* allocate isp_v4l2_stream_t */
     new_stream = kzalloc( sizeof( isp_v4l2_stream_t ), GFP_KERNEL );
     if ( new_stream == NULL ) {
-        LOG( LOG_ERR, "[Stream#%d] Failed to allocate isp_v4l2_stream_t.", stream_type );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d] Failed to allocate isp_v4l2_stream_t.", stream_type );
         return -ENOMEM;
     }
 
@@ -1031,11 +1128,11 @@ int isp_v4l2_stream_init( isp_v4l2_stream_t **ppstream, int stream_type, int ctx
 void isp_v4l2_stream_deinit( isp_v4l2_stream_t *pstream, unsigned long stream_on_mask )
 {
     if ( !pstream ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream pointer is NULL" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream pointer is NULL" );
         return;
     }
 
-    LOG( LOG_INFO, "[Stream#%d] Deinitializing stream", pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d] Deinitializing stream", pstream->stream_type );
 
 	//cancel_work_sync(&pstream->work);
 
@@ -1051,11 +1148,11 @@ void isp_v4l2_stream_deinit( isp_v4l2_stream_t *pstream, unsigned long stream_on
 void isp_v4l2_stream_free( isp_v4l2_stream_t *pstream )
 {
     if ( !pstream ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream pointer is NULL" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream pointer is NULL" );
         return;
     }
 
-    LOG( LOG_INFO, "[Stream#%d] Releasing stream memory", pstream->stream_type );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d] Releasing stream memory", pstream->stream_type );
 
     kvfree( pstream );
     pstream = NULL;
@@ -1086,7 +1183,7 @@ static void isp_v4l2_stream_buffer_list_release( isp_v4l2_stream_t *pstream,
                 break;
             }
 
-            LOG( LOG_INFO, "[Stream#%d-%s] Releasing VB2 buffer, index: %d",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Releasing VB2 buffer, index: %d",
                  pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), vbuf->vb2_buf.index );
 
             v4l2_m2m_buf_done( vbuf, VB2_BUF_STATE_ERROR );
@@ -1112,7 +1209,7 @@ static void isp_v4l2_stream_buffer_list_release( isp_v4l2_stream_t *pstream,
 
         vb2_buffer_done( vb, VB2_BUF_STATE_ERROR );
 
-        LOG( LOG_INFO, "[Stream#%d-%s] Releasing VB2 buffer, index: %d",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Releasing VB2 buffer, index: %d",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), buf_index );
     }
 }
@@ -1120,15 +1217,17 @@ static void isp_v4l2_stream_buffer_list_release( isp_v4l2_stream_t *pstream,
 int isp_v4l2_stream_on( isp_v4l2_stream_t *pstream, isp_v4l2_stream_direction_t stream_direction, unsigned long stream_open_mask )
 {
     if ( !pstream ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream pointer is NULL" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream pointer is NULL" );
         return -EINVAL;
     }
 
     if ( !isp_v4l2_stream_check_direction( stream_direction ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream direction is out of range: %d", stream_direction );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream direction is out of range: %d", stream_direction );
         return -EINVAL;
     }
 
+	if (!pstream->stream_direction_started[stream_direction])
+		pstream->sequence[stream_direction] = 0;
     pstream->stream_direction_started[stream_direction] = 1;
 
     int stream_started = pstream->stream_direction_started[V4L2_STREAM_DIRECTION_CAP];
@@ -1136,7 +1235,7 @@ int isp_v4l2_stream_on( isp_v4l2_stream_t *pstream, isp_v4l2_stream_direction_t 
         stream_started &= pstream->stream_direction_started[V4L2_STREAM_DIRECTION_OUT];
     }
 
-    LOG( LOG_INFO, "[Stream#%d-%s-%d] Enable streaming, stream is ready to start hardware: %s",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s-%d] Enable streaming, stream is ready to start hardware: %s",
          pstream->stream_type,
          isp_v4l2_stream_get_direction_string( stream_direction ), pstream->ctx_id,
          ( ( stream_started ) ? "yes" : "no" ) );
@@ -1162,18 +1261,18 @@ int isp_v4l2_stream_on( isp_v4l2_stream_t *pstream, isp_v4l2_stream_direction_t 
 int isp_v4l2_stream_off( isp_v4l2_stream_t *pstream, isp_v4l2_stream_direction_t stream_direction, unsigned long stream_on_mask )
 {
     if ( !pstream ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream pointer is NULL" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream pointer is NULL" );
         return -EINVAL;
     }
 
     if ( !isp_v4l2_stream_check_direction( stream_direction ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream direction is out of range: %d", stream_direction );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream direction is out of range: %d", stream_direction );
         return -EINVAL;
     }
 
-    LOG( LOG_INFO, "[Stream#%d-%s-%d] Disable streaming", pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), pstream->ctx_id );
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s-%d] Disable streaming", pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), pstream->ctx_id );
 
-    fw_intf_stream_stop( pstream->ctx_id, pstream->stream_type, stream_on_mask );
+    fw_intf_stream_stop( pstream->ctx_id, pstream->stream_type, stream_on_mask, pstream->stream_direction_started[stream_direction] );
 
     // Control fields update
     pstream->stream_direction_started[stream_direction] = 0;
@@ -1235,7 +1334,7 @@ int isp_v4l2_stream_enum_framesizes( isp_v4l2_stream_t *pstream, isp_v4l2_stream
         return -EINVAL;
     }
 
-    LOG( LOG_INFO, "[Stream#%d-%s] index: %d, pixel_format: 0x%x.\n",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] index: %d, pixel_format: 0x%x.\n",
          pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), fsize->index, fsize->pixel_format );
 
     if ( !isp_v4l2_stream_find_format( fsize->pixel_format, pstream->stream_type, stream_direction ) )
@@ -1243,7 +1342,7 @@ int isp_v4l2_stream_enum_framesizes( isp_v4l2_stream_t *pstream, isp_v4l2_stream
 
     /* check index */
     if ( fsize->index >= pstream->stream_common->snapshot_sizes.frmsize_num ) {
-        LOG( LOG_INFO, "[Stream#%d-%s] index (%d) should be smaller than %d.",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] index (%d) should be smaller than %d.",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
              fsize->index, pstream->stream_common->snapshot_sizes.frmsize_num );
         return -EINVAL;
@@ -1271,7 +1370,7 @@ int isp_v4l2_stream_enum_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dir
 
     /* check index */
     if ( f->index >= isp_v4l2_stream_supported_formats[effective_stream_type].num_formats ) {
-        LOG( LOG_INFO, "[Stream#%d-%s] format index (%d) should be smaller than %u.",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] format index (%d) should be smaller than %u.",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
              f->index, isp_v4l2_stream_supported_formats[effective_stream_type].num_formats );
         return -EINVAL;
@@ -1299,7 +1398,7 @@ int isp_v4l2_stream_enum_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dir
     f->pixelformat = fmt->pixelformat;
 
 #if 0
-    LOG( LOG_INFO, "[Stream#%d-%s] index: %d, format: 0x%x, desc: %s.\n",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] index: %d, format: 0x%x, desc: %s.\n",
          pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), f->index, f->pixelformat, f->description );
 #endif
     return 0;
@@ -1307,7 +1406,7 @@ int isp_v4l2_stream_enum_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dir
 
 int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_direction_t stream_direction, struct v4l2_format *f )
 {
-    LOG( LOG_INFO, "[Stream#%d-%s] Try stream format, type: %u, pixelformat: 0x%08x (%s), width: %u, height: %u",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Try stream format, type: %u, pixelformat: 0x%08x (%s), width: %u, height: %u",
          pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), f->type, f->fmt.pix_mp.pixelformat,
          isp_v4l2_stream_get_pixelformat_string( f->fmt.pix_mp.pixelformat ), f->fmt.pix_mp.width, f->fmt.pix_mp.height );
 
@@ -1316,30 +1415,11 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
     // Get effective stream type
     const isp_v4l2_stream_type_t effective_stream_type = isp_v4l2_stream_get_effective_stream_type( pstream->stream_type, stream_direction );
 
-    // RAW stream requires checking data width for requested format as this depends on the sensor data width
-    if ( effective_stream_type == V4L2_STREAM_TYPE_RAW && ( tfmt != NULL ) ) {
-
-        // Update stream common sensor info to get the current sensor mode and submode
-        isp_v4l2_stream_update_common_sensor_info( pstream );
-
-        const uint8_t mode = pstream->stream_common->sensor_info.cur_mode;
-        const uint8_t sub_mode = pstream->stream_common->sensor_info.mode[mode].cur_sub_mode;
-        const uint8_t sensor_data_width = pstream->stream_common->sensor_info.mode[mode].data_width;
-
-        // Check current sensor data width against the requested format and reset format to default if there is a mismatch
-        if ( sensor_data_width != tfmt->data_width ) {
-            LOG( LOG_NOTICE, "[Stream#%d-%s] Requested format: %s data width (%d) does not match the sensor configured data width (%d), default format will be used instead.",
-                 pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
-                 isp_v4l2_stream_get_pixelformat_string( f->fmt.pix_mp.pixelformat ), tfmt->data_width, sensor_data_width );
-            tfmt = NULL;
-        }
-    }
-
     /* Check format and fall-back to default if not supported */
     if ( !tfmt ) {
         const uint32_t default_pixel_format = isp_v4l2_stream_get_default_pixelformat( pstream, stream_direction );
         if ( default_pixel_format != 0 ) {
-            LOG( LOG_INFO, "[Stream#%d-%s] Requested format: 0x%08x is not supported, setting default format to: 0x%08x (%s)",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Requested format: 0x%08x is not supported, setting default format to: 0x%08x (%s)",
                  pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
                  f->fmt.pix_mp.pixelformat, default_pixel_format, isp_v4l2_stream_get_pixelformat_string( default_pixel_format ) );
             if ( stream_direction == V4L2_STREAM_DIRECTION_CAP ) {
@@ -1350,7 +1430,7 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
             f->fmt.pix_mp.pixelformat = default_pixel_format;
             tfmt = isp_v4l2_stream_find_format( f->fmt.pix_mp.pixelformat, pstream->stream_type, stream_direction );
         } else {
-            LOG( LOG_ERR, "[Stream#%d-%s] Requested format: 0x%08x is not supported. Failed to get default format.",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d-%s] Requested format: 0x%08x is not supported. Failed to get default format.",
                  pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), f->fmt.pix_mp.pixelformat );
         }
     }
@@ -1360,36 +1440,29 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
         return -EINVAL;
     }
 
-    // Update plane number for raw stream format based on sensor channel number
-    if ( effective_stream_type == V4L2_STREAM_TYPE_RAW ) {
-
-        const uint8_t mode = pstream->stream_common->sensor_info.cur_mode;
-        const uint8_t sub_mode = pstream->stream_common->sensor_info.mode[mode].cur_sub_mode;
-
-        // Update planes number to match sensor channel number, so raw buffer would keep all sensor channels
-        tfmt->num_planes = pstream->stream_common->sensor_info.mode[mode].sub_mode[sub_mode].num_channels;
-    }
-
     /* Adjust width, height for META stream */
     if ( effective_stream_type == V4L2_STREAM_TYPE_META ) {
         f->fmt.pix.width = ISP_V4L2_METADATA_SIZE;
         f->fmt.pix.height = 1;
+    } else if ( effective_stream_type == V4L2_STREAM_TYPE_RAW ) {
+        /* ISP m2m raw input: beat-align width per bit-depth so the packed stride hits a 32-byte AXI beat. */
+        unsigned int walign = ilog2( ISP_STRIDE_ALIGN * 8 ) - __ffs( tfmt->data_width );
+        v4l_bound_align_image( &f->fmt.pix_mp.width, ISP_V4L2_MIN_WIDTH, ISP_V4L2_MAX_WIDTH, walign,
+                               &f->fmt.pix_mp.height, ISP_V4L2_MIN_HEIGHT, ISP_V4L2_MAX_HEIGHT, 1, 1 );
     } else {
-        if ( f->fmt.pix_mp.width == 0 || f->fmt.pix_mp.height == 0 ) {
-            const uint8_t mode = pstream->stream_common->sensor_info.cur_mode;
-
-            f->fmt.pix_mp.width = pstream->stream_common->sensor_info.mode[mode].width;
-            f->fmt.pix_mp.height = pstream->stream_common->sensor_info.mode[mode].height;
-        }
-
-        /* Clamp to the ISP's min/max input resolution; width/height only need
-         * to be even. The 32-byte line-stride requirement (ISP AXI beat) is
-         * met by padding bytesperline (ALIGN below), NOT by cropping the
-         * active width: sensors such as imx477 stream non-beat-aligned widths
-         * (4056) that must be preserved end-to-end, so the stride is padded
-         * rather than the width rounded. */
+        /* Processed output: even width; plane stride is 32-aligned by the bpl ALIGN below. */
         v4l_bound_align_image( &f->fmt.pix_mp.width, ISP_V4L2_MIN_WIDTH, ISP_V4L2_MAX_WIDTH, 1,
                                &f->fmt.pix_mp.height, ISP_V4L2_MIN_HEIGHT, ISP_V4L2_MAX_HEIGHT, 1, 1 );
+        /* Mali-C71AE has no scaler: the m2m output cannot be wider than the
+         * bit-depth-aligned RAW input (OUT is configured first). A wider output
+         * makes the ISP read past the input line stride -> RAW10 full-res shear.
+         * Clamp to the input width so output == input. */
+        if ( pstream->stream_type == V4L2_STREAM_TYPE_M2M &&
+             stream_direction == V4L2_STREAM_DIRECTION_CAP ) {
+            const uint32_t in_w = pstream->cur_v4l2_fmt[V4L2_STREAM_DIRECTION_OUT].fmt.pix_mp.width;
+            if ( in_w && f->fmt.pix_mp.width > in_w )
+                f->fmt.pix_mp.width = in_w;
+        }
     }
 
     // All streams are multiplanar
@@ -1409,11 +1482,27 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
         f->fmt.pix_mp.plane_fmt[i].bytesperline = ALIGN( ( f->fmt.pix_mp.width * tfmt->data_width ) >> 3, ISP_STRIDE_ALIGN );
         f->fmt.pix_mp.plane_fmt[i].sizeimage = f->fmt.pix_mp.height * f->fmt.pix_mp.plane_fmt[i].bytesperline;
 
-        if ( f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 ) {
-            if ( i == 1 ) {
-                f->fmt.pix_mp.plane_fmt[i].sizeimage /= 2;
-            }
+        /*
+         * Single contiguous semi-planar buffer (one dmabuf => one fd), per
+         * the NV12/NV16/NV24 fourcc contracts: the plane holds Y (h*bpl)
+         * immediately followed by interleaved UV — half-height for 4:2:0,
+         * full-height for 4:2:2, full-height at 2 bytes/px for 4:4:4.
+         */
+        if ( tfmt->num_planes == 1 && i == 0 ) {
+            if ( f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 )
+                f->fmt.pix_mp.plane_fmt[i].sizeimage =
+                    f->fmt.pix_mp.plane_fmt[i].sizeimage * 3 / 2;
+            else if ( f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV16 )
+                f->fmt.pix_mp.plane_fmt[i].sizeimage *= 2;
+            else if ( f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV24 )
+                f->fmt.pix_mp.plane_fmt[i].sizeimage *= 3;
+        } else if ( f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 && i == 1 ) {
+            f->fmt.pix_mp.plane_fmt[i].sizeimage /= 2;
         }
+
+        /* RAW input shares the buffer with the CSI/VDMA writer, which appends a per-frame metadata trailer. */
+        if ( effective_stream_type == V4L2_STREAM_TYPE_RAW )
+            f->fmt.pix_mp.plane_fmt[i].sizeimage += ISP_BUF_TRAILER_HEADROOM;
 
         memset( f->fmt.pix_mp.plane_fmt[i].reserved, 0, sizeof( f->fmt.pix_mp.plane_fmt[i].reserved ) );
         memset( f->fmt.pix_mp.reserved, 0, sizeof( f->fmt.pix_mp.reserved ) );
@@ -1425,18 +1514,18 @@ int isp_v4l2_stream_try_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 int isp_v4l2_stream_get_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_direction_t stream_direction, struct v4l2_format *f )
 {
     if ( ( pstream == NULL ) || ( f == NULL ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream or format pointer is NULL" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream or format pointer is NULL" );
         return -EINVAL;
     }
 
     if ( !isp_v4l2_stream_check_direction( stream_direction ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream direction is not valid: %d", stream_direction );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream direction is not valid: %d", stream_direction );
         return -EINVAL;
     }
 
     *f = pstream->cur_v4l2_fmt[stream_direction];
 
-       LOG( LOG_DEBUG, "[Stream#%d-%s] Get stream format: width: %4u, height: %4u, format: 0x%x (%s)",
+       LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "[Stream#%d-%s] Get stream format: width: %4u, height: %4u, format: 0x%x (%s)",
          pstream->stream_type,
          isp_v4l2_stream_get_direction_string( stream_direction ),
          f->fmt.pix_mp.width,
@@ -1445,7 +1534,7 @@ int isp_v4l2_stream_get_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
          isp_v4l2_stream_get_pixelformat_string( f->fmt.pix_mp.pixelformat ) );
 
     if ( f->fmt.pix_mp.width == 0 || f->fmt.pix_mp.height == 0 || f->fmt.pix_mp.pixelformat == 0 ) { //not formatted yet
-        LOG( LOG_NOTICE, "Compliance error. Uninitialized format" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_NOTICE, "Compliance error. Uninitialized format" );
     }
 
     return 0;
@@ -1454,16 +1543,16 @@ int isp_v4l2_stream_get_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_direction_t stream_direction, struct v4l2_format *f )
 {
     if ( ( pstream == NULL ) || ( f == NULL ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream or format pointer is NULL" );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream or format pointer is NULL" );
         return -EINVAL;
     }
 
     if ( !isp_v4l2_stream_check_direction( stream_direction ) ) {
-        LOG( LOG_ERR, "Invalid parameter. Stream direction is not valid: %d", stream_direction );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Invalid parameter. Stream direction is not valid: %d", stream_direction );
         return -EINVAL;
     }
 
-    LOG( LOG_DEBUG, "[Stream#%d-%s] Set stream format: width: %4u, height: %4u, format: 0x%x (%s)",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_DEBUG, "[Stream#%d-%s] Set stream format: width: %4u, height: %4u, format: 0x%x (%s)",
          pstream->stream_type,
          isp_v4l2_stream_get_direction_string( stream_direction ),
          f->fmt.pix_mp.width,
@@ -1474,7 +1563,7 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
     /* try format first */
     int rc = isp_v4l2_stream_try_format( pstream, stream_direction, f );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "[Stream#%d-%s] Function isp_v4l2_stream_try_format call failed, rc: %d",
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d-%s] Function isp_v4l2_stream_try_format call failed, rc: %d",
              pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), rc );
         return rc;
     }
@@ -1487,7 +1576,7 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
         rc = fw_intf_stream_set_resolution( pstream->ctx_id, &pstream->stream_common->sensor_info,
                                             pstream->stream_type, &( f->fmt.pix_mp.width ), &( f->fmt.pix_mp.height ), f->fmt.pix_mp.pixelformat );
         if ( rc < 0 ) {
-            LOG( LOG_ERR, "[Stream#%d-%s] Function stream_set_resolution call failed, rc: %d",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "[Stream#%d-%s] Function stream_set_resolution call failed, rc: %d",
                  pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), rc );
             return rc;
         }
@@ -1495,7 +1584,7 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
 
     const uint32_t mode = pstream->stream_common->sensor_info.cur_mode;
     const uint32_t sub_mode = pstream->stream_common->sensor_info.mode[mode].cur_sub_mode;
-    LOG( LOG_INFO, "[Stream#%d-%s] Current sensor mode: %u, sub mode: %u, exposures: %u, fps: %u",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d-%s] Current sensor mode: %u, sub mode: %u, exposures: %u, fps: %u",
          pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ), mode, sub_mode,
          pstream->stream_common->sensor_info.mode[mode].sub_mode[sub_mode].exposures,
          pstream->stream_common->sensor_info.mode[mode].sub_mode[sub_mode].fps / 256 );
@@ -1503,7 +1592,7 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
     /* update format */
     rc = fw_intf_stream_set_output_format( pstream->ctx_id, pstream->stream_type, stream_direction, f->fmt.pix_mp.pixelformat );
     if ( rc < 0 ) {
-        LOG( LOG_ERR, "Error. stream_set_output_format call failed, rc: %d", rc );
+        LOG_CAT( ALOG_CAT_V4L2,  LOG_ERR, "Error. stream_set_output_format call failed, rc: %d", rc );
         return rc;
     }
 
@@ -1528,14 +1617,14 @@ int isp_v4l2_stream_set_format( isp_v4l2_stream_t *pstream, isp_v4l2_stream_dire
             fw_intf_set_image_crop_width( pstream->ctx_id, out_w );
             fw_intf_set_image_crop_height( pstream->ctx_id, out_h );
             fw_intf_set_image_crop_enable( pstream->ctx_id, 1 );
-            LOG( LOG_INFO, "[Stream#%d] ISP crop %ux%u -> %ux%u @ (%u,%u)",
+            LOG_CAT( ALOG_CAT_V4L2,  LOG_INFO, "[Stream#%d] ISP crop %ux%u -> %ux%u @ (%u,%u)",
                  pstream->stream_type, in_w, in_h, out_w, out_h, xoff, yoff );
         } else {
             fw_intf_set_image_crop_enable( pstream->ctx_id, 0 );
         }
     }
 
-    LOG( LOG_NOTICE, "[Stream#%d-%s] Effective stream format: width: %4u, height: %4u, type: %u, format: 0x%x (%s), cp: %d, bpl: %d",
+    LOG_CAT( ALOG_CAT_V4L2,  LOG_NOTICE, "[Stream#%d-%s] Effective stream format: width: %4u, height: %4u, type: %u, format: 0x%x (%s), cp: %d, bpl: %d",
          pstream->stream_type, isp_v4l2_stream_get_direction_string( stream_direction ),
          pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.width,
          pstream->cur_v4l2_fmt[stream_direction].fmt.pix_mp.height,

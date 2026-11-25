@@ -1379,6 +1379,8 @@ static bool suitable_migration_source(struct compact_control *cc,
 static bool suitable_migration_target(struct compact_control *cc,
 							struct page *page)
 {
+	int migratetype;
+
 	/* If the page is a large free page, then disallow migration */
 	if (PageBuddy(page)) {
 		int order = cc->order > 0 ? cc->order : pageblock_order;
@@ -1396,8 +1398,18 @@ static bool suitable_migration_target(struct compact_control *cc,
 		return true;
 
 	/* If the block is MIGRATE_MOVABLE or MIGRATE_CMA, allow migration */
-	if (is_migrate_movable(get_pageblock_migratetype(page)))
+	migratetype = get_pageblock_migratetype(page);
+	if (migratetype == MIGRATE_MOVABLE)
 		return true;
+
+	/*
+	 * With vm.cma_first=0 the allocator treats CMA as a last resort;
+	 * do not let compaction fill it with pages the zone could hold
+	 * elsewhere.  alloc_contig_range() does not use this scanner, so
+	 * CMA allocations themselves are unaffected.
+	 */
+	if (is_migrate_cma(migratetype))
+		return READ_ONCE(sysctl_cma_first);
 
 	/* Otherwise skip the block */
 	return false;

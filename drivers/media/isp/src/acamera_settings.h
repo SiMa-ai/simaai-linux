@@ -21,6 +21,8 @@
 #ifndef __ACAMERA_SETTINGS_H__
 #define __ACAMERA_SETTINGS_H__
 
+/* MIPI input-formatter channel types/helpers (channel_data_type,
+ * input_formatter_*) used by the decompander/frame_stitch HW programmers. */
 #include "sensor_api.h"
 
 typedef struct context_options_t {
@@ -31,15 +33,10 @@ typedef struct _acamera_settings {
     // Sensor related setting for the context
     char *sensor_name; // Sensor name string
 
-    void ( *sensor_init )( void **priv_ptr,
-                           uint8_t location,
-                           sensor_control_t *ctrl,
-                           const sensor_options_t *const options ); // Function ptr to initialize sensor
-
-    sensor_options_t sensor_options; // Sensor options
-
     // Context calibration / register settings
-    int32_t ( *get_calibrations )( uint32_t wdr_mode, void *param ); // Function ptr to get calibration
+    /* Supplies the calibration table. The IPA has already resolved which
+     * mode is running and what it is worth, so this hands back one set. */
+    int32_t ( *get_calibrations )( uint32_t wdr_mode, void *param );
 
     context_options_t context_options; // Context options
 

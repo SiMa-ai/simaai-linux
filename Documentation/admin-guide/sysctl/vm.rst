@@ -25,6 +25,7 @@ files can be found in mm/swap.c.
 Currently, these files are in /proc/sys/vm:
 
 - admin_reserve_kbytes
+- cma_first
 - compact_memory
 - compaction_proactiveness
 - compact_unevictable_allowed
@@ -108,6 +109,24 @@ and add the sum of their RSS.
 On x86_64 this is about 128MB.
 
 Changing this takes effect whenever an application requests memory.
+
+
+cma_first
+=========
+
+Available only when CONFIG_CMA is set.  When set to 0 (the default), CMA
+pageblocks are used only after every other free list has been exhausted,
+and compaction never migrates pages into them.  A large reusable CMA pool
+then stays empty unless the system is genuinely short of memory, so
+cma_alloc() rarely has to migrate anything and contiguous allocations stay
+fast.  The trade-off is that non-CMA memory may be reclaimed while CMA
+memory sits idle.
+
+When set to 1, the upstream behaviour is restored: the page allocator
+serves movable allocations from CMA pageblocks as soon as more than half
+of a zone's free memory is in CMA, and compaction may use CMA pageblocks as
+migration targets.  This balances use of the CMA area against the rest of
+the zone.
 
 
 compact_memory

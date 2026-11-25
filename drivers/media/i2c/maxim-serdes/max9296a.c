@@ -100,6 +100,9 @@
 
 #define MAX9296A_MIPI_TX4(x)			(0x404 + (x) * 0x40)
 #define MAX9296A_MIPI_TX4_DESKEW_PER_2K		FIELD_PREP(GENMASK(2, 0), 0b001)
+#define MAX9296A_MIPI_TX4_DESKEW_PER_8K		FIELD_PREP(GENMASK(2, 0), 0b111)
+#define MAX9296A_MIPI_TX4_DESKEW_PER_64F	FIELD_PREP(GENMASK(5, 3), 0b110)
+#define MAX9296A_MIPI_TX4_DESKEW_PER_128F	FIELD_PREP(GENMASK(5, 3), 0b111)
 #define MAX9296A_MIPI_TX4_DESKEW_PER_AUTO	BIT(7)
 
 #define MAX9296A_MIPI_TX10(x)			(0x40a + (x) * 0x40)
@@ -520,10 +523,12 @@ static int max9296a_init_phy(struct max_des *des, struct max_des_phy *phy)
 		if (ret)
 			return ret;
 
-		/* Enable periodic deskew with 2 x 1k UI.. */
+		/* 8k UI every 128 frames: the DWC D-PHY Rx needs a 2^13 UI
+		 * burst, and a shorter interval still trips a PHY fatal. */
 		ret = regmap_write(priv->regmap, MAX9296A_MIPI_TX4(hw_index),
 				   MAX9296A_MIPI_TX4_DESKEW_PER_AUTO |
-				   MAX9296A_MIPI_TX4_DESKEW_PER_2K);
+				   MAX9296A_MIPI_TX4_DESKEW_PER_128F |
+				   MAX9296A_MIPI_TX4_DESKEW_PER_8K);
 		if (ret)
 			return ret;
 	} else {
@@ -910,6 +915,12 @@ static int max9296a_init(struct max_des *des)
 
 	/* Configure the deserializer to wait for frame start only when no IPI
 	 * enable delay is set.
+	 *
+	 * NOTE: When multiple GMSL cameras are connected, this property has to
+	 * be declared in the device tree of all the connected cameras. If only
+	 * one camera declares this property in device tree then it will cause
+	 * overflows, since BACKTOP30 register is common for both the connected
+	 * GMSL cameras.
 	 */
 	ret = device_property_read_u32(priv->dev, "simaai,ipi-enable-delay-ms",
 				 &delay_ms);
@@ -1015,6 +1026,13 @@ static void max9296a_remove(struct i2c_client *client)
 	max_des_remove(&priv->des);
 
 	gpiod_set_value_cansleep(priv->gpiod_pwdn, 1);
+}
+
+static void max9296a_shutdown(struct i2c_client *client)
+{
+	struct max9296a_priv *priv = i2c_get_clientdata(client);
+
+	max_des_shutdown(&priv->des);
 }
 
 static const struct max_phys_config max9296a_phys_configs[] = {
@@ -1155,6 +1173,7 @@ static struct i2c_driver max9296a_i2c_driver = {
 	},
 	.probe = max9296a_probe,
 	.remove = max9296a_remove,
+	.shutdown = max9296a_shutdown,
 };
 
 module_i2c_driver(max9296a_i2c_driver);

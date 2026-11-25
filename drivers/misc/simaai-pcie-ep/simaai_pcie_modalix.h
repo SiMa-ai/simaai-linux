@@ -75,6 +75,12 @@
 #define MOD_OFF_NET_TXHEAD	0x50
 #define MOD_OFF_NET_TXTAIL	0x28
 #define MOD_OFF_NET_RXHEAD	0x2c
+/*
+ * Host sets this to 1 while it wants SI_NET_MSI for packets queued to it.
+ * It is a spare doorbell register used for its value alone: the host never
+ * rings it and the SoC keeps its interrupt masked.
+ */
+#define MOD_OFF_NET_RXINT	0x54
 
 #define MOD_MCMD_DB		0
 #define MOD_MWQ_DB		1
@@ -88,5 +94,6 @@
 #define MOD_DCQ_DB_REM		1
 #define MOD_DRQ_DB_REM		2
 #define MOD_NET_TXHEAD_DB	MOD_SPARE_DB_START
+#define MOD_NET_RXINT_DB	(MOD_SPARE_DB_START + 1)
 
 #endif

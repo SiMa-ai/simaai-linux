@@ -60,10 +60,7 @@ struct _sensor_fsm_t {
     sensor_state_t state;
     system_fw_interrupt_mask_t irq_mask;
     system_fw_interrupt_mask_t repeat_irq_mask;
-    sensor_control_t ctrl;
     uint8_t sensor_pos;
-    void *drv_priv;
-    const sensor_param_t *s_param;
     acamera_cmd_sensor_info general_sensor_info;
     uint32_t black_level;
 };
@@ -77,5 +74,12 @@ uint8_t sensor_fsm_process_event( sensor_fsm_ptr_t p_fsm, event_id_t event_id );
 void sensor_fsm_process_interrupt( sensor_fsm_const_ptr_t p_fsm, uint8_t irq_event );
 
 void sensor_request_interrupt( sensor_fsm_ptr_t p_fsm, system_fw_interrupt_mask_t mask );
+
+
+/* The depth a pedestal is expressed in, from a mode description. Exposed so a
+ * caller that refreshes the mode after the sensor info was assembled can
+ * re-derive the domain instead of leaving it paired with the old mode. */
+uint32_t sensor_black_level_bits_of( acamera_calib_mgr_entry_t *p_cm, uint32_t wdr_mode,
+                                     uint32_t operating_bits );
 
 #endif /* __SENSOR_FSM_H__ */

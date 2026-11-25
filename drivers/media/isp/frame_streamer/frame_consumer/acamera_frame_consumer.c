@@ -36,7 +36,7 @@ static void frame_consumer_do_frame( aframe_t *frame )
         static size_t running_counter = 0;
         if ( ( ++running_counter % freq ) == 0 ) {
             system_timer_usleep( 20 * 1000 );
-            LOG( LOG_NOTICE, "Frame consumer double buffering test, injecting 20ms delay." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "Frame consumer double buffering test, injecting 20ms delay." );
         }
     }
 #endif
@@ -54,7 +54,7 @@ static void frame_consumer_notify_callback( const unsigned int ctx_id, const afr
     aframe_t *frame = NULL;
     int rc = frame_stream_get_frame( ctx_id, type, state, &frame );
     if ( rc != 0 ) {
-        LOG( LOG_CRIT, "frame_stream_isp_get_frame failed rc %d", rc );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "frame_stream_isp_get_frame failed rc %d", rc );
         return;
     }
 
@@ -63,7 +63,7 @@ static void frame_consumer_notify_callback( const unsigned int ctx_id, const afr
     // We're done with the frame, put it back
     rc = frame_stream_put_frame( frame );
     if ( rc != 0 ) {
-        LOG( LOG_CRIT, "frame_stream_isp_put_frame failed rc %d", rc );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "frame_stream_isp_put_frame failed rc %d", rc );
         return;
     }
 }
@@ -84,7 +84,7 @@ int frame_consumer_initialize( void )
         FRAME_STREAM_EVENT_OUT_FULL | FRAME_STREAM_EVENT_RAW_FULL | FRAME_STREAM_EVENT_META_FULL,
         -1, -1, NULL );
     if ( rc < 0 ) {
-        LOG( LOG_CRIT, "frame_stream_register_notify_callback failed rc %d", rc );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "frame_stream_register_notify_callback failed rc %d", rc );
         return rc;
     }
     return 0;

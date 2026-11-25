@@ -61,12 +61,12 @@ int v4l2_streamer_get_frame( const unsigned int ctx_id, const aframe_type_t type
             lframe->planes[i].hw_cfg = s_stream_cfg[type].planes[i].hw_cfg;
         }
 #if 0
-        LOG( LOG_INFO, "context id: %u, type: %u, state: %u, source: %u, num_planes: %u",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "context id: %u, type: %u, state: %u, source: %u, num_planes: %u",
              lframe->context_id, lframe->type, lframe->state, lframe->source, lframe->num_planes );
 
-        LOG( LOG_INFO, "Plane information:" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Plane information:" );
         for ( i = 0; i < lframe->num_planes; i++ ) {
-            LOG( LOG_INFO, "  |--Plane %u. width: %u, height: %u, line offset: %u, address: 0x%llx, data width: %u",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "  |--Plane %u. width: %u, height: %u, line offset: %u, address: 0x%llx, data width: %u",
                  i,
                  lframe->planes[i].width,
                  lframe->planes[i].height,

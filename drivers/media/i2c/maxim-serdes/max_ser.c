@@ -875,7 +875,7 @@ static int max_ser_enable_streams(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  u32 pad, u64 streams_mask)
 {
-	printk(KERN_ERR "Serializer: max_ser_enable_streams called\n");
+	pr_debug("Serializer: %s called\n", __func__);
 	return max_ser_update_streams(sd, state, pad, streams_mask, true);
 }
 

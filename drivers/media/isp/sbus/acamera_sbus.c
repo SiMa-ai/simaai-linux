@@ -490,11 +490,11 @@ void acamera_sbus_init( acamera_sbus_t *p_bus, sbus_type_t interface_type )
             acamera_sbus_isp_init( p_bus );
             break;
         default:
-            LOG( LOG_CRIT, "Invalid SBUS protocol." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Invalid SBUS protocol." );
             break;
         };
     } else {
-        LOG( LOG_CRIT, "Failed to initialize SBUS. Input pointer is null." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to initialize SBUS. Input pointer is null." );
     }
 }
 
@@ -526,10 +526,10 @@ void acamera_sbus_deinit( acamera_sbus_t *p_bus, sbus_type_t interface_type )
                                 acamera_sbus_isp_deinit( p_bus );*/
             break;
         default:
-            LOG( LOG_CRIT, "Invalid SBUS protocol." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Invalid SBUS protocol." );
             break;
         };
     } else {
-        LOG( LOG_CRIT, "Failed to initialize SBUS. Input pointer is null." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to initialize SBUS. Input pointer is null." );
     }
 }

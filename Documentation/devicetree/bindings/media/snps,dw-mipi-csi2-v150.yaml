@@ -7,8 +7,8 @@ $schema: http://devicetree.org/meta-schemas/core.yaml#
 title: Synopsys DesignWare CSI-2 Host controller (csi2host)
 
 maintainers:
-  - Frank Li <Frank.Li at nxp.com>
-  - Eugen Hristev <eugen.hristev at microchip.com>
+  - Frank Li <Frank.Li@nxp.com>
+  - Eugen Hristev <eugen.hristev@microchip.com>
 
 description:
   CSI2HOST is used to receive image coming from an MIPI CSI-2 compatible
@@ -95,6 +95,18 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32
     description: IPI vertical front porch, in lines.
 
+  simaai,ipi-controller-enable-delay-ms:
+    maximum: 5000
+    description:
+      Delay before enabling the receiver IPI interface when controller timing
+      mode is selected. Camera timing mode ignores this receiver property.
+      Without a legacy source-node delay, camera timing mode therefore starts
+      without a delay.
+      When present, this value replaces the legacy source-node delay in
+      controller mode, including when it is zero. When absent, legacy device
+      trees may instead place simaai,ipi-enable-delay-ms on the bound source
+      node; the driver preserves that source-node ABI in either timing mode.
+
   simaai,ipi-controller-mode:
     $ref: /schemas/types.yaml#/definitions/uint32
     enum: [0, 1]
@@ -114,7 +126,7 @@ properties:
     $ref: /schemas/graph.yaml#/properties/ports
 
     properties:
-      port at 0:
+      port@0:
         $ref: /schemas/graph.yaml#/$defs/port-base
         unevaluatedProperties: false
         description:
@@ -141,7 +153,7 @@ properties:
 
               remote-endpoint: true
 
-      port at 1:
+      port@1:
         $ref: /schemas/graph.yaml#/$defs/port-base
         unevaluatedProperties: false
         description:
@@ -160,8 +172,8 @@ properties:
               remote-endpoint: true
 
     required:
-      - port at 0
-      - port at 1
+      - port@0
+      - port@1
 
 additionalProperties: false
 
@@ -174,7 +186,7 @@ required:
 
 examples:
   - |
-    csi at 3000 {
+    csi@3000 {
         compatible = "snps,dw-mipi-csi2-v150";
         reg = <0x03000 0x1000>;
         reg-names = "core";
@@ -187,7 +199,7 @@ examples:
             #address-cells = <1>;
             #size-cells = <0>;
 
-            port at 0 {
+            port@0 {
                 reg = <0>;
 
                 endpoint {
@@ -198,7 +210,7 @@ examples:
                 };
             };
 
-            port at 1 {
+            port@1 {
                 reg = <1>;
 
                 endpoint {

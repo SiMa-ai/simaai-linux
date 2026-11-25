@@ -271,7 +271,7 @@ static uint32_t get_calibration_description( acamera_isp_ctx_ptr_t p_ictx, uint3
         // 15 bits for rows number and 15 bits for cols number
         result = ( width << 30 | ( rows << 15 ) | cols );
     } else {
-        LOG( LOG_ERR, "Table pointer has invalid index %d. Maximum possible value is %d", (int)id, MODALIX_ISP_CALIB_TOTAL_SIZE );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Table pointer has invalid index %d. Maximum possible value is %d", (int)id, MODALIX_ISP_CALIB_TOTAL_SIZE );
     }
     return result;
 }
@@ -305,13 +305,13 @@ uint8_t acamera_api_calibration( uint32_t ctx_id, uint8_t type, uint8_t id, uint
     }
 
     if ( id >= MODALIX_ISP_CALIB_TOTAL_SIZE ) {
-        LOG( LOG_ERR, "Trying to get an access with an invalid LUT index %d", id );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Trying to get an access with an invalid LUT index %d", id );
         return FAIL;
     }
 
     int16_t internal_lut_idx = id;
     if ( internal_lut_idx == -1 ) {
-        LOG( LOG_ERR, "Trying to get an access with an invalid LUT index %d", internal_lut_idx );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Trying to get an access with an invalid LUT index %d", internal_lut_idx );
         return FAIL;
     }
 

@@ -101,6 +101,49 @@ typedef enum {
 } alog_level_t;
 
 
+/* ============================================================================
+ * Runtime 3A log categories (component-based, shared contract).
+ *
+ * A single category bit gates every LOG_CAT() site for that component across
+ * the WHOLE pipeline -- so enabling e.g. ALOG_CAT_AWB traces the end-to-end
+ * path: IPA param-load -> IPA 3A stats/compute -> control-plane transfer ->
+ * this kernel driver's HW apply. The bit assignment below is a fixed contract
+ * shared by three places that MUST stay in sync:
+ *   - this header (kernel ISP driver)
+ *   - src/ipa/modalix/isp_3a/.../util/logger/acamera_logger.h (libcamera IPA)
+ *   - the on-board config file ISP3A_LOG_CONF_PATH
+ *
+ * At init the driver reads ISP3A_LOG_CONF_PATH; if present its `level` and
+ * `categories` bitmask override the compiled defaults, if absent the compiled
+ * defaults stand (zero overhead, normal behaviour). This exists so QA can turn
+ * on targeted 3A tracing to debug a customer-reported issue without a rebuild.
+ * ============================================================================*/
+#define ISP3A_LOG_CONF_PATH "/usr/share/libcamera/ipa/modalix/isp3a_log.conf"
+
+typedef enum {
+    ALOG_CAT_AE         = 1u << 0,  /* auto-exposure */
+    ALOG_CAT_AWB        = 1u << 1,  /* auto-white-balance */
+    ALOG_CAT_AF         = 1u << 2,  /* auto-focus */
+    ALOG_CAT_CCM        = 1u << 3,  /* colour correction matrix */
+    ALOG_CAT_GAMMA      = 1u << 4,  /* gamma / tone */
+    ALOG_CAT_IRIDIX     = 1u << 5,  /* iridix (local tone / DRC) */
+    ALOG_CAT_SINTER     = 1u << 6,  /* spatial noise reduction */
+    ALOG_CAT_SHADING    = 1u << 7,  /* lens shading (radial + mesh LSC) */
+    ALOG_CAT_BLACKLEVEL = 1u << 8,  /* black level / sensor offset */
+    ALOG_CAT_DEMOSAIC   = 1u << 9,  /* demosaic */
+    ALOG_CAT_SHARPEN    = 1u << 10, /* sharpening */
+    ALOG_CAT_CNR        = 1u << 11, /* chroma noise reduction */
+    ALOG_CAT_DPC        = 1u << 12, /* defect pixel correction */
+    ALOG_CAT_SENSOR     = 1u << 13, /* sensor exposure/gain program + mode */
+    ALOG_CAT_CONTROL    = 1u << 14, /* command/control plane (SYSTEM_* + param xfer) */
+    ALOG_CAT_SBUF       = 1u << 15, /* stats-buffer ring (IPA<->kernel) */
+    ALOG_CAT_V4L2       = 1u << 16, /* V4L2 stream / buffer path */
+    ALOG_CAT_GENERAL    = 1u << 17, /* uncategorised / framework */
+    ALOG_CAT_FLICKER    = 1u << 18, /* AE anti-flicker / flicker detection */
+    ALOG_CAT_ALL        = 0xffffffffu,
+} alog_category_t;
+
+
 /**
  * @brief      Provides a function callback for locking and a mutex which is
  *             used by it.
@@ -187,6 +230,39 @@ void alog_unlock( void );
  *
  */
 bool alog_check_level( const alog_level_t level );
+
+
+/**
+ * @brief      Load level + category bitmask from ISP3A_LOG_CONF_PATH if it
+ *             exists, else leave the compiled defaults untouched. Safe to call
+ *             from process context only (it reads a file). Called at ISP init.
+ */
+void alog_load_config( void );
+
+
+/**
+ * @brief      Sets the runtime category bitmask (see alog_category_t).
+ */
+void alog_set_categories( const uint32_t categories );
+
+
+/**
+ * @brief      Returns the runtime category bitmask.
+ */
+uint32_t alog_get_categories( void );
+
+
+/**
+ * @brief      True if any of the requested category bits are currently enabled.
+ */
+bool alog_check_cat( const uint32_t cat );
+
+
+/** @brief Sets the sampled-log interval (1 = every frame). */
+void alog_set_throttle( const uint32_t n );
+
+/** @brief Sampled-log interval for LOG_CAT_SAMPLED; always >= 1. */
+uint32_t alog_throttle( void );
 
 
 /**
@@ -282,6 +358,39 @@ const char *alog_level_string( const alog_level_t level );
     } while ( 0 )
 
 
+/**
+ * @brief      Category-gated log. Prints only when both the level passes AND at
+ *             least one of the requested category bits (alog_category_t) is
+ *             enabled by the runtime mask (default: all, or per the on-board
+ *             config file). Tag every per-component 3A trace site with this so
+ *             QA can isolate one block end-to-end.
+ * @code
+ * LOG_CAT( ALOG_CAT_AWB, LOG_DEBUG, "awb gains r=%d b=%d", r, b );
+ * @endcode
+ */
+#define LOG_CAT( cat, level, fmt, ... )              \
+    do {                                             \
+        if ( alog_check_cat( cat ) )                 \
+            LOG( level, fmt, ##__VA_ARGS__ );        \
+    } while ( 0 )
+
+
+/**
+ * @brief      Category-gated log sampled 1-in-alog_throttle() calls (each site
+ *             keeps its own counter). throttle defaults to 100 (thins high-rate
+ *             per-frame traces); set `throttle = 1` in the config file to log
+ *             every frame when chasing fast oscillation/flip scenarios that a
+ *             fixed hard-coded stride would mask.
+ */
+#define LOG_CAT_SAMPLED( cat, level, fmt, ... )                            \
+    do {                                                                   \
+        static uint32_t _alog_sample_n = 0;                                \
+        if ( alog_check_cat( cat ) &&                                      \
+             ( _alog_sample_n++ % alog_throttle() ) == 0 )                 \
+            LOG( level, fmt, ##__VA_ARGS__ );                              \
+    } while ( 0 )
+
+
 /* This is neccessary to maintain backwards compatibility, ideally each of this would be function call. Forexample LOG_DEBUG(...). */
 
 #define LOG_DEBUG LOG_LEVEL_DEBUG
@@ -295,36 +404,28 @@ const char *alog_level_string( const alog_level_t level );
 
 
 /* ============================================================================
- * Per-component verbose-trace toggles.
+ * Per-component verbose traces (now runtime categories, see LOG_CAT above).
  *
- * Some LOG() calls in the ISP driver live inside spin_lock_irqsave regions
- * on the per-frame hot path. Even at LOG_DEBUG, those calls pay a function-
- * call cost; when the system log level is bumped (or when printk's console
- * driver stalls) they have been measured to hold ISP spinlocks with IRQs
- * disabled for tens of milliseconds, dropping other interrupts.
+ * These were compile-time #ifdef ENABLE_<NAME>_LOGS toggles. They are now
+ * runtime LOG_CAT( ALOG_CAT_<NAME>, ... ) sites, gated by the category bitmask
+ * loaded from ISP3A_LOG_CONF_PATH -- so QA enables them from the on-board file
+ * without a rebuild. Old name -> new category bit:
  *
- * The fix is to wrap each in-lock LOG site in `#ifdef ENABLE_<NAME>_LOGS`,
- * leaving the macro undefined by default. Define any subset below (or via
- * the kernel build's CFLAGS) to re-enable targeted tracing while debugging
- * a specific component. Do NOT leave these enabled on a running system —
- * they can re-introduce IRQ-shadow latency at higher log levels.
+ *   ENABLE_SBUF_LOGS        -> ALOG_CAT_SBUF     (sbuf ring get/set hot path)
+ *   ENABLE_AE_LOGS          -> ALOG_CAT_AE       (AE per-FSM traces)
+ *   ENABLE_AWB_LOGS         -> ALOG_CAT_AWB      (AWB per-FSM traces)
+ *   ENABLE_GAMMA_LOGS       -> ALOG_CAT_GAMMA    (gamma per-FSM traces)
+ *   ENABLE_IRIDIX_LOGS      -> ALOG_CAT_IRIDIX   (iridix per-FSM traces)
+ *   ENABLE_V4L2_STREAM_LOGS -> ALOG_CAT_V4L2     (V4L2 buffer-list traces)
  *
- *   ENABLE_SBUF_LOGS          — sbuf_mgr ring-state traces (get/set hot path)
- *   ENABLE_AE_LOGS            — AE per-FSM diagnostic traces
- *   ENABLE_AWB_LOGS           — AWB per-FSM diagnostic traces
- *   ENABLE_GAMMA_LOGS         — Gamma per-FSM diagnostic traces
- *   ENABLE_IRIDIX_LOGS        — Iridix per-FSM diagnostic traces
- *   ENABLE_V4L2_STREAM_LOGS   — V4L2 buffer-list traces inside stream lock
- *
- * Add new toggles here (not in individual .c files) so every component
- * that uses LOG() can guard new sites consistently.
+ * WARNING: some of these sites live inside spin_lock_irqsave regions on the
+ * per-frame hot path. When their category AND the log level are both enabled,
+ * the printf under the lock can hold ISP spinlocks with IRQs disabled for tens
+ * of ms. That is why the default level (ERROR) already gates out the DEBUG
+ * traces even with categories=all: enabling them is an explicit QA action.
+ * Enable only the categories you need while reproducing an issue, then delete
+ * the config file.
  * ============================================================================*/
-//#define ENABLE_SBUF_LOGS
-//#define ENABLE_AE_LOGS
-//#define ENABLE_AWB_LOGS
-//#define ENABLE_GAMMA_LOGS
-//#define ENABLE_IRIDIX_LOGS
-//#define ENABLE_V4L2_STREAM_LOGS
 
 
 #endif // ACAMERA_LOGGER_H

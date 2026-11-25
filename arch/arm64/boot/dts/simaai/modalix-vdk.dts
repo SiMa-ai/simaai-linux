@@ -39,6 +39,11 @@
 	};
 };
 
+&cpu0 {
+	/delete-property/ clocks;
+	/delete-property/ operating-points-v2;
+};
+
 &nvs_sdhci0 {
 	status = "okay";
 };

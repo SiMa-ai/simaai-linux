@@ -144,6 +144,8 @@ struct pktProbeDesc {
 	char label[64];
 	uint64_t bytesCount;
 	uint64_t prevBytesCount;
+	uint32_t globalEn;       /* Probe global enable status (read-back) */
+	uint32_t statAlarmStatus; /* Stat alarm status (read-back) */
 	struct pktFilterDesc fltDesc[4];
 	struct counterDesc pktCounterDesc;
 };

@@ -76,6 +76,17 @@ struct _histogram_fsm_t {
      * twice. Per-FSM so concurrent stats events from different ISP
      * contexts don't race on a shared scratch buffer. */
     uint32_t hist_buf[ HISTOGRAM_BUF_LEN ];
+
+    /* aexp per-zone 5-bin histograms, four stored 16-bit bins per zone
+     * (bin0,bin1,bin3,bin4; bin2 derived from the 65536 normalisation).
+     * Decoded per stats-ready from the metering memory and published as
+     * the AE_ZONES stats section for the spatial flicker detector.
+     * aexp_buf is the raw one-shot snapshot of the block (zone cells +
+     * the global cells + CRC), same single-read discipline as hist_buf. */
+    uint32_t aexp_buf[ ISP_METERING_HISTOGRAM_ZONES_MAX * 2 + 4 ];
+    uint16_t aexp_zone_bins[ ISP_METERING_HISTOGRAM_ZONES_MAX * 4 ];
+    uint8_t aexp_nodes_h;
+    uint8_t aexp_nodes_v;
 };
 
 

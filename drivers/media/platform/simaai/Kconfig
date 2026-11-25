@@ -47,9 +47,9 @@ config SIMAAI_V4L2_VIDEO
 
 config SIMAAI_CAMERA_INSTRUMENTATION
 	bool "SiMa.ai camera pipeline debug instrumentation"
-	default n
+	depends on DEBUG_FS
+	default y
 	help
-	  Compile in runtime debug module parameters and fault injectors for
-	  the camera pipeline drivers (ISP, VDMA, MIPI CSI-2, DMA). Exposes
-	  /sys/module parameters that can destabilise the pipeline; enable on
-	  development builds only.
+	  Expose the camera pipeline drivers' (VDMA, MIPI CSI-2, DMA) debug
+	  knobs and fault injectors under debugfs. These knobs can
+	  destabilise the pipeline; enable on development builds only.

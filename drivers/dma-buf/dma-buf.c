@@ -11,6 +11,7 @@
  * refining of this idea.
  */
 
+#include <linux/of.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/dma-buf.h>
@@ -34,6 +35,7 @@
 #include <uapi/linux/magic.h>
 
 #include "dma-buf-sysfs-stats.h"
+#include <linux/simaai-stu.h>
 
 static inline int is_dma_buf_file(struct file *);
 
@@ -512,6 +514,75 @@ static long dma_buf_import_sync_file(struct dma_buf *dmabuf,
 }
 #endif
 
+/*
+ * The ISP programs its own STU; the bus address is assumed to be needed
+ * only by the EVXX, so translate through the EVXX STU. The handle is
+ * resolved once and cached: the STU is a built-in platform device that
+ * never goes away.
+ */
+static struct simaai_stu *dma_buf_evxx_stu(void)
+{
+	static struct simaai_stu *stu;
+	struct device_node *np;
+
+	if (stu)
+		return stu;
+
+	np = of_find_compatible_node(NULL, NULL, "simaai,modalix-evxx-rproc");
+	if (!np) {
+		pr_err_once("dma_buf: failed to find evxx node\n");
+		return NULL;
+	}
+
+	stu = simaai_stu_get_by_phandle(np, "simaai,stu");
+	of_node_put(np);
+	if (IS_ERR(stu)) {
+		stu = NULL;
+		return NULL;
+	}
+
+	return stu;
+}
+
+static int dma_buf_get_buf_desc(struct dma_buf *dmabuf,
+				void __user *user_data)
+{
+	struct dma_buf_desc bufDesc;
+	struct iosys_map map;
+	struct page *page;
+	struct simaai_stu *stu;
+
+	if (copy_from_user(&bufDesc, user_data, sizeof(struct dma_buf_desc)))
+		return -EFAULT;
+
+	bufDesc.paddr = (__u64)-1;
+	bufDesc.size = dmabuf->size;
+
+	if (!dma_buf_vmap(dmabuf, &map)) {
+		page = vmalloc_to_page(map.vaddr);
+		if (page)
+			bufDesc.paddr = page_to_phys(page) +
+					offset_in_page(map.vaddr);
+		dma_buf_vunmap(dmabuf, &map);
+	}
+
+	/*
+	 * Only CMA buffers are consumed through the EVXX STU; memory
+	 * outside the STU windows (the DMS carveout) is never accessed
+	 * through it. Report the physical address as the bus address for
+	 * such buffers so the field is always well defined.
+	 */
+	stu = dma_buf_evxx_stu();
+	if (!stu || simaai_stu_get_bus_address(stu, bufDesc.paddr,
+					       &bufDesc.busAddr))
+		bufDesc.busAddr = bufDesc.paddr;
+
+	if (copy_to_user(user_data, &bufDesc, sizeof(struct dma_buf_desc)))
+		return -EFAULT;
+
+	return 0;
+}
+
 static long dma_buf_ioctl(struct file *file,
 			  unsigned int cmd, unsigned long arg)
 {
@@ -561,6 +632,8 @@ static long dma_buf_ioctl(struct file *file,
 	case DMA_BUF_IOCTL_IMPORT_SYNC_FILE:
 		return dma_buf_import_sync_file(dmabuf, (const void __user *)arg);
 #endif
+	case DMA_BUF_IOCTL_GET_DESC:
+		return dma_buf_get_buf_desc(dmabuf, (void __user *)arg);
 
 	default:
 		return -ENOTTY;

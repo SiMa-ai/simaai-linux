@@ -213,11 +213,19 @@ static int simaai_rproc_stop(struct rproc *rproc)
 	struct simaai_rproc *srproc = rproc->priv;
 	void __iomem *prc_cvu_addr = ioremap(srproc->config->prc_base_addr +
 									srproc->config->cvu_clk_reset_offset, 0x4);
-	uint32_t val = readl(prc_cvu_addr);
-	writel(val & (~(srproc->config->clock_enable_mask)), prc_cvu_addr);
+	uint32_t val;
 
+	/*
+	 * Hold the core in reset first, then take its clocks away. Removing the
+	 * clock from a core that is still running leaves anything it had
+	 * outstanding on the bus with nothing to complete it, and asserts reset
+	 * onto logic that no longer has a clock to latch it.
+	 */
 	val = readl(prc_cvu_addr);
 	writel(val & (~(srproc->config->reset_mask)), prc_cvu_addr);
+
+	val = readl(prc_cvu_addr);
+	writel(val & (~(srproc->config->clock_enable_mask)), prc_cvu_addr);
 
 	iounmap(prc_cvu_addr);
 	dev_info(rproc->dev.parent, "Stopped EV core");
@@ -287,37 +295,42 @@ static int simaai_rproc_add_carveout(struct simaai_rproc *srproc)
 
 	of_phandle_iterator_init(&it, np, "memory-region", NULL, 0);
 	while (of_phandle_iterator_next(&it) == 0) {
+		dma_addr_t da;
+
 		rmem = of_reserved_mem_lookup(it.node);
 		if (!rmem) {
-			of_node_put(it.node);
 			dev_err(dev, "unable to acquire memory-region\n");
+			of_node_put(it.node);
 			return -EINVAL;
 		}
 
-		/* we need base and size for evmem for startup */
+		/*
+		 * reg is the physical (host) address. The EV74 device/bus address
+		 * is derived through the STU window that maps this block.
+		 */
+		da = rmem->base;
+		if (srproc->stu &&
+		    simaai_stu_get_bus_address(srproc->stu, rmem->base, &da)) {
+			dev_err(dev, "no STU bus address for %pa\n", &rmem->base);
+			of_node_put(it.node);
+			return -EINVAL;
+		}
+
+		/* evmem: keep base/size for startup; boot vector uses the bus addr */
 		if (strstr(it.node->name, "evmem")) {
-			srproc->evmem_base = rmem->base;
+			srproc->evmem_base = da;
 			srproc->evmem_size = rmem->size;
 		}
 
-		/*  No need to map vdev buffer */
 		if (strstr(it.node->name, "vdev0buffer")) {
+			/* buffer is backed directly by its reserved region */
 			mem = rproc_of_resm_mem_entry_init(dev, index,
-							   rmem->size,
-							   rmem->base,
+							   rmem->size, da,
 							   get_carveout_name(it.node->name));
 		} else {
-			dma_addr_t dma_addr = rmem->base;
-			if (srproc->stu) {
-				if (simaai_stu_get_dev_address(srproc->stu, rmem->base, &dma_addr)) {
-					dev_err(dev, "Error getting device address\n");
-					return -EINVAL;
-				}
-			}
-
 			mem = rproc_mem_entry_init(dev, NULL,
-						   dma_addr,
-						   rmem->size, rmem->base,
+						   rmem->base,		/* host phys */
+						   rmem->size, da,	/* EV74 bus  */
 						   simaai_rproc_mem_alloc,
 						   simaai_rproc_mem_release,
 						   get_carveout_name(it.node->name));
@@ -505,13 +518,15 @@ static int simaai_rproc_probe(struct platform_device *pdev)
 	ret = rproc_add(rproc);
 	if (ret) {
 		dev_err(dev, "ERROR : failed to add rproc handle\n");
-		goto err_put_rproc;
+		goto err_free_mbox;
 	}
 
 	dev_dbg(dev, "Successfully added rproc handle\n");
 
 	return 0;
 
+err_free_mbox:
+	mbox_free_channel(srproc->chan);
 err_put_rproc:
 	rproc_free(rproc);
 
@@ -521,8 +536,15 @@ err_put_rproc:
 static void simaai_rproc_remove(struct platform_device *pdev)
 {
 	struct rproc *rproc = platform_get_drvdata(pdev);
+	struct simaai_rproc *srproc = rproc->priv;
 
 	rproc_del(rproc);
+	/*
+	 * The mailbox is requested at probe and was never given back, so the
+	 * channel stayed owned after unbind and the next probe was refused
+	 * with "mailbox not free". That made the module impossible to reload.
+	 */
+	mbox_free_channel(srproc->chan);
 	rproc_free(rproc);
 }
 

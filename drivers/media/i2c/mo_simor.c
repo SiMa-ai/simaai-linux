@@ -11,9 +11,12 @@
  */
 
 #include <linux/i2c.h>
+#include <linux/math.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/pm_runtime.h>
+
+#include <linux/media/simaai/metoak_rgbd.h>
 
 #include <media/v4l2-async.h>
 #include <media/v4l2-cci.h>
@@ -22,20 +25,32 @@
 #include <media/v4l2-subdev.h>
 
 /* ---- sensor width and height------------------------------ */
-#define SIMOR_WIDTH 1920
-#define SIMOR_HEIGHT 360
 /*
- * MIPI bus format. For RGB888 sensor data sent over 8 bit raw :
- * MEDIA_BUS_FMT_SBGGR8_1X8  (8 bit raw)
- * 
+ * Disparity packed with a reference image, three 8-bit samples per pixel:
+ * the subdev reports image geometry, the _3X8 code gives the receiver 3x.
  */
-#define SIMOR_MBUS_CODE MEDIA_BUS_FMT_SBGGR8_1X8
+#define SIMOR_WIDTH METOAK_RGBD_WIDTH
+#define SIMOR_HEIGHT METOAK_RGBD_HEIGHT
+#define SIMOR_MBUS_CODE MEDIA_BUS_FMT_METOAK_RGBD_3X8
 
 #define SIMOR_NUM_LANES 2
-#define SIMOR_BPP 8 /* SBGGR8 = 8 bits/pixel on the bus */
+/* Bits per image pixel: three 8-bit samples. */
+#define SIMOR_BPP (8 * METOAK_RGBD_BPP)
 
-/* PIXEL_RATE in pixels/sec, as seen by the receiver */
+/* PIXEL_RATE in image pixels/sec, as seen by the receiver */
 #define SIMOR_PIXEL_RATE(freq, lanes) (((u64)(freq)*2 * (lanes)) / SIMOR_BPP)
+
+/*
+ * The module paces itself at 25 fps; blanking only models its line time
+ * in the receiver's pixel clock, rounded up because a short IPI line
+ * faults. The Development Guide's linelenth 9920 / framelenth 840 are in
+ * the module's own 208.32 MHz domain and would claim 27 fps here.
+ */
+#define SIMOR_FPS	25
+#define SIMOR_VBLANK	543	/* 903 lines per frame - 360 active */
+/* exposure and gain run in the module's own AE: fixed single-value controls */
+#define SIMOR_EXPOSURE_FIXED	360	/* lines */
+#define SIMOR_AGAIN_FIXED	1024
 
 /* ------------------------------------------------------------------------- */
 
@@ -53,6 +68,7 @@ struct simor_sensor {
 	u64 pixel_rate;
 };
 
+/* Receiver bands this module is accepted in; its transmitter is fixed. */
 static const s64 simor_link_freqs[] = {
 	450000000,
 	480000000,
@@ -256,9 +272,10 @@ static int simor_init_controls(struct simor_sensor *s)
 {
 	struct v4l2_ctrl_handler *hdl = &s->ctrls;
 	struct v4l2_ctrl *ctrl;
+	u32 hblank;
 	int ret;
 
-	ret = v4l2_ctrl_handler_init(hdl, 2);
+	ret = v4l2_ctrl_handler_init(hdl, 6);
 	if (ret)
 		return ret;
 
@@ -274,6 +291,26 @@ static int simor_init_controls(struct simor_sensor *s)
 				 s->pixel_rate, 1, s->pixel_rate);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+	/* raw-sensor contract: blanking, exposure and gain exist, all fixed */
+	hblank = DIV_ROUND_UP_ULL(s->pixel_rate,
+				  SIMOR_FPS * (SIMOR_HEIGHT + SIMOR_VBLANK)) -
+		 SIMOR_WIDTH;
+	ctrl = v4l2_ctrl_new_std(hdl, NULL, V4L2_CID_HBLANK, hblank, hblank, 1,
+				 hblank);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+	ctrl = v4l2_ctrl_new_std(hdl, NULL, V4L2_CID_VBLANK, SIMOR_VBLANK,
+				 SIMOR_VBLANK, 1, SIMOR_VBLANK);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+	v4l2_ctrl_new_std(hdl, NULL, V4L2_CID_EXPOSURE, SIMOR_EXPOSURE_FIXED,
+			  SIMOR_EXPOSURE_FIXED, 1, SIMOR_EXPOSURE_FIXED);
+
+	v4l2_ctrl_new_std(hdl, NULL, V4L2_CID_ANALOGUE_GAIN, SIMOR_AGAIN_FIXED,
+			  SIMOR_AGAIN_FIXED, 1, SIMOR_AGAIN_FIXED);
 
 	if (hdl->error) {
 		ret = hdl->error;

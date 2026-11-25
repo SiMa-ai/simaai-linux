@@ -185,6 +185,9 @@ enum si_dma_dir {
 	DIR_MAX
 };
 
+struct si_pep_dev;
+void *si_pep_dma_regs(struct si_pep_dev *pep, int ch_num, enum si_dma_dir dir);
+
 #define DMA_REG_OFFSET(pep, ch, dir, reg)                                     \
 	(dir == DIR_WRITE) ?                                                  \
 		(&((struct si_dma_wrch_regs *)si_pep_dma_regs(pep, ch, dir))  \
@@ -244,6 +247,12 @@ struct si_pep_dma_ll_ctx {
 	 * must not be freed, only released by clearing *ll_busy.
 	 */
 	bool cached;
+	/*
+	 * The transfer is waited for: mask every channel interrupt for it
+	 * instead of running with what an earlier transfer on the channel
+	 * left in int_setup. Without an MSI that is where a stale one comes from.
+	 */
+	bool quiet;
 	unsigned long *ll_busy;
 	size_t size;
 	size_t nents;

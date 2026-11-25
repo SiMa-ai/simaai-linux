@@ -82,6 +82,7 @@ typedef struct {
 	__u16 h_start;          /* sensor input-port offset */
 	__u16 v_start;          /* sensor input-port offset */
 	__u8  video_port_id;    /* sensor video port / context id (MCFE routing) */
+	__u8  black_level_bits; /* depth black_level above is expressed in */
 } acamera_cmd_sensor_info;
 
 #endif /* __UAPI_MODALIX_ISP_SENSOR_INFO_H__ */

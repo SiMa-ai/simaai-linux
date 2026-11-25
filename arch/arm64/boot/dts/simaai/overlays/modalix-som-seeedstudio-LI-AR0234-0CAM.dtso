@@ -7,9 +7,9 @@
 /plugin/;
 
 &{/} {
-    ar0234_vana_2: csi0_fixedregulator@0 {
+    ar0234_vana_0: csi0_fixedregulator@0 {
         compatible = "regulator-fixed";
-        regulator-name = "ar0234_vana_2";
+        regulator-name = "ar0234_vana_0";
         regulator-min-microvolt = <2800000>;
         regulator-max-microvolt = <2800000>;
         enable-active-high;
@@ -17,23 +17,23 @@
         regulator-always-on;
     };
 
-    ar0234_vdig_2: csi0_fixedregulator@1 {
+    ar0234_vdig_0: csi0_fixedregulator@1 {
         compatible = "regulator-fixed";
-        regulator-name = "ar0234_vdig_2";
+        regulator-name = "ar0234_vdig_0";
         regulator-min-microvolt = <1050000>;
         regulator-max-microvolt = <1050000>;
         regulator-always-on;
     };
 
-    ar0234_vddl_2: csi0_fixedregulator@2 {
+    ar0234_vddl_0: csi0_fixedregulator@2 {
         compatible = "regulator-fixed";
-        regulator-name = "ar0234_vddl_2";
+        regulator-name = "ar0234_vddl_0";
         regulator-min-microvolt = <1800000>;
         regulator-max-microvolt = <1800000>;
         regulator-always-on;
     };
 
-    ar0234_clk_2: csi0_camera-clk {
+    ar0234_clk_0: csi0_camera-clk {
         compatible = "fixed-clock";
         #clock-cells = <0>;
         clock-frequency = <27000000>;
@@ -95,7 +95,7 @@
 &csi00in {
     clock-lanes = <0>;
     data-lanes = <1 2>;
-    link-frequencies = /bits/ 64 <270000000>;
+    link-frequencies = /bits/ 64 <360000000>;
     remote-endpoint = <&cam00out>;
     clock-continuous;
 };
@@ -105,18 +105,18 @@
                 compatible = "onsemi,ar0234";
                 reg = <0x10>;
 
-                clocks = <&ar0234_clk_2>;
+                clocks = <&ar0234_clk_0>;
                 clock-names = "xclk";
 
-                VANA-supply = <&ar0234_vana_2>;
-                VDIG-supply = <&ar0234_vdig_2>;
-                VDDL-supply = <&ar0234_vddl_2>;
+                VANA-supply = <&ar0234_vana_0>;
+                VDIG-supply = <&ar0234_vdig_0>;
+                VDDL-supply = <&ar0234_vddl_0>;
 
                 port@1 {
                         cam00out: endpoint@0 {
                                 clock-lanes = <0>;
                                 data-lanes = <1 2>;
-                                link-frequencies = /bits/ 64 <270000000>;
+                                link-frequencies = /bits/ 64 <360000000>;
                                 remote-endpoint = <&csi00in>;
                                 clock-continuous;
                         };

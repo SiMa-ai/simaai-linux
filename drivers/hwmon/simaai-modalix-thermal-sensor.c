@@ -11,6 +11,7 @@
 #include <linux/slab.h>
 #include <linux/of_address.h>
 #include <linux/delay.h>
+#include <linux/thermal.h>
 #include "simaai-modalix-pvt-addr-map.h"
 
 #define SDIF_BUSY_BIT BIT(0)
@@ -80,13 +81,21 @@
 #define EFUSE_DATA_START	36
 #define EFUSE_DATA_END		51
 #define ECID_START		60
-#define ECID_END		62
+#define ECID_END		63
 #define HOT_TEMP		85
 #define COLD_TEMP		-40
 #define K_0			-14120	/* -141.2 x 100 */
 #define Y_0			56560	/* 565.6 x 100  */
 #define SCALE_100		100
 #define SCALE_10		10
+
+struct thermal_priv;
+
+/* One thermal-OF zone per temperature channel; id = channel index */
+struct thermal_tz_ctx {
+	struct thermal_priv *priv;	/* Back-reference to driver data */
+	int channel;			/* Temperature channel index */
+};
 
 struct thermal_priv {
 	void __iomem *pvt_base;		/* Base address for PVT block */
@@ -96,6 +105,7 @@ struct thermal_priv {
 	struct device *dev;		/* Back-reference to device */
 	struct device *hwmon_dev;	/* HWMON registered device */
 	struct mutex lock;		/* Per-device lock */
+	struct thermal_tz_ctx tz_ctx[MAX_TEMP_CHANNELS];
 };
 
 static const char *const rtsn_name[MAX_TEMP_CHANNELS] = {
@@ -258,7 +268,7 @@ static int read_efuse(struct thermal_priv *priv)
 	u32 efuse_thermal_data[64];
 	void __iomem *base = priv->efuse_base;
 
-	dev_info(priv->dev, "Starting DFT eFuse read sequence\n");
+	dev_dbg(priv->dev, "Starting DFT eFuse read sequence\n");
 
 	/* Load DR */
 	iowrite32(CHAIN_SIZE_1, base + WORD0);
@@ -319,7 +329,7 @@ static int read_efuse(struct thermal_priv *priv)
 		efuse_thermal_data[i] = ioread32(base + WORD1);
 		if ((i >= EFUSE_DATA_START && i <= EFUSE_DATA_END) ||
 			(i >= ECID_START && i <= ECID_END))
-			dev_dbg(priv->dev, "eFuse Data[%02d]: 0x%08X\n",
+			dev_dbg(priv->dev, "Efuse Data[%02d]: 0x%08X\n",
 					i, efuse_thermal_data[i]);
 	}
 
@@ -328,7 +338,7 @@ static int read_efuse(struct thermal_priv *priv)
 	val = ioread32(base + WORD1);
 
 	if ((val & 0x00000000) == 0x00000000) {
-		dev_info(priv->dev, "DFT Efuse read success\n");
+		dev_dbg(priv->dev, "DFT Efuse read success\n");
 	} else {
 		dev_err(priv->dev, "DFT Efuse read failure: val=0x%08X\n", val);
 		return -EIO;
@@ -438,45 +448,55 @@ static int thermal_hwmon_read_string(struct device *dev,
 	return -EOPNOTSUPP;
 }
 
+static int thermal_read_channel(struct thermal_priv *priv, int channel,
+				long *val)
+{
+	u32 raw;
+	int ret;
+
+	if (!priv->pvt_base || IS_ERR(priv->pvt_base)) {
+		dev_err(priv->dev, "pvt_base not mapped (channel %d)\n",
+			channel);
+		return -ENODEV;
+	}
+
+	if (channel < 0 || channel >= MAX_TEMP_CHANNELS) {
+		dev_err(priv->dev, "invalid channel %d (max %d)\n", channel,
+			MAX_TEMP_CHANNELS - 1);
+		return -EINVAL;
+	}
+
+	ret = start_measurement_sequence(priv, channel);
+	if (ret) {
+		dev_err(priv->dev, "measurement failed on channel %d (err=%d)\n",
+			channel, ret);
+		return ret;
+	}
+	raw = read_temperature_raw(priv->pvt_base, channel);
+	if (raw == 0) {
+		dev_err(priv->dev, "Temperature read failed for channel %d\n",
+			channel);
+		return -ENODATA;
+	}
+	*val = compute_temperature(priv, raw, channel);
+
+	return 0;
+}
+
 static int thermal_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 			      u32 attr, int channel, long *val)
 {
 	struct thermal_priv *priv = dev_get_drvdata(dev);
-	u32 raw, ret = 0;
 
 	if (!priv) {
 		dev_err(dev, "priv is NULL\n");
 		return -ENODEV;
 	}
 
-	if (!priv->pvt_base || IS_ERR(priv->pvt_base)) {
-		dev_err(dev, "pvt_base not mapped (channel %d)\n", channel);
-		return -ENODEV;
-	}
-
-	if (channel < 0 || channel >= MAX_TEMP_CHANNELS) {
-		dev_err(dev, "invalid channel %d (max %d)\n", channel,
-			MAX_TEMP_CHANNELS - 1);
-		return -EINVAL;
-	}
-
 	if (type != hwmon_temp || attr != hwmon_temp_input)
 		return -EOPNOTSUPP;
 
-	ret = start_measurement_sequence(priv, channel);
-	if (ret) {
-		dev_err(dev, "measurement failed on channel %d (err=%d)\n",
-			channel, ret);
-		return ret;
-	}
-	raw = read_temperature_raw(priv->pvt_base, channel);
-	if (raw == 0) {
-		dev_err(dev, "Temperature read failed for channel %d\n", channel);
-		return -ENODATA;
-	}
-	*val = compute_temperature(priv, raw, channel);
-
-	return ret;
+	return thermal_read_channel(priv, channel, val);
 }
 
 static umode_t thermal_hwmon_is_visible(const void *data,
@@ -510,6 +530,85 @@ static const struct hwmon_chip_info thermal_chip_info = {
 	.ops = &thermal_hwmon_ops,
 	.info = thermal_info,
 };
+
+static int thermal_of_get_temp(struct thermal_zone_device *tz, int *temp)
+{
+	struct thermal_tz_ctx *ctx = thermal_zone_device_priv(tz);
+	long val;
+	int ret;
+
+	ret = thermal_read_channel(ctx->priv, ctx->channel, &val);
+	if (ret)
+		return ret;
+
+	*temp = val;
+	return 0;
+}
+
+static int get_hot_trip_temp_cb(struct thermal_trip *trip, void *data)
+{
+	int *hot_temp = data;
+
+	if (trip->type != THERMAL_TRIP_HOT)
+		return 0;
+
+	*hot_temp = trip->temperature;
+
+	return 1;
+}
+
+static void thermal_of_hot_notify(struct thermal_zone_device *tz)
+{
+	const char *type;
+	struct device *device;
+	int temp = 0, hot_temp = 0;
+
+	if (!tz)
+		return;
+
+	type = thermal_zone_device_type(tz);
+	device = thermal_zone_device(tz);
+
+	thermal_of_get_temp(tz, &temp);
+	for_each_thermal_trip(tz, get_hot_trip_temp_cb, &hot_temp);
+
+	dev_warn(device,
+		 "%s: WARNING! Temperature %d.%03d C reached hot level (%d.%03d C)",
+		 type, temp / 1000, temp % 1000, hot_temp / 1000, hot_temp % 1000);
+}
+
+static const struct thermal_zone_device_ops thermal_of_ops = {
+	.get_temp = thermal_of_get_temp,
+	.hot = thermal_of_hot_notify,
+};
+
+/*
+ * Register each temperature channel with the thermal-OF core so a
+ * thermal-zones node referencing this device (#thermal-sensor-cells = <1>,
+ * sensor id = channel index) gets a working thermal zone. Channels no zone
+ * references return -ENODEV, which is not an error.
+ */
+static int thermal_register_of_zones(struct thermal_priv *priv)
+{
+	int i;
+
+	for (i = 0; i < MAX_TEMP_CHANNELS; i++) {
+		struct thermal_tz_ctx *ctx = &priv->tz_ctx[i];
+		struct thermal_zone_device *tz;
+
+		ctx->priv = priv;
+		ctx->channel = i;
+
+		tz = devm_thermal_of_zone_register(priv->dev, i, ctx,
+						   &thermal_of_ops);
+		if (IS_ERR(tz) && PTR_ERR(tz) != -ENODEV)
+			return dev_err_probe(priv->dev, PTR_ERR(tz),
+					     "failed to register thermal zone for channel %d\n",
+					     i);
+	}
+
+	return 0;
+}
 
 static int thermal_sensor_probe(struct platform_device *pdev)
 {
@@ -598,9 +697,12 @@ static int thermal_sensor_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->hwmon_dev))
 		return PTR_ERR(priv->hwmon_dev);
 
+	ret = thermal_register_of_zones(priv);
+	if (ret)
+		return ret;
+
 	platform_set_drvdata(pdev, priv);
 
-	dev_info(&pdev->dev, "thermal sensor probed successfully\n");
 	dev_info(&pdev->dev, "thermal sensor registered as %s\n",
 				dev_name(priv->hwmon_dev));
 	return 0;

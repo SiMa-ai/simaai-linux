@@ -72,7 +72,7 @@ static void *get_active_ctx_ptr( void )
 void *get_ctx_ptr_by_id( uint32_t ctx_id )
 {
     if ( ctx_id >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_CRIT, "Invalid parameter. Context id (%u) is out of range [0;%d]",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Invalid parameter. Context id (%u) is out of range [0;%d]",
              ctx_id, ( ( FIRMWARE_CONTEXT_NUMBER > 0 ) ? ( FIRMWARE_CONTEXT_NUMBER - 1 ) : 0 ) );
         return NULL;
     }
@@ -89,9 +89,12 @@ int32_t acamera_init( acamera_settings *settings, uint8_t num_of_contexts, semap
 
     int32_t result = 0;
 
-    LOG( LOG_INFO, "Control SW Init" );
-    LOG( LOG_NOTICE, "DRIVER: " FIRMWARE_VERSION_STR " (%x)", FIRMWARE_REVISION );
-    LOG( LOG_NOTICE, "HW GEN: " ISP_RTL_VERSION_STR " (" ISP_RTL_SVN_REVISION_STR ")" );
+    /* Pick up on-board 3A log overrides (level + categories) if present. */
+    alog_load_config();
+
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Control SW Init" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "DRIVER: " FIRMWARE_VERSION_STR " (%x)", FIRMWARE_REVISION );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "HW GEN: " ISP_RTL_VERSION_STR " (" ISP_RTL_SVN_REVISION_STR ")" );
 
 #if ACAMERA_ISP_PROFILING && ACAMERA_ISP_PROFILING_INIT
     acamera_profiler_init();
@@ -126,12 +129,12 @@ int32_t acamera_init( acamera_settings *settings, uint8_t num_of_contexts, semap
 
         result = acamera_isp_ctx_init( p_ictx, &settings[idx] );
         if ( result != 0 ) {
-            LOG( LOG_CRIT, "Failed to initialize the context %d.", (int)idx );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to initialize the context %d.", (int)idx );
             break;
         }
 
         if ( ( p_ictx->calib_mgr_data = acamera_calib_mgr_init( settings[idx].get_calibrations ) ) == NULL ) {
-            LOG( LOG_CRIT, "Failed to initialize calibration manager entry for context %d.", (int)idx );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to initialize calibration manager entry for context %d.", (int)idx );
             result = 1;
             break;
         }
@@ -141,7 +144,7 @@ int32_t acamera_init( acamera_settings *settings, uint8_t num_of_contexts, semap
     if ( result == 0 ) {
         g_isp.isp_initialized = 1;
     } else {
-        LOG( LOG_CRIT, "One or more contexts were not initialized properly." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "One or more contexts were not initialized properly." );
         g_isp.isp_initialized = 0;
     }
 
@@ -163,7 +166,9 @@ int32_t acamera_deinit( void )
     acamera_isp_ctx_ptr_t p_ictx;
 
 #if FW_HAS_CONTROL_CHANNEL
-    ctrl_channel_deinit();
+    /* Stop handing calibrations out and release any waiter, but leave the
+     * storage alone: the contexts below still hold pointers into it. */
+    ctrl_channel_shutdown();
 #endif
 
 #if defined( ISP_HAS_MCFE_FSM )
@@ -178,6 +183,12 @@ int32_t acamera_deinit( void )
 
         acamera_calib_mgr_deinit( p_ictx->calib_mgr_data );
     }
+
+#if FW_HAS_CONTROL_CHANNEL
+    /* Every calibration manager entry is gone, so nothing can be holding a
+     * slot pointer any more and the calibration storage can be freed. */
+    ctrl_channel_deinit();
+#endif
 
 #if defined( ISP_HAS_MCFE_FSM )
     module_mcfe_deinit();
@@ -213,7 +224,7 @@ void acamera_process_interrupt( uint8_t slot, const uint32_t mask )
 
     // Check if slot number within range.
     if ( slot >= FIRMWARE_CONTEXT_NUMBER ) {
-        LOG( LOG_DEBUG, "IRQ slot number is out of range, skipping. IRQ slot: %d, mask: 0x%x, contexts: %d", slot, mask, FIRMWARE_CONTEXT_NUMBER );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "IRQ slot number is out of range, skipping. IRQ slot: %d, mask: 0x%x, contexts: %d", slot, mask, FIRMWARE_CONTEXT_NUMBER );
         return;
     }
 
@@ -222,7 +233,7 @@ void acamera_process_interrupt( uint8_t slot, const uint32_t mask )
     if ( p_ictx && mask ) {
 
 #if 0
-        LOG(LOG_INFO,"IRQ slot: %d mask: 0x%x", slot, mask );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO,"IRQ slot: %d mask: 0x%x", slot, mask );
 
 		LOG (LOG_ERR, "MCFE FC : %#x", acamera_frontend_mcfe_enable_flow_control_read(p_ictx->settings.isp_base));
 		LOG (LOG_ERR, "MCBE FC : %#x", acamera_frontend_mcbe_enable_flow_control_read(p_ictx->settings.isp_base));
@@ -277,7 +288,7 @@ int32_t acamera_process_event( void )
         }
     } else {
         result = -1;
-        LOG( LOG_CRIT, "Firmware was not initialized properly. Please initialize the firmware before calling acamera_process." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Firmware was not initialized properly. Please initialize the firmware before calling acamera_process." );
     }
 
 #if FW_HAS_CONTROL_CHANNEL
@@ -463,7 +474,7 @@ uint8_t acamera_handle_param( uint32_t ctx_id, uint32_t param_id, uint8_t direct
         return handle_context_param( get_ctx_ptr_by_id( ctx_id ), param_id, direction, set_value, get_value );
 
     } else {
-        LOG( LOG_ERR, "Unsupported param id: 0x%x.", param_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Unsupported param id: 0x%x.", param_id );
         return NOT_SUPPORTED;
     }
 }

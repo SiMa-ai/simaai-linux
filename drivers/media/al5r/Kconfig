@@ -8,3 +8,15 @@
           To compile this support as a module, choose M here:
           The module will be called allegro_encoder.
           If unsure, say N.
+
+    config ALLEGRO_CODEC_KUNIT
+        bool "KUnit tests for the AL5R command arbiter"
+        depends on ALLEGRO_CODEC_DRIVER && KUNIT=y
+        default n
+        help
+          Unit tests for the command-arbiter recovery path, covering the
+          retire-then-reuse interleaving in which a command retires before
+          its timeout recovery runs and the slot is reused meanwhile.
+          Built in when selected, but only run when the kernel is booted
+          with simaai_vidip_kunit; otherwise every case reports as skipped.
+          Needs no codec hardware. If unsure, say N.

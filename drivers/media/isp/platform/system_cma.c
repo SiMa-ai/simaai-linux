@@ -63,7 +63,7 @@ static inline void system_cma_update_tracking_info( size_t size, bool alloc )
 // Not in API. Used by main.c
 void system_cma_print_tracking_info( void )
 {
-    LOG( LOG_NOTICE, "system_cma: used = 0x%zx (%zu MiB), remaining = 0x%zx (%zu MiB); %zu node(s)", resmem_used, resmem_used >> 20, g_resmem_remaining, g_resmem_remaining >> 20, g_resmem_nodes_allocated );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "system_cma: used = 0x%zx (%zu MiB), remaining = 0x%zx (%zu MiB); %zu node(s)", resmem_used, resmem_used >> 20, g_resmem_remaining, g_resmem_remaining >> 20, g_resmem_nodes_allocated );
 }
 
 /**
@@ -108,7 +108,7 @@ int system_cma_alloc( void **out_virtaddr, uint32_t *out_physaddr, uint32_t size
         system_cma_update_tracking_info( size, true );
         system_cma_print_tracking_info();
     } else {
-        LOG( LOG_CRIT, "system_cma_alloc(size 0x%x): failed", size );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "system_cma_alloc(size 0x%x): failed", size );
         system_cma_print_tracking_info();
         paddr = 0;
     }
@@ -146,7 +146,7 @@ void system_cma_free( uint32_t addr )
     }
 
     if ( i >= g_resmem_nodes_allocated ) {
-        LOG( LOG_CRIT, "system_dma_free on unallocated addr %08x", addr );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "system_dma_free on unallocated addr %08x", addr );
         mutex_unlock( &ddr_alloc_lock );
         return;
     }

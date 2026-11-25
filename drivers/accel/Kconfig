@@ -31,3 +31,8 @@ source "drivers/accel/qaic/Kconfig"
 source "drivers/accel/rocket/Kconfig"
 
 endif
+
+# Not a DRM accel driver: it publishes /dev/mla via misc_register rather
+# than an accel/accel* node, so it must be sourced outside "if DRM" to
+# avoid taking a DRM dependency it does not have.
+source "drivers/accel/simaaimla/Kconfig"

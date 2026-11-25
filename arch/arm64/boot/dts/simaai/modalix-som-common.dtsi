@@ -6,8 +6,6 @@
 / {
 	chosen {
 		bootargs = "console=ttyS0,115200n8 root=/dev/ram0 rw rootfstype=ramfs uio_pdrv_genirq.of_id=generic-uio";
-		linux,initrd-start = <0x10 0x7D000000>;
-		linux,initrd-end = <0x10 0x7E400000>;
 	};
 
 	aliases {
@@ -44,12 +42,6 @@
 				};
 			};
 		};
-	};
-	ptp_clk: ptpclk {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <100000000>;
-		clock-output-names = "ptpclk";
 	};
 };
 
@@ -100,7 +92,8 @@
 };
 
 &gpio50 {
-	pinctrl-0 = <&pins_gpio56_deafult>, <&pins_gpio57_deafult>;
+	pinctrl-0 = <&pins_gpio50_deafult>, <&pins_gpio56_deafult>,
+		    <&pins_gpio57_deafult>;
 	pinctrl-names = "default";
 	status = "okay";
 };
@@ -150,8 +143,6 @@
 };
 
 &xgmac0 {
-	clocks = <&eth_clk>, <&ptp_clk>;
-	clock-names = "stmmaceth", "ptp_ref";
 	phy-mode = "sgmii";
 	managed = "in-band-status";
 	snps,ps-speed = <1000>;
@@ -277,48 +268,6 @@
 
 };
 
-/ {
-	regulator-virtual-consumer-buck0-4d {
-		compatible = "regulator-virtual-consumer";
-		default-supply = <&buck0_4d>;
-	};
-
-	regulator-virtual-consumer-buck1-4d {
-		compatible = "regulator-virtual-consumer";
-		default-supply = <&buck1_4d>;
-	};
-
-	regulator-virtual-consumer-buck2-4d {
-		compatible = "regulator-virtual-consumer";
-		default-supply = <&buck2_4d>;
-	};
-
-	regulator-virtual-consumer-buck3-4d {
-		compatible = "regulator-virtual-consumer";
-		default-supply = <&buck3_4d>;
-	};
-
-	regulator-virtual-consumer-buck0-4f {
-		compatible = "regulator-virtual-consumer";
-		default-supply = <&buck0_4f>;
-	};
-
-	regulator-virtual-consumer-buck1-4f {
-		compatible = "regulator-virtual-consumer";
-		default-supply = <&buck1_4f>;
-	};
-
-	regulator-virtual-consumer-buck2-4f {
-		compatible = "regulator-virtual-consumer";
-		default-supply = <&buck2_4f>;
-	};
-
-	regulator-virtual-consumer-buck3-4f {
-		compatible = "regulator-virtual-consumer";
-		default-supply = <&buck3_4f>;
-	};
-};
-
 &i2c52 {
 	status = "okay";
 	clock-frequency = <400000>;
@@ -352,3 +301,9 @@
 	status = "okay";
 };
 
+&soc_poweroff {
+	poweroff-gpios = <&port5 0 GPIO_ACTIVE_HIGH>;
+	simaai,poweroff-i2c-bus  = <&i2c23>;
+	simaai,poweroff-i2c-addr = <0x4f>;
+	simaai,poweroff-i2c-page = <0>;
+};

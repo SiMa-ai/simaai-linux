@@ -75,6 +75,8 @@ struct axi_dma_chan {
 	u64				completed;
 	u64				dropped;
 	u64				reported;
+	u32				video_errs;	/* video-mode DMA errors this stream */
+	u32				video_err_status; /* OR of their status bits */
 
 	/*
 	 * Video-mode scratch fallback: a per-channel throwaway buffer the channel
@@ -82,7 +84,7 @@ struct axi_dma_chan {
 	 * userspace immediately instead of being held. Armed by the capture driver
 	 * via dw_axi_dma_arm_scratch(). Idle drain runs in RELOAD multiblock mode
 	 * (reload_looping) -- the HW reruns the single scratch block with no LLI
-	 * fetch/writeback, so no self-invalidation (SOCSW-5392); active capture is a
+	 * fetch/writeback, so no self-invalidation; active capture is a
 	 * ring whose tail turns around through the single scratch block.
 	 */
 	bool				has_scratch;
@@ -102,7 +104,7 @@ void dw_axi_dma_disarm_scratch(struct dma_chan *dchan);
 
 /*
  * Re-validate the (scratch) descriptors and request the channel to resume after
- * the DMA FSM halted on a shadow-LLI-invalid error (SOCSW-5392). Used by the CSI
+ * the DMA FSM halted on a shadow-LLI-invalid error. Used by the CSI
  * IPI-overflow recovery path. Returns 0 on success, -ENODEV if no scratch.
  */
 int dw_axi_dma_resume_after_overflow(struct dma_chan *dchan);

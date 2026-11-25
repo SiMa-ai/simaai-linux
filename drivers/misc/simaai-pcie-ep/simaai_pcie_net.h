@@ -14,12 +14,32 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 
+/* si_pkt_desc.csum_flags */
+#define SI_PKT_F_CSUM_PARTIAL	BIT(0)
+
 struct si_pkt_desc {
 	uint32_t len;
 	uint32_t maxlen;
 	void *cpu_addr;
 	dma_addr_t dma_addr;
-	struct sk_buff *skb;
+	union {
+		/* On the SoC, the packet it received into this slot */
+		struct sk_buff *skb;
+		/*
+		 * What the sender tells the receiver, once the feature for
+		 * the direction is agreed (SI_NET_F_PARTIAL_CSUM from the
+		 * SoC, SI_NET_F_HOST_PARTIAL_CSUM from the host). With
+		 * SI_PKT_F_CSUM_PARTIAL set, the checksum of the packet
+		 * from csum_start to its end belongs csum_offset past
+		 * csum_start, both counted from the ethernet header. All
+		 * zero otherwise, which is what the field always held.
+		 */
+		struct {
+			uint16_t csum_start;
+			uint16_t csum_offset;
+			uint32_t csum_flags;
+		};
+	};
 };
 
 struct si_net_hwdata {

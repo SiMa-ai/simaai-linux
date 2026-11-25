@@ -12,12 +12,14 @@
 #include <linux/platform_device.h>
 #include <linux/fs.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/mm.h>
 #include <linux/delay.h>
 #include <linux/of_device.h>
 #include <linux/of_address.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
+#include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/kthread.h>
@@ -34,7 +36,7 @@
 #include <linux/netdevice.h>
 #include <net/net_namespace.h>
 
-#include <linux/simaai_pcie_api.h>
+#include <uapi/linux/simaai/simaai_pcie_api.h>
 #include "simaai_pcie_drv.h"
 
 #include "simaai_pep_hw.h"
@@ -43,6 +45,28 @@
 #include "simaai_pep_drv_davinci.h"
 
 #define DRV_MODULE_NAME "simaai_pep_drv"
+
+/*
+ * Upper bound on how long a single eDMA transfer is polled for completion,
+ * and the busy-wait step between reads of the channel status register.
+ *
+ * The status poll runs in atomic context with the per-channel DMA spinlock
+ * held, so it must be bounded. If the host tears down its side mid-transfer
+ * (application exit, queue destroy, or link down), the EP-initiated transfer
+ * never gets its PCIe completion and the channel stays in RUNNING forever.
+ * Without a timeout the poll spins under the spinlock indefinitely: the
+ * owning ioctl never returns so the task is unkillable, every other user of
+ * the channel and the link-down recovery worker block on the held lock and
+ * show up in D state, and the SoC has to be rebooted. The bound turns that
+ * into an -ETIMEDOUT the caller can propagate.
+ *
+ * Sized well above the worst-case legitimate transfer; tune if larger
+ * buffers or slower links need it. The real fix is to make completion
+ * interrupt-driven (the channel already arms the abort/stop interrupts) and
+ * wait outside the spinlock, but this stops the unkillable hang today.
+ */
+#define SI_PEP_DMA_POLL_DELAY_US	1
+#define SI_PEP_DMA_TIMEOUT_US		(2 * 1000 * 1000)
 
 static bool use_driver_loopback = false;
 static struct si_pep_thread_param t_params[SI_MAX_DQS];
@@ -292,6 +316,13 @@ static ssize_t sysfs_show_data_stats(struct kobject *kobj,
 		pos += sprintf(buf + pos,"%d\n",
 				qdev->stats.abort_reqs_fail);
 		pos += sprintf(buf + pos,
+				"dma-buf attachment cache hits          : ");
+		pos += sprintf(buf + pos, "%d\n", qdev->stats.dbuf_cache_hits);
+		pos += sprintf(buf + pos,
+				"dma-buf attachment cache misses        : ");
+		pos += sprintf(buf + pos, "%d\n",
+				qdev->stats.dbuf_cache_misses);
+		pos += sprintf(buf + pos,
 				"Timestamp of last data response sent   : ");
 		pos += sprintf(buf + pos, "%lld\n", qdev->stats.last_resp);
 		pos += sprintf(buf + pos, "\n");
@@ -527,7 +558,7 @@ int si_pep_register_irq_handler(struct si_pep_dev *pep, char *irqname,
 	struct device *dev = pep->dev;
 
 	irq = platform_get_irq_byname(pep->pdev, irqname);
-	si_info(pep, "irq %s = %#lx\n", irqname, irq);
+	si_dbg(pep, "IRQ: %s - %#x", irqname, irq);
 	if (irq < 0) {
 		si_err(pep, "Failed to find IRQ for '%s'", irqname);
 		return irq;
@@ -651,7 +682,7 @@ static u32 si_pep_pcie_read_pciesys(struct si_pep_dev *pep, u32 reg, size_t size
 
 	ret = si_pep_pcie_read(pep->pciesys_base + reg, size, &val);
 	if (ret != PCIBIOS_SUCCESSFUL)
-		si_err(pep, "Failed to read 0x%08x, error %d\n", reg, ret);
+		si_err(pep, "Failed to read 0x%08x, error %d", reg, ret);
 
 	return val;
 }
@@ -663,7 +694,7 @@ static void si_pep_pcie_write_pciesys(struct si_pep_dev *pep, u32 reg, size_t si
 
 	ret = si_pep_pcie_write(pep->pciesys_base + reg, size, val);
 	if (ret != PCIBIOS_SUCCESSFUL)
-		si_err(pep, "Failed to write 0x%08x, error %d\n", reg, ret);
+		si_err(pep, "Failed to write 0x%08x, error %d", reg, ret);
 }
 
 static inline void si_pep_pcie_writel_pciesys(struct si_pep_dev *pep, u32 reg,
@@ -706,7 +737,7 @@ static u32 si_pep_pcie_read_dbi(struct si_pep_dev *pep, u32 reg, size_t size)
 
 	ret = si_pep_pcie_read(pep->dbi_base + reg, size, &val);
 	if (ret)
-		si_err(pep, "Failed to read 0x%08x, error %d\n", reg, ret);
+		si_err(pep, "Failed to read 0x%08x, error %d", reg, ret);
 
 	return val;
 }
@@ -718,7 +749,7 @@ static void si_pep_pcie_write_dbi(struct si_pep_dev *pep, u32 reg, size_t size,
 
 	ret = si_pep_pcie_write(pep->dbi_base + reg, size, val);
 	if (ret)
-		si_err(pep, "Failed to write 0x%08x, error %d\n", reg, ret);
+		si_err(pep, "Failed to write 0x%08x, error %d", reg, ret);
 }
 
 static inline void si_pep_pcie_writel_dbi(struct si_pep_dev *pep, u32 reg,
@@ -773,23 +804,35 @@ int si_pep_irq_link_down_disable(struct si_pep_dev *pep)
 	/* disable link down event */
 	errint_ctrl = (errint_ctrl & (~(PCIE0_ERR_STS_LDEVENT)));
 	si_pep_pcie_writel_pciesys(pep, PCIE0_ERR_INT_CTRL_REG, errint_ctrl);
-	si_err(pep, "Link down interrupt disabled\n");
+	si_err(pep, "Link down interrupt disabled");
 	return 0;
 }
 
 int si_pep_irq_link_down_enable(struct si_pep_dev *pep)
 {
 	uint32_t errint_ctrl;
+	uint32_t errint_sts;
 
 	if (unlikely(!pep)) {
 		pr_err("%s: Invalid pointer\n", __func__);
 		return -EINVAL;
 	}
+
+	/*
+	 * Discard an event latched while the interrupt was masked, clearing
+	 * it the way the handler does. The caller arms the interrupt only
+	 * once it has built the state the handler tears down, so an event
+	 * from before now has nothing to clean up; acting on it would
+	 * dismantle what was just built and rebuild it through recovery.
+	 */
+	errint_sts = si_pep_pcie_readl_pciesys(pep, PCIE0_ERR_INT_STS_REG);
+	si_pep_pcie_writel_pciesys(pep, PCIE0_ERR_INT_STS_REG, errint_sts);
+
 	errint_ctrl = si_pep_pcie_readl_pciesys(pep, PCIE0_ERR_INT_CTRL_REG);
 	/* enable only link down event, NOT surprise link down event */
 	errint_ctrl = (errint_ctrl | PCIE0_ERR_STS_LDEVENT);
 	si_pep_pcie_writel_pciesys(pep, PCIE0_ERR_INT_CTRL_REG, errint_ctrl);
-	si_err(pep, "Link down interrupt enabled\n");
+	si_err(pep, "Link down interrupt enabled");
 	return 0;
 }
 
@@ -871,8 +914,7 @@ static int si_pep_get_msi_config(struct si_pep_dev *pep,
 	config->msg_nvecs = (u16)(1U << ((data & PCI_MSI_FLAGS_QSIZE) >>
 				__ffs(PCI_MSI_FLAGS_QSIZE)));
 
-	if (data & PCI_MSI_FLAGS_64BIT)
-		is_64bit = true;
+	is_64bit = data & PCI_MSI_FLAGS_64BIT;
 
 	reg = msi_cap_offset + PCI_MSI_ADDRESS_LO;
 	config->msg_addr_l = si_pep_pcie_readl_dbi(pep, reg);
@@ -890,11 +932,23 @@ static int si_pep_get_msi_config(struct si_pep_dev *pep,
 	return 0;
 }
 
-int si_pep_copy_to_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
-		int ch, int msi)
+/* Whether the host enabled enough MSI vectors for vector msi to exist */
+bool si_pep_msi_has_vector(struct si_pep_dev *pep, int msi)
+{
+	struct si_pep_msi_config msicfg;
+
+	if (si_pep_get_msi_config(pep, &msicfg))
+		return false;
+
+	return msicfg.msg_nvecs == 1 || msi < msicfg.msg_nvecs;
+}
+
+static int si_pep_copy_to_host_do(struct si_pep_dev *pep, u64 dest, u64 src,
+				  u32 size, int ch, int msi, bool quiet)
 {
 	int dir = DIR_WRITE;
 	volatile u32 reg;
+	unsigned long flags;
 	int retry_count = 3;
 	struct si_pep_msi_config msicfg;
 
@@ -906,7 +960,7 @@ int si_pep_copy_to_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
 
 	si_dbg_dma(pep, "DMA%d from 0x%llx to 0x%llx, size %u, msi %d", ch, src,
 			dest, size, msi);
-	spin_lock(&pep->dma_write_lock[ch]);
+	spin_lock_irqsave(&pep->dma_write_lock[ch], flags);
 	DMA_REG_WRITE(pep, ch, dir, en, DMA_EN_ENABLE);
 	DMA_REG_WRITE(pep, ch, dir, sar_high, upper_32_bits(src));
 	DMA_REG_WRITE(pep, ch, dir, sar_low, lower_32_bits(src));
@@ -915,7 +969,8 @@ int si_pep_copy_to_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
 	DMA_REG_WRITE(pep, ch, dir, control1, 0x2);
 	DMA_REG_WRITE(pep, ch, dir, int_clear, DMA_INT_CLEAR_INTS_MASK);
 	DMA_REG_WRITE(pep, ch, dir, int_setup, DMA_INT_SETUP_LAIE);
-	if (msi >= 0 && (si_pep_get_msi_config(pep, &msicfg) == 0)) {
+	if (msi >= 0 && (si_pep_get_msi_config(pep, &msicfg) == 0) &&
+			(msicfg.msg_nvecs == 1 || msi < msicfg.msg_nvecs)) {
 		DMA_REG_WRITE(pep, ch, dir, msi_stop_low, msicfg.msg_addr_l);
 		DMA_REG_WRITE(pep, ch, dir, msi_stop_high, msicfg.msg_addr_h);
 		DMA_REG_WRITE(pep, ch, dir, msi_abort_low, msicfg.msg_addr_l);
@@ -937,27 +992,63 @@ int si_pep_copy_to_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
 		DMA_REG_WRITE(pep, ch, dir, xfersize, size);
 		DMA_REG_WRITE(pep, ch, dir, doorbell, DMA_DOORBELL_DB_START);
 
-		do { /* Wait for completion|error */
-			reg = DMA_REG_READ(pep, ch, dir, status);
-		} while ((DMA_STATUS_STATUS_MASK & reg) == DMA_STATUS_RUNNING);
+		/* Bounded: never spin forever if the host side is gone. */
+		if (readl_poll_timeout_atomic(
+			    DMA_REG_OFFSET(pep, ch, dir, status), reg,
+			    (DMA_STATUS_STATUS_MASK & reg) != DMA_STATUS_RUNNING,
+			    SI_PEP_DMA_POLL_DELAY_US, SI_PEP_DMA_TIMEOUT_US)) {
+			if (quiet)
+				goto stuck;
+			reg = DMA_REG_READ(pep, ch, dir, int_status);
+			si_err(pep, "DMA timed out: status stuck RUNNING, int "
+					"status 0x%x. From 0x%llx to 0x%llx, "
+					"size %u, msi %d",
+			       reg, src, dest, size, msi);
+stuck:
+			DMA_REG_WRITE(pep, ch, dir, doorbell,
+					DMA_DOORBELL_DB_STOP);
+			DMA_REG_WRITE(pep, ch, dir, en, 0);
+			spin_unlock_irqrestore(&pep->dma_write_lock[ch], flags);
+			return -ETIMEDOUT;
+		}
 
 		if ((DMA_STATUS_STATUS_MASK & reg) == DMA_STATUS_ABORTED) {
 			if (retry_count > 0)
 				continue;
 
+			if (quiet)
+				goto aborted;
 			reg = DMA_REG_READ(pep, ch, dir, int_status);
 			si_err(pep, "DMA Aborted: int status 0x%x. From 0x%llx "
 					"to 0x%llx, size %u, msi %d",
 			       reg, src, dest, size, msi);
-			spin_unlock(&pep->dma_write_lock[ch]);
+aborted:
+			spin_unlock_irqrestore(&pep->dma_write_lock[ch], flags);
 			return -EIO;
 		}
 		break;
 	}
 	DMA_REG_WRITE(pep, ch, dir, en, 0);
-	spin_unlock(&pep->dma_write_lock[ch]);
+	spin_unlock_irqrestore(&pep->dma_write_lock[ch], flags);
 
 	return 0;
+}
+
+int si_pep_copy_to_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
+			int ch, int msi)
+{
+	return si_pep_copy_to_host_do(pep, dest, src, size, ch, msi, false);
+}
+
+/*
+ * For a caller that holds a lock a console message could wait behind, as one
+ * on the network interface does for net_tx_lock. The failure is in the return
+ * value, for the caller to log once it is out of the lock.
+ */
+int si_pep_copy_to_host_quiet(struct si_pep_dev *pep, u64 dest, u64 src,
+			      u32 size, int ch, int msi)
+{
+	return si_pep_copy_to_host_do(pep, dest, src, size, ch, msi, true);
 }
 
 int si_pep_copy_from_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
@@ -989,9 +1080,22 @@ int si_pep_copy_from_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
 		DMA_REG_WRITE(pep, ch, dir, xfersize, size);
 		DMA_REG_WRITE(pep, ch, dir, doorbell, DMA_DOORBELL_DB_START);
 
-		do { /* Wait for completion|error */
-			reg = DMA_REG_READ(pep, ch, dir, status);
-		} while ((DMA_STATUS_STATUS_MASK & reg) == DMA_STATUS_RUNNING);
+		/* Bounded: never spin forever if the host side is gone. */
+		if (readl_poll_timeout_atomic(
+			    DMA_REG_OFFSET(pep, ch, dir, status), reg,
+			    (DMA_STATUS_STATUS_MASK & reg) != DMA_STATUS_RUNNING,
+			    SI_PEP_DMA_POLL_DELAY_US, SI_PEP_DMA_TIMEOUT_US)) {
+			reg = DMA_REG_READ(pep, ch, dir, int_status);
+			si_err(pep, "Transfer timed out: status stuck RUNNING, "
+					"int status 0x%x. From 0x%llx to 0x%llx, "
+					"size %u",
+			       reg, src, dest, size);
+			DMA_REG_WRITE(pep, ch, dir, doorbell,
+					DMA_DOORBELL_DB_STOP);
+			DMA_REG_WRITE(pep, ch, dir, en, 0);
+			spin_unlock(&pep->dma_read_lock[ch]);
+			return -ETIMEDOUT;
+		}
 
 		if ((DMA_STATUS_STATUS_MASK & reg) == DMA_STATUS_ABORTED) {
 			if (retry_count > 0)
@@ -1012,12 +1116,37 @@ int si_pep_copy_from_host(struct si_pep_dev *pep, u64 dest, u64 src, u32 size,
 	return 0;
 }
 
+/*
+ * Set channel ch, in direction dir, up to run the linked list at ll_p: enable
+ * it, clear what is pending and load the list pointer. What the channel
+ * interrupts for, and the doorbell that starts the transfer, are left to the
+ * caller because they differ between callers. Whoever calls this has the
+ * channel to itself.
+ */
+void si_pep_dma_ll_program(struct si_pep_dev *pep, int ch, int dir,
+			   dma_addr_t ll_p)
+{
+	DMA_REG_WRITE(pep, ch, dir, en, DMA_EN_ENABLE);
+	DMA_REG_WRITE(pep, ch, dir, int_clear, DMA_INT_CLEAR_INTS_MASK);
+	DMA_REG_WRITE(pep, ch, dir, control1, 0x03);
+	DMA_REG_WRITE(pep, ch, dir, cycle, 0x02);
+	DMA_REG_WRITE(pep, ch, dir, watermark_en, 0x03);
+	DMA_REG_WRITE(pep, ch, dir, xfersize, 0);
+	DMA_REG_WRITE(pep, ch, dir, sar_low, 0);
+	DMA_REG_WRITE(pep, ch, dir, sar_high, 0);
+	DMA_REG_WRITE(pep, ch, dir, dar_low, 0);
+	DMA_REG_WRITE(pep, ch, dir, dar_high, 0);
+	DMA_REG_WRITE(pep, ch, dir, llp_low, lower_32_bits(ll_p));
+	DMA_REG_WRITE(pep, ch, dir, llp_high, upper_32_bits(ll_p));
+}
+
 int si_pep_copy_do_ll(struct si_pep_dev *pep, struct si_pep_dma_ll_ctx *llctx,
 		int ch, int msi)
 {
 	int dir;
 	volatile u32 reg;
 	spinlock_t *lock;
+	unsigned long flags;
 	struct si_pep_msi_config msicfg;
 
 	if ((pep->state != SOC_STATE_RUN) && (msi == -1))
@@ -1037,22 +1166,12 @@ int si_pep_copy_do_ll(struct si_pep_dev *pep, struct si_pep_dma_ll_ctx *llctx,
 	si_dbg_dma(pep, "DMA %s with linked list on channel %d, msi %d",
 			(dir==DIR_READ)?"read":"write", ch, msi);
 
-	spin_lock(lock);
-	DMA_REG_WRITE(pep, ch, dir, en, DMA_EN_ENABLE);
-        DMA_REG_WRITE(pep, ch, dir, int_clear, DMA_INT_CLEAR_INTS_MASK);
-        DMA_REG_WRITE(pep, ch, dir, control1, 0x03);
-        DMA_REG_WRITE(pep, ch, dir, cycle, 0x02);
-        DMA_REG_WRITE(pep, ch, dir, watermark_en, 0x03);
-        DMA_REG_WRITE(pep, ch, dir, xfersize, 0);
-        DMA_REG_WRITE(pep, ch, dir, sar_low, 0);
-        DMA_REG_WRITE(pep, ch, dir, sar_high, 0);
-        DMA_REG_WRITE(pep, ch, dir, dar_low, 0);
-        DMA_REG_WRITE(pep, ch, dir, dar_high, 0);
-        DMA_REG_WRITE(pep, ch, dir, llp_low, lower_32_bits(llctx->p_dma_ll));
-        DMA_REG_WRITE(pep, ch, dir, llp_high, upper_32_bits(llctx->p_dma_ll));
+	spin_lock_irqsave(lock, flags);
+	si_pep_dma_ll_program(pep, ch, dir, llctx->p_dma_ll);
 
 	if (dir == DIR_WRITE && msi >= 0 &&
-			(si_pep_get_msi_config(pep, &msicfg) == 0)) {
+			(si_pep_get_msi_config(pep, &msicfg) == 0) &&
+			(msicfg.msg_nvecs == 1 || msi < msicfg.msg_nvecs)) {
 		DMA_REG_WRITE(pep, ch, dir, msi_stop_low, msicfg.msg_addr_l);
 		DMA_REG_WRITE(pep, ch, dir, msi_stop_high, msicfg.msg_addr_h);
 		DMA_REG_WRITE(pep, ch, dir, msi_abort_low, msicfg.msg_addr_l);
@@ -1068,23 +1187,34 @@ int si_pep_copy_do_ll(struct si_pep_dev *pep, struct si_pep_dma_ll_ctx *llctx,
 		DMA_REG_WRITE(pep, ch, dir, int_setup,
 				DMA_INT_SETUP_LAIE |
 				DMA_INT_SETUP_RAIE | DMA_INT_SETUP_RSIE);
+	} else if (llctx->quiet) {
+		DMA_REG_WRITE(pep, ch, dir, int_setup, DMA_INT_SETUP_INTS_MASK);
 	}
 
-
 	DMA_REG_WRITE(pep, ch, dir, doorbell, DMA_DOORBELL_DB_START);
-	do { /* Wait for completion|error */
-		reg = DMA_REG_READ(pep, ch, dir, status);
-	} while ((DMA_STATUS_STATUS_MASK & reg) == DMA_STATUS_RUNNING);
+	/* Bounded: never spin forever if the host side is gone. */
+	if (readl_poll_timeout_atomic(
+		    DMA_REG_OFFSET(pep, ch, dir, status), reg,
+		    (DMA_STATUS_STATUS_MASK & reg) != DMA_STATUS_RUNNING,
+		    SI_PEP_DMA_POLL_DELAY_US, SI_PEP_DMA_TIMEOUT_US)) {
+		reg = DMA_REG_READ(pep, ch, dir, int_status);
+		si_err(pep, "DMA timed out: status stuck RUNNING, INT status "
+				"0x%x, msi %d", reg, msi);
+		DMA_REG_WRITE(pep, ch, dir, doorbell, DMA_DOORBELL_DB_STOP);
+		DMA_REG_WRITE(pep, ch, dir, en, 0);
+		spin_unlock_irqrestore(lock, flags);
+		return -ETIMEDOUT;
+	}
 
 	if ((DMA_STATUS_STATUS_MASK & reg) == DMA_STATUS_ABORTED) {
 		reg = DMA_REG_READ(pep, ch, dir, int_status);
 		si_err(pep, "DMA Aborted: INT status 0x%x, msi %d", reg, msi);
-		spin_unlock(lock);
+		spin_unlock_irqrestore(lock, flags);
 		return -EIO;
 	}
 
 	DMA_REG_WRITE(pep, ch, dir, en, 0);
-	spin_unlock(lock);
+	spin_unlock_irqrestore(lock, flags);
 
 	return 0;
 }
@@ -1138,7 +1268,7 @@ static int si_pep_destroy_queue(struct si_pep_dev *pep, enum si_qtype qtype,
 			atomic_set(&pep->mwq_prev_head, 0);
 			mutex_lock(&pep->mreq_cache_mutex);
 			pep->mchdr.nreqs = 0;
-			pep->mchdr.maxreqs = SI_DWQ_CACHE_SIZE;
+			pep->mchdr.maxreqs = SI_MWQ_CACHE_SIZE;
 			pep->mchdr.head = 0;
 			pep->mchdr.tail = 0;
 			pep->mreq_cached = 0;
@@ -1192,7 +1322,7 @@ static int si_pep_destroy_queue(struct si_pep_dev *pep, enum si_qtype qtype,
 			dma_free_coherent(dev, size, pep->mrqe_cache,
 					pep->p_mrqe_cache);
 			pep->mrqe_cache = NULL;
-			pep->mrqe_cache = 0;
+			pep->p_mrqe_cache = 0;
 			mq_set_rq_head(pep, 0);
 		}
 		break;
@@ -1258,9 +1388,18 @@ static int si_pep_create_queue(struct si_pep_dev *pep, struct si_qctx *ctx)
 		ret = si_pep_copy_from_host(pep, pep->p_mrqe_cache,
 				ctx->qe_pb, size, MWQ_CACHE_DMA_CH);
 		if (ret) {
+			/*
+			 * Leave nothing behind for the delete that follows:
+			 * the context was copied in above with the status the
+			 * host gave it, and the cache has to be freed here
+			 * and not again in si_pep_destroy_queue().
+			 */
 			si_err(pep, "Failed to cache rqes");
 			dma_free_coherent(dev, size, pep->mrqe_cache,
 					pep->p_mrqe_cache);
+			pep->mrqe_cache = NULL;
+			pep->p_mrqe_cache = 0;
+			pep->mrq_ctx->status = SI_INVALID;
 			return -EIO;
 		}
 		pep->mrq_ctx->status = SI_ACTIVE;
@@ -1324,9 +1463,13 @@ static int si_pep_create_queue(struct si_pep_dev *pep, struct si_qctx *ctx)
 		ret = si_pep_copy_from_host(pep, pep->p_drqe_caches[qid],
 				ctx->qe_pb, size, DWQ_CACHE_DMA_CH);
 		if (ret) {
+			/* As for the management queue above */
 			si_err(pep, "Failed to cache rqes");
 			dma_free_coherent(dev, size, pep->drqe_caches[qid],
 					pep->p_drqe_caches[qid]);
+			pep->drqe_caches[qid] = NULL;
+			pep->p_drqe_caches[qid] = 0;
+			pep->drq_ctx[qid]->status = SI_INVALID;
 			return -EIO;
 		}
 
@@ -1374,6 +1517,7 @@ static int si_pep_abort_io(struct si_pep_dev *pep, void *params)
 	struct si_wqe wqe = { 0 };
 	struct si_io io = { 0 };
 	struct mutex *m;
+	bool found = false;
 
 	qidx = (struct si_qe_id *)params;
 	if (qidx->qtype == SI_MWQ) {
@@ -1405,17 +1549,51 @@ static int si_pep_abort_io(struct si_pep_dev *pep, void *params)
 			continue;
 		}
 
-		si_qerr(qdev, "Aborting unprocessed request %d. Seq: %u",
-				idx, wqe.seqid);
 		memcpy(&wqe, &rcache[head], sizeof(struct si_wqe));
 		memset(&rcache[head], 0, sizeof(struct si_wqe));
+		found = true;
 		qdev->stats.abort_reqs_suc++;
+		si_qerr(qdev, "Aborting unprocessed request %d. Seq: %u",
+				idx, wqe.seqid);
 		break;
 	}
 	mutex_unlock(m);
 
-	if (wqe.qidx.qtype == 0)
+	/*
+	 * Only the endpoint owes a response for a request it still held.
+	 *
+	 * When the scan does not find the index, the application has already
+	 * taken the request out of the cache and will answer it itself. The
+	 * old code sent an aborted completion anyway, built from a wqe that
+	 * was still zeroed -- so the host received two completions for one
+	 * request, the first of them carrying cmd 0. Report the miss and
+	 * leave the request to the application that owns it.
+	 */
+	if (!found) {
 		qdev->stats.abort_reqs_fail++;
+		si_qdbg(qdev, "Abort of request %d: already consumed", idx);
+		return -ENOENT;
+	}
+
+	/*
+	 * Return the host's work queue slot, and with it the transmit buffer
+	 * the request referenced.
+	 *
+	 * Nothing else on this path does: the tail is only advanced by
+	 * si_pep_read_request() for a request with no data, and by
+	 * SI_GET_DATA once the data has been pulled, and an aborted request
+	 * reaches neither. The host frees a transmit buffer when the tail
+	 * sweeps past its work queue entry, so without this the buffer comes
+	 * back only when some later request is consumed and the absolute
+	 * tail write carries it along. On a queue that has gone idle --
+	 * which is exactly the state an abort tends to leave behind --
+	 * nothing sweeps, and the buffer is held until the queue is torn
+	 * down.
+	 */
+	if (queue_is_data(qdev))
+		dq_set_wq_tail(pep, qidx->qid, idx + 1);
+	else
+		mq_set_wq_tail(pep, idx + 1);
 
 	io.cmd = wqe.cmd;
 	io.resp = SI_RES_ABORTED;
@@ -1434,7 +1612,8 @@ static int si_pep_handle_setup_soc_cmd(struct si_pep_dev *pep,
 	return SI_RES_SUCCESS;
 }
 
-static int si_pep_setup_netintf(struct si_pep_dev *pep, dma_addr_t haddr)
+static int si_pep_setup_netintf(struct si_pep_dev *pep, dma_addr_t haddr,
+		u32 features)
 {
 	int ret;
 
@@ -1449,7 +1628,7 @@ static int si_pep_setup_netintf(struct si_pep_dev *pep, dma_addr_t haddr)
 	}
 
 	si_minfo(pep, "Creating veth interface");
-	ret = si_pep_net_init(pep, haddr);
+	ret = si_pep_net_init(pep, haddr, features);
 	if (ret) {
 		si_err(pep, "Failed to setup network interface");
 		return ret;
@@ -1608,6 +1787,8 @@ void si_pep_handle_mcmd(struct si_pep_dev *pep, struct si_mcmd *mcmd_in)
 	struct si_mcmd mcmd = { 0 };
 	struct si_mcmd_res mcmd_res = { 0 };
 	struct si_mcmd_timesync_params *time;
+	struct si_mcmd_set_nethw_addr_params *nethw;
+	struct si_mcmd_set_nethw_addr_res nethw_res;
 	struct timespec64 tp;
 	struct timezone tz;
 	struct si_qctx *ctx;
@@ -1710,20 +1891,37 @@ void si_pep_handle_mcmd(struct si_pep_dev *pep, struct si_mcmd *mcmd_in)
 		pep->card_num = *((u32 *)params);
 		break;
 	case SI_MCMD_SET_NETHWADDR:
-		haddr = ((struct si_mcmd_set_nethw_addr_params *)params)->
-			nethw_addr_high;
-		haddr = (haddr << 32) |
-			((struct si_mcmd_set_nethw_addr_params *)params)->
-			nethw_addr_low;
+		nethw = (struct si_mcmd_set_nethw_addr_params *)params;
+		haddr = nethw->nethw_addr_high;
+		haddr = (haddr << 32) | nethw->nethw_addr_low;
 		si_dbg_net(pep, "Net hardware data on host 0x%llx", haddr);
 
-		if (haddr != 0) {
-			ret = si_pep_setup_netintf(pep, haddr);
+		if (haddr == 0) {
+			si_pep_teardown_netintf(pep);
+			break;
+		}
+
+		/*
+		 * A host that predates the feature negotiation sends the two
+		 * address words and nothing else. It gets no features and no
+		 * answer, exactly as before.
+		 */
+		if (mcmd.param_size < sizeof(*nethw)) {
+			ret = si_pep_setup_netintf(pep, haddr, 0);
 			if (ret)
 				res = SI_RES_FAILURE;
-		} else {
-			si_pep_teardown_netintf(pep);
+			break;
 		}
+
+		ret = si_pep_setup_netintf(pep, haddr, nethw->features);
+		if (ret) {
+			res = SI_RES_FAILURE;
+			break;
+		}
+
+		nethw_res.features = pep->net_dev.features;
+		memcpy(mcmd_res.params, &nethw_res, sizeof(nethw_res));
+		mcmd_res.param_size = sizeof(nethw_res);
 		break;
 	case SI_MCMD_SET_NETIPADDR:
 		ret = si_pep_set_netintf_ifaddr(pep,
@@ -1741,7 +1939,6 @@ mcmd_restart:
 	mcmd_res.res = res;
 	mcmd_res.errno = ret;
 	mcmd_res.seq_id = mcmd.seq_id;
-	mcmd_res.param_size = 0;
 	pep->drv_ops->resp_mcmd(pep, &mcmd_res);
 	si_minfo(pep, "Command 0x%04x, Response 0x%x", mcmd_res.cmd,
 			mcmd_res.res);
@@ -1793,7 +1990,7 @@ static void si_pep_process_timestamp(struct si_pep_dev *pep, u8 action,
 		ts->ts_index = ts_index;
 		break;
 	default:
-		si_err(pep, "Invalid action code: %d\n", action);
+		si_err(pep, "Invalid action code: %d", action);
 	}
 	return;
 }
@@ -1939,9 +2136,15 @@ end:
 	return cached;
 }
 
-void si_pep_get_reqs_from_host(struct si_pep_dev *pep, enum si_qtype t, int qid)
+/*
+ * Fetch whatever the host has queued that this end has not seen. Returns
+ * the number of requests cached, which the caller needs to tell "nothing
+ * was waiting" from "something was waiting and would not fit".
+ */
+int si_pep_get_reqs_from_host(struct si_pep_dev *pep, enum si_qtype t, int qid)
 {
 	int cached;
+	int total = 0;
 	int to_cache;
 	u16 head;
 	u16 tail;
@@ -1962,11 +2165,11 @@ void si_pep_get_reqs_from_host(struct si_pep_dev *pep, enum si_qtype t, int qid)
 		head = dq_get_wq_head(pep, qid);
 		tail = dq_get_wq_tail(pep, qid);
 	} else
-		return;
+		return 0;
 
 	wq_phead = atomic_read(wq_phead_ptr);
 	if (head == 0 || head == tail || wq_phead == head)
-		return;
+		return 0;
 
 	si_dinfo(pep, "%s queue %d, head %u, tail %u, prev head %u",
 			si_pep_qtype_str(t), qid, head, tail, wq_phead);
@@ -1976,22 +2179,25 @@ void si_pep_get_reqs_from_host(struct si_pep_dev *pep, enum si_qtype t, int qid)
 		to_cache = (wqctx->entries - wq_phead);
 		if (to_cache) {
 			cached = si_pep_cache_wqe(pep, t, qid, wq_phead, to_cache);
+			total += cached;
 			if (cached < to_cache) {
 				atomic_set(wq_phead_ptr, wq_phead + cached);
-				return;
+				return total;
 			}
 		}
 		to_cache = head;
 		cached = si_pep_cache_wqe(pep, t, qid, 0, to_cache);
+		total += cached;
 		atomic_set(wq_phead_ptr, cached);
 	} else {
 		nwqs = head - wq_phead;
 		to_cache = nwqs;
 		cached = si_pep_cache_wqe(pep, t, qid, wq_phead, to_cache);
+		total += cached;
 		atomic_set(wq_phead_ptr, wq_phead + cached);
 	}
 
-	return;
+	return total;
 }
 
 #define MOD_PCIE_SYS_PCIE0_LINK_DBG2_OFFSET	(0x1000b4)
@@ -2031,18 +2237,47 @@ static int si_pep_recover_from_link_down(void *arg)
 	/* We could wait here for smlh link up */
 	msleep(100);
 
+	/*
+	 * Rebuild under the lock the link-down handler and si_pep_remove()
+	 * take, so neither interleaves with a half-built driver. remove()
+	 * clears 'initialized' before it starts taking things apart; a
+	 * rebuild is pointless then, and leaving recovery_mode set tells
+	 * remove() there is nothing of local_init()'s to undo.
+	 *
+	 * It also tells remove() to kthread_stop() this thread, so the
+	 * thread must not return before that: a kthread that returns is
+	 * reaped and its task_struct freed, leaving remove() nothing to
+	 * stop. Sleep until told instead, as the poll loop above does.
+	 */
+	mutex_lock(&pep->state_lock);
+	if (!pep->initialized) {
+		mutex_unlock(&pep->state_lock);
+		set_current_state(TASK_INTERRUPTIBLE);
+		while (!kthread_should_stop()) {
+			schedule();
+			set_current_state(TASK_INTERRUPTIBLE);
+		}
+		__set_current_state(TASK_RUNNING);
+		return 0;
+	}
+
 	if (use_driver_loopback) {
-		t_params[i].pep = pep;
-		t_params[i].qid = i;
-		pep->loopback_hdlr[i] =
-			kthread_create(si_pep_data_loopback_handler,
-					&t_params[i],
-					"sima-loopback-hdlr-%d", i);
+		for (i = 0; i < SI_MAX_DQS; i++) {
+			t_params[i].pep = pep;
+			t_params[i].qid = i;
+			pep->loopback_hdlr[i] =
+				kthread_create(si_pep_data_loopback_handler,
+						&t_params[i],
+						"sima-loopback-hdlr-%d", i);
+		}
 	}
 
 	pep->drv_ops->local_init(pep);
+	if (pep->drv_ops->enable_doorbells)
+		pep->drv_ops->enable_doorbells(pep);
 	pep->drv_ops->set_soc_state(pep, SOC_STATE_RUN);
 	pep->recovery_mode = 0;
+	mutex_unlock(&pep->state_lock);
 
 	return 0;
 }
@@ -2057,26 +2292,25 @@ static void si_pep_link_down_cleanup(struct si_pep_dev *pep)
 		return;
 	}
 
+	/*
+	 * Same ordering as si_pep_remove(): the link may be down, but the
+	 * doorbell interrupt is an SoC-side line and keeps being delivered.
+	 * Mask it before local_deinit() frees the workqueue behind it, and
+	 * leave it masked until the recovery thread has rebuilt everything.
+	 */
+	if (pep->drv_ops->disable_doorbells)
+		pep->drv_ops->disable_doorbells(pep);
+
 	si_pep_teardown_netintf(pep);
 	pep->drv_ops->local_deinit(pep);
 
 	if (use_driver_loopback) {
 		for (i = 0; i < SI_MAX_DQS; i++) {
 			if (pep->loopback_hdlr[i]) {
-				kthread_stop(pep->loopback_hdlr[i]);
 				wake_up_interruptible(&pep->dreq_wait[i]);
+				kthread_stop(pep->loopback_hdlr[i]);
 			}
 		}
-	}
-
-	if (pep->recovery_mode == 0) {
-		pep->recovery_thread = kthread_run(si_pep_recover_from_link_down,
-				pep, "simaai_ep_recovery");
-		if (IS_ERR(pep->recovery_thread)) {
-			si_err(pep, "Failed to create recovery thread. Reboot SoC");
-			return;
-		}
-		pep->recovery_mode = 1;
 	}
 
 	i = 0;
@@ -2105,12 +2339,21 @@ static void si_pep_link_down_cleanup(struct si_pep_dev *pep)
 		if (ctx->status != SI_INVALID)
 			si_pep_destroy_queue(pep, SI_DCQ, &i);
 	}
+
+	if (pep->recovery_mode == 0) {
+		pep->recovery_thread = kthread_run(si_pep_recover_from_link_down,
+				pep, "simaai_ep_recovery");
+		if (IS_ERR(pep->recovery_thread)) {
+			si_err(pep, "Failed to create recovery thread. Reboot SoC");
+			return;
+		}
+		pep->recovery_mode = 1;
+	}
 }
 
 static void si_pep_link_down_handler(struct work_struct *lwork)
 {
 	struct si_pep_dev *pep;
-	u32 reg;
 	
 	pep = link_down_work_to_pep_dev(lwork);
 	if (unlikely(!pep)) {
@@ -2118,9 +2361,26 @@ static void si_pep_link_down_handler(struct work_struct *lwork)
 		return;
 	}
 
+	/*
+	 * The event is masked until probe has built everything this path
+	 * tears down, and masked again before remove() starts taking it
+	 * apart, so normally there is always a driver here to clean up.
+	 * 'initialized' is the backstop for whatever still gets through --
+	 * an event that races one of those edges, or a spurious one -- and
+	 * the lock keeps the cleanup from interleaving with the recovery
+	 * rebuild or with remove().
+	 */
+	mutex_lock(&pep->state_lock);
+	if (!pep->initialized) {
+		si_err(pep, "PCIe Link down before the driver is ready. Ignored.");
+		mutex_unlock(&pep->state_lock);
+		return;
+	}
+
 	si_err(pep, "PCIe Link down. Cleaning up state.");
 	/* Reading any pcie registers at this point might cause abort */
 	si_pep_link_down_cleanup(pep);
+	mutex_unlock(&pep->state_lock);
 }
 
 static void si_pep_dbg_dump_bufid(struct si_pep_dev *pep,
@@ -2225,7 +2485,7 @@ static void si_pep_dbg_dump_buf(struct si_pep_dev *pep, struct si_buffer *buf,
 	}
 
 	si_pep_dbg_dump_bufid(pep, &buf->bid, prefix);
-	si_dbg_dump(pep, "%s: Address Type: %s, Address: 0x%px, Size: %lu, "
+	si_dbg_dump(pep, "%s: Address Type: %s, Address: 0x%llx, Size: %llu, "
 			"Total Size: %u, Entries: %u", prefix, addrtype,
 			buf->addr, buf->size, buf->tsize, buf->nents);
 }
@@ -2236,7 +2496,10 @@ static int si_pep_get_rqe(struct si_pep_dev *pep, enum si_qtype t, u32 qid,
 	int c;
 	u32 nqueues;
 	u32 head;
+	u32 nhead;
 	u32 tail;
+	unsigned long flags;
+	spinlock_t *alloc_lock;
 	struct si_qctx *ctx;
 	struct si_rqe *rqe_cache;
 
@@ -2244,10 +2507,13 @@ static int si_pep_get_rqe(struct si_pep_dev *pep, enum si_qtype t, u32 qid,
 		ctx = pep->drq_ctx[qid];
 		nqueues = SI_MAX_DQS;
 		rqe_cache = pep->drqe_caches[qid];
+		alloc_lock = &pep->rqe_alloc_lock[(qid < SI_MAX_DQS) ?
+				qid + 1 : 0];
 	} else if (si_pep_is_mgmt_queue(t)) {
 		ctx = pep->mrq_ctx;
 		nqueues = 1;
 		rqe_cache = pep->mrqe_cache;
+		alloc_lock = &pep->rqe_alloc_lock[0];
 	} else {
 		si_err(pep, "Invalid queue type %u, queue %u", t, qid);
 		return -EINVAL;
@@ -2265,14 +2531,43 @@ static int si_pep_get_rqe(struct si_pep_dev *pep, enum si_qtype t, u32 qid,
 		return -ENOENT;
 	}
 
+	/*
+	 * Claim the slot under a lock rather than by read-modify-write.
+	 *
+	 * Reading head, handing that entry out and then storing head + 1 is
+	 * three separate operations on an atomic_t, which makes the type
+	 * atomic in name only. Nothing serialises the callers: any process
+	 * holding the queue node can transmit, and the SoC originates frames
+	 * of its own that never began as a host request. Two senders can
+	 * read the same head and both be handed the same RQE, and so the
+	 * same host receive buffer. Both then DMA into it, the host sees one
+	 * transfer land on top of the other, and neither side reports an
+	 * error -- the loss shows up much later as a truncated or garbled
+	 * frame with no obvious origin.
+	 *
+	 * It has to be a lock, not a cmpxchg on ctx->head. ctx points into
+	 * the OCM window, which is ioremapped and therefore Device memory,
+	 * where arm64 does not support atomic read-modify-write. A cmpxchg
+	 * there faults immediately -- synchronous external abort -- so the
+	 * serialisation lives in ordinary memory and the accesses below stay
+	 * plain loads and stores.
+	 */
+	spin_lock_irqsave(alloc_lock, flags);
 	tail = atomic_read(&ctx->tail);
 	head = atomic_read(&ctx->head);
 	c = CIRC_SPACE(head, tail, ctx->entries);
 	if (c <= 1) {
+		spin_unlock_irqrestore(alloc_lock, flags);
 		si_dbg(pep, "No free rq entries in %u. Head %u, "
 			"Tail %u, Entries %u", qid, head, tail, ctx->entries);
 		return -EAGAIN;
 	}
+
+	nhead = head + 1;
+	if (nhead >= ctx->entries)
+		nhead = 0;
+	atomic_set(&ctx->head, nhead);
+	spin_unlock_irqrestore(alloc_lock, flags);
 
 	*rqe = &rqe_cache[head];
 	(*rqe)->qidx.qid = qid;
@@ -2284,10 +2579,6 @@ static int si_pep_get_rqe(struct si_pep_dev *pep, enum si_qtype t, u32 qid,
 
 	si_dbg(pep, "%s queue %u, Tail %u, Head: %u",
 		si_pep_qtype_str((*rqe)->qidx.qtype), qid, tail, head);
-	head++;
-	if (head >= ctx->entries)
-		head = 0;
-	atomic_set(&ctx->head, head);
 
 	return 0;
 }
@@ -2363,7 +2654,10 @@ static int si_pep_get_cqe(struct si_pep_dev *pep, enum si_qtype qtype,
 	int c;
 	u32 nqueues;
 	u32 head;
+	u32 nhead;
 	u32 tail;
+	unsigned long flags;
+	spinlock_t *alloc_lock;
 	struct si_qctx *ctx;
 	char *qstr;
 
@@ -2371,10 +2665,13 @@ static int si_pep_get_cqe(struct si_pep_dev *pep, enum si_qtype qtype,
 		ctx = pep->dcq_ctx[qid];
 		nqueues = SI_MAX_DQS;
 		qstr = "Data";
+		alloc_lock = &pep->cqe_alloc_lock[(qid < SI_MAX_DQS) ?
+				qid + 1 : 0];
 	} else if (si_pep_is_mgmt_queue(qtype)) {
 		ctx = pep->mcq_ctx;
 		nqueues = 1;
 		qstr = "Management";
+		alloc_lock = &pep->cqe_alloc_lock[0];
 	} else {
 		si_err(pep, "Invalid queue type %u, queue %u", qtype, qid);
 		return -EINVAL;
@@ -2391,14 +2688,39 @@ static int si_pep_get_cqe(struct si_pep_dev *pep, enum si_qtype qtype,
 		return -ENOENT;
 	}
 
+	/*
+	 * Claim the slot under a lock, for the same reason as
+	 * si_pep_get_rqe(): the read of head, the use of that index and the
+	 * store of head + 1 are three separate operations, and nothing
+	 * serialises the callers. Two responses that race here are assigned
+	 * the same completion slot, so the second si_pep_set_cqe() DMAs over
+	 * the first before the host has read it. The host is then left
+	 * blocked in read() waiting for a reply this end believes it already
+	 * sent, and the queue stalls with no error logged anywhere.
+	 *
+	 * This is reachable whenever more than one writer is active on a
+	 * queue, which is the normal case on the management queue.
+	 *
+	 * A cmpxchg on ctx->head is not an option: ctx is in the ioremapped
+	 * OCM window, which is Device memory, and arm64 raises a synchronous
+	 * external abort for an atomic read-modify-write there.
+	 */
+	spin_lock_irqsave(alloc_lock, flags);
 	tail = atomic_read(&ctx->tail);
 	head = atomic_read(&ctx->head);
 	c = CIRC_SPACE(head, tail, ctx->entries);
 	if (c <= 1) {
+		spin_unlock_irqrestore(alloc_lock, flags);
 		si_dinfo(pep, "%s queue %u, No free entries. Head %u, Tail %u",
 				qstr, qid, head, tail);
 		return -EAGAIN;
 	}
+
+	nhead = head + 1;
+	if (nhead >= ctx->entries)
+		nhead = 0;
+	atomic_set(&ctx->head, nhead);
+	spin_unlock_irqrestore(alloc_lock, flags);
 
 	cqe->qidx.qid = qid;
 	cqe->qidx.idx = head;
@@ -2410,11 +2732,6 @@ static int si_pep_get_cqe(struct si_pep_dev *pep, enum si_qtype qtype,
 
 	si_dinfo(pep, "%s queue %u, Tail %u, Head: %u",
 		si_pep_qtype_str(cqe->qidx.qtype), qid, tail, head);
-
-	head++;
-	if (head >= ctx->entries)
-		head = 0;
-	atomic_set(&ctx->head, head);
 
 	return 0;
 }
@@ -2477,9 +2794,8 @@ static int si_pep_set_cqe(struct si_pep_dev *pep, struct si_cqe *cqe)
 }
 
 static int si_pep_get_buff_arg(struct si_pep_dev *pep, struct si_buffer *buf,
-		void **addrs, size_t **sizes)
+		u64 **addrs, u64 **sizes)
 {
-	struct device *dev = pep->dev;
 	int n = buf->nents;
 	int ret;
 
@@ -2488,25 +2804,27 @@ static int si_pep_get_buff_arg(struct si_pep_dev *pep, struct si_buffer *buf,
 		return -E2BIG;
 	}
 
-	*addrs = devm_kmalloc_array(dev, n, sizeof(void __user*), GFP_KERNEL);
+	*addrs = kmalloc_array(n, sizeof(u64), GFP_KERNEL);
 	if (*addrs == NULL) {
 		si_err(pep, "Failed to allocate argument list");
 		return -ENOMEM;
 	}
 
-	*sizes = devm_kmalloc_array(dev, n, sizeof(size_t), GFP_KERNEL);
+	*sizes = kmalloc_array(n, sizeof(u64), GFP_KERNEL);
 	if (*sizes == NULL) {
 		si_err(pep, "Failed to allocate argument list for sizes");
 		ret = -ENOMEM;
 		goto error_salloc;
 	}
 
-	if (copy_from_user(*addrs, buf->addrs, n * sizeof(void __user *))) {
+	if (copy_from_user(*addrs, u64_to_user_ptr(buf->addr),
+				n * sizeof(u64))) {
 		ret = -EFAULT;
 		goto error_copy_from;
 	}
 
-	if (copy_from_user(*sizes, buf->sizes, n * sizeof(size_t))) {
+	if (copy_from_user(*sizes, u64_to_user_ptr(buf->size),
+				n * sizeof(u64))) {
 		ret = -EFAULT;
 		goto error_copy_from;
 	}
@@ -2514,9 +2832,11 @@ static int si_pep_get_buff_arg(struct si_pep_dev *pep, struct si_buffer *buf,
 	return 0;
 
 error_copy_from:
-	devm_kfree(dev, *sizes);
+	kfree(*sizes);
+	*sizes = NULL;
 error_salloc:
-	devm_kfree(dev, *addrs);
+	kfree(*addrs);
+	*addrs = NULL;
 
 	return ret;
 }
@@ -2609,10 +2929,282 @@ static void si_pep_free_dma_ll_cache(struct si_pep_qdev *qdev)
 	qdev->ll_cache_size = 0;
 	clear_bit(0, &qdev->ll_busy);
 }
+
+/*
+ * Obtain a coherent scratch buffer for copying in a remote SGE list. Same
+ * reuse strategy as si_pep_get_dma_ll_buf(): the queue keeps one buffer and
+ * grows it on demand instead of allocating and freeing one per buffer on the
+ * transfer path.
+ */
+static int si_pep_get_sge_buf(struct si_pep_qdev *qdev, size_t size,
+		struct si_sge **buf, dma_addr_t *dma, bool *cached)
+{
+	struct si_pep_dev *pep = qdev->pep;
+	void *b;
+	dma_addr_t d;
+
+	if (!test_and_set_bit(0, &qdev->sge_busy)) {
+		if (qdev->sge_cache && qdev->sge_cache_size >= size) {
+			*buf = qdev->sge_cache;
+			*dma = qdev->sge_cache_dma;
+			*cached = true;
+			return 0;
+		}
+
+		/* too small (or first use): grow it and keep the new one */
+		b = dma_alloc_coherent(pep->dev, size, &d, GFP_KERNEL);
+		if (b == NULL) {
+			clear_bit(0, &qdev->sge_busy);
+			return -ENOMEM;
+		}
+		if (qdev->sge_cache)
+			dma_free_coherent(pep->dev, qdev->sge_cache_size,
+					qdev->sge_cache, qdev->sge_cache_dma);
+		qdev->sge_cache = b;
+		qdev->sge_cache_dma = d;
+		qdev->sge_cache_size = size;
+		*buf = b;
+		*dma = d;
+		*cached = true;
+		return 0;
+	}
+
+	/* cached buffer is in use by another transfer on this queue */
+	b = dma_alloc_coherent(pep->dev, size, &d, GFP_KERNEL);
+	if (b == NULL)
+		return -ENOMEM;
+	*buf = b;
+	*dma = d;
+	*cached = false;
+	return 0;
+}
+
+static void si_pep_put_sge_buf(struct si_pep_qdev *qdev, struct si_sge *buf,
+		dma_addr_t dma, size_t size, bool cached)
+{
+	if (cached) {
+		/* buffer stays with the queue; just release the claim */
+		clear_bit(0, &qdev->sge_busy);
+		return;
+	}
+
+	dma_free_coherent(qdev->pep->dev, size, buf, dma);
+}
+
+/* Release a queue's cached SGE scratch buffer (driver teardown). */
+static void si_pep_free_sge_cache(struct si_pep_qdev *qdev)
+{
+	if (qdev->sge_cache == NULL)
+		return;
+
+	dma_free_coherent(qdev->pep->dev, qdev->sge_cache_size,
+			qdev->sge_cache, qdev->sge_cache_dma);
+	qdev->sge_cache = NULL;
+	qdev->sge_cache_dma = 0;
+	qdev->sge_cache_size = 0;
+	clear_bit(0, &qdev->sge_busy);
+}
 	
-static void si_pep_unmap_user_ptr_single(struct si_pep_dev *pep,
+/*
+ * Find a cached attachment for @dbuf in @dir. The dma_buf pointer is the
+ * identity: fd numbers are recycled, so an application that closes dma-buf fd
+ * 7 and allocates another buffer that lands on fd 7 must not find the old
+ * entry. Caller holds qdev->dbuf_cache_lock.
+ */
+static struct si_pep_dbuf_cache_ent *si_pep_dbuf_cache_find(
+		struct si_pep_qdev *qdev, struct dma_buf *dbuf,
+		enum dma_data_direction dir)
+{
+	int idx;
+
+	for (idx = 0; idx < SI_PEP_DBUF_CACHE_SIZE; idx++) {
+		struct si_pep_dbuf_cache_ent *ent = &qdev->dbuf_cache[idx];
+
+		if (ent->dbuf == dbuf && ent->dir == dir)
+			return ent;
+	}
+
+	return NULL;
+}
+
+/*
+ * Pick the slot a new attachment goes into: a free one, or failing that the
+ * least recently used entry that no transfer is holding. Returns NULL if every
+ * entry is in flight, in which case the caller keeps its mapping private.
+ * Caller holds qdev->dbuf_cache_lock.
+ */
+static struct si_pep_dbuf_cache_ent *si_pep_dbuf_cache_victim(
+		struct si_pep_qdev *qdev)
+{
+	struct si_pep_dbuf_cache_ent *victim = NULL;
+	int idx;
+
+	for (idx = 0; idx < SI_PEP_DBUF_CACHE_SIZE; idx++) {
+		struct si_pep_dbuf_cache_ent *ent = &qdev->dbuf_cache[idx];
+
+		if (ent->dbuf == NULL)
+			return ent;
+
+		if (ent->inuse)
+			continue;
+
+		if (victim == NULL || ent->stamp < victim->stamp)
+			victim = ent;
+	}
+
+	return victim;
+}
+
+/*
+ * Drop an attachment that is no longer reachable from the cache. Takes a copy
+ * of the entry rather than a pointer to a live slot, so this runs with
+ * qdev->dbuf_cache_lock dropped: the exporter callbacks can sleep and must not
+ * be called under the cache lock.
+ */
+static void si_pep_dbuf_cache_release(struct si_pep_dbuf_cache_ent *ent)
+{
+	dma_buf_unmap_attachment_unlocked(ent->attach, ent->sgt, ent->dir);
+	dma_buf_detach(ent->dbuf, ent->attach);
+	dma_buf_put(ent->dbuf);
+}
+
+/* Point a transfer's buffer map at a cache entry it has already claimed. */
+static void si_pep_dbuf_map_from_ent(struct si_pep_userbuf_map *ubmap,
+		struct si_pep_dbuf_cache_ent *ent, size_t size)
+{
+	ubmap->dbuf_ent = ent;
+	ubmap->dbuf = ent->dbuf;
+	ubmap->dbuf_attach = ent->attach;
+	ubmap->dbuf_sgt = ent->sgt;
+	ubmap->nr_sgents = ent->sgt->nents;
+	ubmap->total_size = size;
+	ubmap->dir = ent->dir;
+}
+
+/*
+ * Whether the CPU-side DMA sync helpers may be used on an exporter's mapping.
+ *
+ * dma_sync_sgtable_*() reaches the memory as phys_to_virt(sg_dma_address()),
+ * so it is only valid for scatterlists whose pages live in the kernel linear
+ * map. The carveout heap (/dev/dma_heap/simaai,dms) maps a no-map reserved
+ * region by physical address with dma_map_resource() and never sets a page on
+ * the scatterlist entry: the DMA address is real, but its linear-map alias was
+ * never mapped, so the maintenance faults on the first "dc ivac" -- which
+ * dcache_inval_poc() issues even for a zero-length range.
+ *
+ * Those buffers do not need anything from us anyway. The carveout heap keeps
+ * its own memremap()ed alias and maintains the caches through it in
+ * begin/end_cpu_access, i.e. on DMA_BUF_IOCTL_SYNC from userspace, which this
+ * cache does not disturb. Testing sg_page() rather than the heap keeps this
+ * about the property that actually matters.
+ */
+static bool si_pep_dbuf_sgt_is_page_backed(struct sg_table *sgt)
+{
+	return sgt->sgl != NULL && sg_page(sgt->sgl) != NULL;
+}
+
+/*
+ * Hand an already-mapped cache entry to a transfer.
+ *
+ * The device is not IO-coherent (no dma-coherent property on the endpoint
+ * node), and the dma_buf_map_attachment() this cache skips used to perform the
+ * cache maintenance for every transfer as a side effect of dma_map_sgtable().
+ * Reusing a mapping therefore has to reissue that maintenance by hand, or the
+ * eDMA reads data still dirty in the CPU caches. This mirrors what map does:
+ * a clean for DMA_TO_DEVICE, an invalidate for DMA_FROM_DEVICE.
+ *
+ * Only the page-backed heaps -- linux,cma and system -- both need this and can
+ * survive it; see si_pep_dbuf_sgt_is_page_backed().
+ */
+static void si_pep_dbuf_reuse_ent(struct si_pep_dev *pep,
+		struct si_pep_userbuf_map *ubmap,
+		struct si_pep_dbuf_cache_ent *ent, size_t size)
+{
+	if (si_pep_dbuf_sgt_is_page_backed(ent->sgt))
+		dma_sync_sgtable_for_device(pep->dev, ent->sgt, ent->dir);
+	si_pep_dbuf_map_from_ent(ubmap, ent, size);
+}
+
+/*
+ * Release every idle attachment held by a queue. Called when the queue device
+ * is closed, which is the only correct point: the attachments are bound to
+ * this device and outlive individual transfers.
+ *
+ * The queue device can be opened more than once and opens are not refcounted,
+ * so this runs on every close, not just the last one: closing one fd drops the
+ * idle attachments another fd had warmed, which costs that fd an attach and a
+ * map on its next transfer but is otherwise harmless.
+ *
+ * A transfer submitted through another fd may still be using an entry. Those
+ * are left in place and released by a later flush; unmapping under an
+ * in-flight DMA would be far worse than holding the reference a while longer.
+ */
+static void si_pep_dbuf_cache_flush(struct si_pep_qdev *qdev)
+{
+	/* one slot per cache entry, so a full cache is drained in one pass */
+	struct si_pep_dbuf_cache_ent stale[SI_PEP_DBUF_CACHE_SIZE];
+	int nstale = 0;
+	int idx;
+
+	mutex_lock(&qdev->dbuf_cache_lock);
+	for (idx = 0; idx < SI_PEP_DBUF_CACHE_SIZE; idx++) {
+		struct si_pep_dbuf_cache_ent *ent = &qdev->dbuf_cache[idx];
+
+		if (ent->dbuf == NULL)
+			continue;
+
+		if (ent->inuse) {
+			si_qdbg(qdev, "dma-buf attachment still in use, deferring release");
+			continue;
+		}
+
+		stale[nstale++] = *ent;
+		memset(ent, 0, sizeof(*ent));
+	}
+	mutex_unlock(&qdev->dbuf_cache_lock);
+
+	for (idx = 0; idx < nstale; idx++)
+		si_pep_dbuf_cache_release(&stale[idx]);
+}
+
+static void si_pep_unmap_user_ptr_single(struct si_pep_qdev *qdev,
 		struct si_pep_userbuf_map *ubmap)
 {
+	struct si_pep_dev *pep = qdev->pep;
+
+	if (ubmap->dbuf_ent) {
+		/*
+		 * Borrowed from the queue's cache, so the mapping stays. Take
+		 * over the completion-side maintenance that dma_unmap_sgtable()
+		 * used to do, while the claim on the entry still keeps it from
+		 * being evicted, then drop the claim.
+		 */
+		if (si_pep_dbuf_sgt_is_page_backed(ubmap->dbuf_sgt))
+			dma_sync_sgtable_for_cpu(pep->dev, ubmap->dbuf_sgt,
+					ubmap->dir);
+		mutex_lock(&qdev->dbuf_cache_lock);
+		ubmap->dbuf_ent->inuse--;
+		mutex_unlock(&qdev->dbuf_cache_lock);
+		ubmap->dbuf_ent = NULL;
+		ubmap->dbuf_sgt = NULL;
+		ubmap->dbuf_attach = NULL;
+		ubmap->dbuf = NULL;
+		ubmap->nr_sgents = 0;
+		return;
+	}
+
+	if (ubmap->dbuf) {
+		dma_buf_unmap_attachment_unlocked(ubmap->dbuf_attach,
+				ubmap->dbuf_sgt, ubmap->dir);
+		dma_buf_detach(ubmap->dbuf, ubmap->dbuf_attach);
+		dma_buf_put(ubmap->dbuf);
+		ubmap->dbuf_sgt = NULL;
+		ubmap->dbuf_attach = NULL;
+		ubmap->dbuf = NULL;
+		ubmap->nr_sgents = 0;
+		return;
+	}
+
 	if (ubmap->nr_pages == 0)
 		return;
 
@@ -2629,7 +3221,7 @@ static void si_pep_unmap_user_ptr_single(struct si_pep_dev *pep,
 	ubmap->pages = NULL;
 }
 
-static void si_pep_unmap_user_ptrs(struct si_pep_dev *pep,
+static void si_pep_unmap_user_ptrs(struct si_pep_qdev *qdev,
 		struct si_pep_userbuf_ctx **bufctx)
 {
 	int idx;
@@ -2641,7 +3233,7 @@ static void si_pep_unmap_user_ptrs(struct si_pep_dev *pep,
 		return;
 
 	for (idx = 0; idx < (*bufctx)->nr_bufs; idx++)
-		si_pep_unmap_user_ptr_single(pep, &(*bufctx)->userbuf_maps[idx]);
+		si_pep_unmap_user_ptr_single(qdev, &(*bufctx)->userbuf_maps[idx]);
 
 	kfree((*bufctx)->userbuf_maps);
 	kfree(*bufctx);
@@ -2718,27 +3310,173 @@ error_pin:
 	return ret;
 }
 
-static int si_pep_map_user_ptr(struct si_pep_dev *pep, struct si_buffer *buf,
+/*
+ * Import a userspace dma-buf fd and dma-map it for the eDMA. Unlike the
+ * pinned-pages path this also works for buffers whose CPU mapping is
+ * VM_PFNMAP (dma-heap, udmabuf), where pin_user_pages_fast() fails.
+ * The exporter owns dbuf_sgt; it may cover the whole dma-buf, so callers
+ * must honour total_size when building transfer lists.
+ *
+ * Attachments are cached on the queue, so a buffer that userspace recycles is
+ * attached and mapped once instead of once per transfer, leaving only the DMA
+ * itself on the submission path.
+ */
+static int si_pep_import_dmabuf_single(struct si_pep_qdev *qdev, int fd,
+		size_t size, struct si_pep_userbuf_map *ubmap,
+		enum dma_data_direction dir)
+{
+	struct si_pep_dev *pep = qdev->pep;
+	struct si_pep_dbuf_cache_ent evicted = { 0 };
+	struct si_pep_dbuf_cache_ent *ent;
+	struct dma_buf *dbuf;
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
+	int ret;
+
+	/*
+	 * Resolving the fd on every transfer is deliberate and cheap: it is
+	 * what makes the cache safe, since the resulting dma_buf pointer is a
+	 * stable identity for the buffer where the fd number is not. It also
+	 * keeps the buffer alive while the cache is searched.
+	 */
+	dbuf = dma_buf_get(fd);
+	if (IS_ERR(dbuf)) {
+		si_err(pep, "Invalid dma-buf fd %d: %ld", fd, PTR_ERR(dbuf));
+		return PTR_ERR(dbuf);
+	}
+
+	if (size > dbuf->size) {
+		si_err(pep, "Transfer size %zu exceeds dma-buf size %zu",
+				size, dbuf->size);
+		ret = -EINVAL;
+		goto error_put;
+	}
+
+	mutex_lock(&qdev->dbuf_cache_lock);
+	ent = si_pep_dbuf_cache_find(qdev, dbuf, dir);
+	if (ent) {
+		ent->inuse++;
+		ent->stamp = ++qdev->dbuf_cache_clock;
+		/*
+		 * Counted under the cache lock: transfers on one queue run
+		 * concurrently, and these are what the cache size is tuned
+		 * against, so they are not allowed to drift.
+		 */
+		qdev->stats.dbuf_cache_hits++;
+		mutex_unlock(&qdev->dbuf_cache_lock);
+		/* the cache holds the reference the mapping needs */
+		dma_buf_put(dbuf);
+		si_pep_dbuf_reuse_ent(pep, ubmap, ent, size);
+		return 0;
+	}
+	qdev->stats.dbuf_cache_misses++;
+	mutex_unlock(&qdev->dbuf_cache_lock);
+
+	attach = dma_buf_attach(dbuf, pep->dev);
+	if (IS_ERR(attach)) {
+		ret = PTR_ERR(attach);
+		si_err(pep, "Failed to attach dma-buf fd %d: %d", fd, ret);
+		goto error_put;
+	}
+
+	/*
+	 * Mapping can sleep and is the slow path, so the cache lock is not held
+	 * across it. Another transfer may therefore have imported the same
+	 * buffer meanwhile.
+	 */
+	sgt = dma_buf_map_attachment_unlocked(attach, dir);
+	if (IS_ERR(sgt)) {
+		ret = PTR_ERR(sgt);
+		si_err(pep, "Failed to map dma-buf fd %d: %d", fd, ret);
+		goto error_detach;
+	}
+
+	mutex_lock(&qdev->dbuf_cache_lock);
+	ent = si_pep_dbuf_cache_find(qdev, dbuf, dir);
+	if (ent) {
+		/* lost the race: take the cached mapping and drop this one */
+		ent->inuse++;
+		ent->stamp = ++qdev->dbuf_cache_clock;
+		mutex_unlock(&qdev->dbuf_cache_lock);
+		dma_buf_unmap_attachment_unlocked(attach, sgt, dir);
+		dma_buf_detach(dbuf, attach);
+		dma_buf_put(dbuf);
+		si_pep_dbuf_reuse_ent(pep, ubmap, ent, size);
+		return 0;
+	}
+
+	ent = si_pep_dbuf_cache_victim(qdev);
+	if (ent == NULL) {
+		/*
+		 * Every entry is being used by a transfer in flight. Keep this
+		 * mapping private to the transfer; it is torn down on unmap.
+		 */
+		mutex_unlock(&qdev->dbuf_cache_lock);
+		ubmap->dbuf = dbuf;
+		ubmap->dbuf_attach = attach;
+		ubmap->dbuf_sgt = sgt;
+		ubmap->nr_sgents = sgt->nents;
+		ubmap->total_size = size;
+		ubmap->dir = dir;
+		return 0;
+	}
+
+	/* the outgoing mapping, if any, is released once the lock is dropped */
+	evicted = *ent;
+	ent->dbuf = dbuf;
+	ent->attach = attach;
+	ent->sgt = sgt;
+	ent->dir = dir;
+	ent->inuse = 1;
+	ent->stamp = ++qdev->dbuf_cache_clock;
+	mutex_unlock(&qdev->dbuf_cache_lock);
+
+	if (evicted.dbuf)
+		si_pep_dbuf_cache_release(&evicted);
+
+	/* freshly mapped above, so no sync-for-device is owed here */
+	si_pep_dbuf_map_from_ent(ubmap, ent, size);
+
+	return 0;
+
+error_detach:
+	dma_buf_detach(dbuf, attach);
+error_put:
+	dma_buf_put(dbuf);
+
+	return ret;
+}
+
+static int si_pep_map_user_buf_single(struct si_pep_qdev *qdev, u32 addrtype,
+		u64 addr, size_t size, struct si_pep_userbuf_map *ubmap,
+		enum dma_data_direction dir)
+{
+	if (addrtype == SI_BUF_ADDR_DMABUF)
+		return si_pep_import_dmabuf_single(qdev, (int)addr, size, ubmap,
+				dir);
+
+	return si_pep_map_user_ptr_single(qdev->pep, u64_to_user_ptr(addr),
+			size, ubmap, dir);
+}
+
+static int si_pep_map_user_ptr(struct si_pep_qdev *qdev, struct si_buffer *buf,
 		struct si_pep_userbuf_ctx **bufctx,
 		enum dma_data_direction dir)
 {
+	struct si_pep_dev *pep = qdev->pep;
 	int ret;
 	int idx = 0;
 	int nents = buf->nents;
-	/*
-	 * si_pep_get_buff_arg() fills this with an array of user pointers
-	 * (sizeof(void __user *) elements), so it must be indexed as pointers.
-	 */
-	void **ptrs = NULL;
-	size_t *sizes = NULL;
+	u64 *ptrs = NULL;
+	u64 *sizes = NULL;
 	struct si_pep_userbuf_map *userbuf_maps;
-	struct device *dev = pep->dev;
 
-	if (buf->addrtype != SI_BUF_ADDR_USER)
+	if (buf->addrtype != SI_BUF_ADDR_USER &&
+			buf->addrtype != SI_BUF_ADDR_DMABUF)
 		return -ENOTSUPP;
 
 	if (nents > 1) {
-		ret = si_pep_get_buff_arg(pep, buf, (void **)&ptrs, &sizes);
+		ret = si_pep_get_buff_arg(pep, buf, &ptrs, &sizes);
 		if (ret)
 			return ret;
 	}
@@ -2761,8 +3499,8 @@ static int si_pep_map_user_ptr(struct si_pep_dev *pep, struct si_buffer *buf,
 
 	if (nents == 1) {
 		idx = 0;
-		ret = si_pep_map_user_ptr_single(pep, buf->addr, buf->size,
-				&userbuf_maps[0], dir);
+		ret = si_pep_map_user_buf_single(qdev, buf->addrtype, buf->addr,
+				buf->size, &userbuf_maps[0], dir);
 		if (ret)
 			goto error_map_single;
 
@@ -2770,8 +3508,8 @@ static int si_pep_map_user_ptr(struct si_pep_dev *pep, struct si_buffer *buf,
 	}
 
 	for (idx = 0; idx < buf->nents; idx++) {
-		ret = si_pep_map_user_ptr_single(pep, ptrs[idx], sizes[idx],
-				&userbuf_maps[idx], dir);
+		ret = si_pep_map_user_buf_single(qdev, buf->addrtype, ptrs[idx],
+				sizes[idx], &userbuf_maps[idx], dir);
 		if (ret)
 			goto error_map_single;
 	}
@@ -2782,7 +3520,7 @@ static int si_pep_map_user_ptr(struct si_pep_dev *pep, struct si_buffer *buf,
 error_map_single:
 	while (idx > 0) {
 		idx--;
-		si_pep_unmap_user_ptr_single(pep, &userbuf_maps[idx]);
+		si_pep_unmap_user_ptr_single(qdev, &userbuf_maps[idx]);
 	}
 	/*
 	 * *bufctx still referenced userbuf_maps here, so the caller's
@@ -2793,10 +3531,8 @@ error_map_single:
 error_alloc_ctx:
 	kfree(userbuf_maps);
 done:
-	if (sizes)
-		devm_kfree(dev, sizes);
-	if (ptrs)
-		devm_kfree(dev, ptrs);
+	kfree(sizes);
+	kfree(ptrs);
 
 	return ret;
 }
@@ -2921,15 +3657,16 @@ err_free_ll:
 	return ret;
 }
 
-static int si_pep_dma_buflist_from_sge(struct si_pep_dev *pep,
+static int si_pep_dma_buflist_from_sge(struct si_pep_qdev *qdev,
 		struct si_sge *sge, int ch, struct si_pep_dmabuf **db,
 		int *nents, size_t *tsize)
 {
-	struct device *dev = pep->dev;
+	struct si_pep_dev *pep = qdev->pep;
 	struct si_sge *rsges;
 	dma_addr_t p_rsges;
 	dma_addr_t raddr;
 	size_t ssz;
+	bool cached;
 	int i;
 	int n;
 
@@ -2953,8 +3690,7 @@ static int si_pep_dma_buflist_from_sge(struct si_pep_dev *pep,
 	}
 
 	ssz = n * sizeof(struct si_sge);
-	rsges = dma_alloc_coherent(pep->dev, ssz, &p_rsges, GFP_KERNEL);
-	if (rsges == NULL) {
+	if (si_pep_get_sge_buf(qdev, ssz, &rsges, &p_rsges, &cached)) {
 		si_err(pep, "Failed to allocate mem for remote sges");
 		kfree(*db);
 		*db = NULL;
@@ -2966,7 +3702,7 @@ static int si_pep_dma_buflist_from_sge(struct si_pep_dev *pep,
 		si_err(pep, "Failed to copy sge list from host");
 		kfree(*db);
 		*db = NULL;
-		dma_free_coherent(dev, ssz, rsges, p_rsges);
+		si_pep_put_sge_buf(qdev, rsges, p_rsges, ssz, cached);
 		return -EIO;
 	}
 
@@ -2979,6 +3715,7 @@ static int si_pep_dma_buflist_from_sge(struct si_pep_dev *pep,
 	}
 
 	*nents = n;
+	si_pep_put_sge_buf(qdev, rsges, p_rsges, ssz, cached);
 	return 0;
 }
 
@@ -2986,9 +3723,8 @@ static int si_pep_dma_buflist_from_physptr(struct si_pep_dev *pep,
 		struct si_buffer *buf, struct si_pep_dmabuf **db, int *nents,
 		size_t *tsize)
 {
-	struct device *dev = pep->dev;
-	void *addrs;
-	size_t *sizes;
+	u64 *addrs;
+	u64 *sizes;
 	int ret;
 	int i;
 
@@ -3016,13 +3752,13 @@ static int si_pep_dma_buflist_from_physptr(struct si_pep_dev *pep,
 
 	*tsize = 0;
 	for (i = 0; i < buf->nents; i++) {
-		(*db)[i].addr = ((dma_addr_t*)addrs)[i];
+		(*db)[i].addr = (dma_addr_t)addrs[i];
 		(*db)[i].size = sizes[i];
 		(*tsize) += sizes[i];
 	}
 
-	devm_kfree(dev, addrs);
-	devm_kfree(dev, sizes);
+	kfree(addrs);
+	kfree(sizes);
 
 	return 0;
 }
@@ -3048,7 +3784,7 @@ static int si_pep_dma_buflist_from_uptr(struct si_pep_dev *pep,
 
 	*tsize = 0;
 	for (i = 0; i < bufctx->nr_bufs; i++) {
-		sgt = &ubmap[i].sgt;
+		sgt = ubmap[i].dbuf_sgt ? ubmap[i].dbuf_sgt : &ubmap[i].sgt;
 		left = ubmap[i].total_size;
 		/*
 		 * Iterate the number of *mapped* entries returned by
@@ -3088,10 +3824,11 @@ static int si_pep_buf_prepare_dmabuf_list(struct si_pep_qdev *qdev,
 	int ret;
 
 	*tsize = 0;
-	if (buf->addrtype == SI_BUF_ADDR_USER) {
-		ret = si_pep_map_user_ptr(pep, buf, bufctx, dir);
+	if (buf->addrtype == SI_BUF_ADDR_USER ||
+			buf->addrtype == SI_BUF_ADDR_DMABUF) {
+		ret = si_pep_map_user_ptr(qdev, buf, bufctx, dir);
 		if (ret) {
-			si_err(pep, "Failed to map user pointer");
+			si_err(pep, "Failed to map user buffer");
 			return ret;
 		}
 
@@ -3099,7 +3836,7 @@ static int si_pep_buf_prepare_dmabuf_list(struct si_pep_qdev *qdev,
 				tsize);
 		if (ret) {
 			si_err(pep, "Failed to prepare source list");
-			si_pep_unmap_user_ptrs(pep, bufctx);
+			si_pep_unmap_user_ptrs(qdev, bufctx);
 			return ret;
 		}
 		return 0;
@@ -3115,9 +3852,9 @@ static int si_pep_buf_prepare_dmabuf_list(struct si_pep_qdev *qdev,
 	} else
 		return -EINVAL;
 
-	sge.addr_h = upper_32_bits((u64)buf->addr);
-	sge.addr_l = lower_32_bits((u64)buf->addr);
-	return si_pep_dma_buflist_from_sge(pep, &sge, ch, db, nents, tsize);
+	sge.addr_h = upper_32_bits(buf->addr);
+	sge.addr_l = lower_32_bits(buf->addr);
+	return si_pep_dma_buflist_from_sge(qdev, &sge, ch, db, nents, tsize);
 }
 
 static int si_pep_send_data_single(struct si_pep_qdev *qdev,
@@ -3188,12 +3925,13 @@ static int si_pep_send_data(struct si_pep_qdev *qdev, struct si_buffer *buf,
 	sge = &rqe->sge;
 	if (sge->type == SGE_TYPE_LIST || buf->nents > 1 ||
 			buf->addrtype == SI_BUF_ADDR_USER ||
+			buf->addrtype == SI_BUF_ADDR_DMABUF ||
 			buf->addrtype == SI_BUF_ADDR_SGE_LIST) {
 		llmode = 1;
 	}
 
 	if (llmode) {
-		ret = si_pep_dma_buflist_from_sge(pep, sge, ch, &destb, &ndest,
+		ret = si_pep_dma_buflist_from_sge(qdev, sge, ch, &destb, &ndest,
 				&tsize);
 		if (ret) {
 			si_err(pep, "Unable to prepare destination list");
@@ -3234,7 +3972,7 @@ err_clean_send_data:
 	if (ll.dma_ll)
 		si_pep_free_dma_ll(pep, &ll);
 	if (bufctx)
-		si_pep_unmap_user_ptrs(pep, &bufctx);
+		si_pep_unmap_user_ptrs(qdev, &bufctx);
 
 	return ret;
 }
@@ -3398,14 +4136,14 @@ static int si_pep_recv_data(struct si_pep_qdev *qdev,
 	if (src->addrtype == SI_BUF_ADDR_SGE) {
 		sge.type = SGE_TYPE_SINGLE;
 		sge.size = src->size;
-		si_dbg_l(pep, "Single SGE, Source: 0x%llx, Size: 0x%lu",
-				(dma_addr_t)src->addr, src->size);
+		si_dbg_l(pep, "Single SGE, Source: 0x%llx, Size: %llu",
+				src->addr, src->size);
 	} else if (src->addrtype == SI_BUF_ADDR_SGE_LIST) {
 		sge.type = SGE_TYPE_LIST;
 		sge.size = src->nents;
 		llmode = 1;
-		si_dbg_l(pep, "SGE List, Source: 0x%llx, Size: 0x%lu",
-				(dma_addr_t)src->addr, src->size);
+		si_dbg_l(pep, "SGE List, Source: 0x%llx, Size: %llu",
+				src->addr, src->size);
 	} else {
 		si_err(pep, "Invalid source buffer type");
 		return -EINVAL;
@@ -3414,7 +4152,8 @@ static int si_pep_recv_data(struct si_pep_qdev *qdev,
 	sge.addr_h = upper_32_bits((dma_addr_t)src->addr);
 	sge.addr_l = lower_32_bits((dma_addr_t)src->addr);
 
-	if (dst->addrtype == SI_BUF_ADDR_USER)
+	if (dst->addrtype == SI_BUF_ADDR_USER ||
+			dst->addrtype == SI_BUF_ADDR_DMABUF)
 		llmode = 1;
 	else if (dst->addrtype == SI_BUF_ADDR_PHYSICAL) {
 		if (dst->nents > 1)
@@ -3425,7 +4164,7 @@ static int si_pep_recv_data(struct si_pep_qdev *qdev,
 	}
 
 	if (llmode) {
-		ret = si_pep_dma_buflist_from_sge(pep, &sge, ch, &srcb, &nsrc,
+		ret = si_pep_dma_buflist_from_sge(qdev, &sge, ch, &srcb, &nsrc,
 				&tsize);
 		if (ret) {
 			si_err(pep, "Unable to prepare source list");
@@ -3458,7 +4197,7 @@ err_clean_recv_data:
 	if (ll.dma_ll)
 		si_pep_free_dma_ll(pep, &ll);
 	if (bufctx)
-		si_pep_unmap_user_ptrs(pep, &bufctx);
+		si_pep_unmap_user_ptrs(qdev, &bufctx);
 
 	return ret;
 }
@@ -3469,7 +4208,8 @@ static int si_pep_open(struct inode *inode, struct file *filp)
 	struct si_pep_qdev *qdev;
 	int minor = iminor(inode);
 
-	if (minor > (SI_MAX_DQS + 1)) {
+	/* qdev[] has SI_MAX_DQS + 1 slots, so SI_MAX_DQS is the last valid one */
+	if (minor >= (SI_MAX_DQS + 1)) {
 		si_err(g_pep_dev, "Invalid device file");
 		return -ENOENT;
 	}
@@ -3502,12 +4242,14 @@ static int si_pep_release(struct inode *inode, struct file *filp)
 		}
 	}
 
+	si_pep_dbuf_cache_flush(qdev);
+
 	return 0;
 }
 
 static __poll_t si_pep_poll(struct file *filp, struct poll_table_struct *wait)
 {
-	unsigned int mask = 0;
+	__poll_t mask = 0;
 	struct si_pep_dev *pep;
 	struct si_pep_qdev *qdev;
 	struct si_pep_req_cache_hdr *chdr;
@@ -3518,8 +4260,17 @@ static __poll_t si_pep_poll(struct file *filp, struct poll_table_struct *wait)
 
 	si_qdbg_l(qdev, "Polling %s", qdev->devname);
 
+	/*
+	 * Report conditions as poll bits, not as negative errnos.
+	 *
+	 * __poll_t is unsigned, so returning -EAGAIN here handed the caller
+	 * 0xfffffff5, which has EPOLLIN set along with almost every other
+	 * bit. An application polling a queue while the SoC was not running
+	 * was told the descriptor was readable, went into read(), and
+	 * blocked there -- the opposite of what the check intended.
+	 */
 	if (pep->state != SOC_STATE_RUN)
-		return -EAGAIN;
+		return EPOLLERR;
 
 	if (!queue_is_data(qdev)) {
 		req_wait = &pep->mreq_wait;
@@ -3530,7 +4281,7 @@ static __poll_t si_pep_poll(struct file *filp, struct poll_table_struct *wait)
 	}
 
 	if (use_driver_loopback)
-		return -ENOENT;
+		return EPOLLERR;
 
 	if (chdr->nreqs != 0) {
 		mask |= EPOLLIN | EPOLLPRI;
@@ -3609,10 +4360,36 @@ static long si_pep_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 		return ret;
 		break;
+	case SI_QUEUE_GETINFO: {
+		/*
+		 * Report the geometry of the queue this node serves, as the
+		 * host created it. The context arrived in the create command
+		 * with bufsize filled in by the host driver, so userspace
+		 * here can size its staging buffers to what one ring buffer
+		 * actually holds instead of guessing.
+		 */
+		struct si_qctx *ctx;
+		struct si_qcmd_param qp;
+
+		ctx = queue_is_data(qdev) ? pep->dwq_ctx[qid] : pep->mwq_ctx;
+		if (ctx == NULL || ctx->status != SI_ACTIVE)
+			return -ENOENT;
+
+		memset(&qp, 0, sizeof(qp));
+		qp.qtype = ctx->qtype;
+		qp.qid = qid;
+		qp.qsize = ctx->entries;
+		qp.qdepth = ctx->qdepth;
+		qp.bsize = ctx->bufsize;
+
+		if (copy_to_user((void __user *)arg, &qp, sizeof(qp)))
+			return -EFAULT;
+		return 0;
+	}
 	default:
 		si_err(pep, "Invalid ioctl for device");
 	}
-	
+
 	return -ENOTTY;
 }
 
@@ -3679,29 +4456,49 @@ static int si_pep_read_request(struct si_pep_qdev *qdev, struct si_io *io,
 	 * by the host. So check if the dreq was aborted and skip current dreq
 	 * and memcpy next dreq to user.
 	 */
-	si_qdbg_l(qdev, "Available requests: %d. Head %d, tail: %d",
-			chdr->nreqs, chdr->head, chdr->tail);
+	/*
+	 * The empty check has to come before the skip, and the skip has to
+	 * be bounded by it.
+	 *
+	 * nreqs is unsigned. Skipping with an empty cache decrements it past
+	 * zero, where it reads as 65535 waiting requests: head then walks
+	 * off across stale entries until it lands on one whose inuse is set,
+	 * and the copy below hands that long-finished request up as if it
+	 * were new. Anything genuinely queued behind it has been stepped
+	 * over and is never delivered -- no reply is ever sent for it, and
+	 * the host is left waiting on a frame this end has forgotten it
+	 * owes. Later caching pushes nreqs back up and head eventually
+	 * catches up, so it clears itself: the shape it leaves is one lost
+	 * frame, not visible corruption.
+	 *
+	 * Re-checking after the wait also matters, because what arrives
+	 * while we sleep can itself be an aborted entry.
+	 */
+	for (;;) {
+		si_qdbg_l(qdev, "Available requests: %d. Head %d, tail: %d",
+				chdr->nreqs, chdr->head, chdr->tail);
 
-	while (req_cache[chdr->head].qidx.inuse == 0) {
+		if (chdr->nreqs == 0) {
+			if (f_flags & O_NONBLOCK) {
+				mutex_unlock(m);
+				return -EAGAIN;
+			}
+			mutex_unlock(m);
+			if (wait_event_interruptible(*wait,
+						(chdr->nreqs != 0)))
+				return -ERESTARTSYS;
+			mutex_lock(m);
+			continue;
+		}
+
+		if (req_cache[chdr->head].qidx.inuse != 0)
+			break;
+
+		/* Aborted by the host: drop it and look at the next. */
 		chdr->nreqs--;
 		chdr->head++;
-		if (chdr->head == chdr->maxreqs)
+		if (chdr->head >= chdr->maxreqs)
 			chdr->head = 0;
-		if (chdr->nreqs == 0)
-			break;
-	}
-
-	si_qdbg(qdev, "Available requests: %d. Head %d, tail: %d",
-			chdr->nreqs, chdr->head, chdr->tail);
-	if (chdr->nreqs == 0) {
-		if (f_flags & O_NONBLOCK) {
-			mutex_unlock(m);
-			return -EAGAIN;
-		}
-		mutex_unlock(m);
-		if (wait_event_interruptible(*wait, (chdr->nreqs != 0)))
-			return -ERESTARTSYS;
-		mutex_lock(m);
 	}
 
 	memcpy(&wqe, &req_cache[chdr->head], sizeof(struct si_wqe));
@@ -3724,8 +4521,8 @@ static int si_pep_read_request(struct si_pep_qdev *qdev, struct si_io *io,
 			SI_BUF_ADDR_SGE:SI_BUF_ADDR_SGE_LIST;
 		io->buffer.nents = (wqe.sge.type == SGE_TYPE_SINGLE)?
 			1:wqe.sge.size;
-		io->buffer.addr = (void *)(((u64)wqe.sge.addr_h << 32) |
-				wqe.sge.addr_l);
+		io->buffer.addr = ((u64)wqe.sge.addr_h << 32) |
+				wqe.sge.addr_l;
 		io->buffer.size = wqe.data_size;
 		io->buffer.tsize = wqe.data_size;
 		io->buffer.qidx = *((u32*)&wqe.qidx);
@@ -3755,7 +4552,7 @@ static ssize_t si_pep_read(struct file *filp, char __user *buf, size_t sz,
 	pep = qdev_to_pep_dev(qdev);
 
 	if (sz < sizeof(io)) {
-		si_err(pep, "Buffer too small");
+		si_err_ratelimited(pep, "Buffer too small");
 		return -ENOSPC;
 	}
 
@@ -3764,8 +4561,11 @@ static ssize_t si_pep_read(struct file *filp, char __user *buf, size_t sz,
 	if (ret)
 		return ret;
 
+	/* The bytes copied, not the size of the buffer that was offered */
 	if (copy_to_user(buf, &io, sizeof(struct si_io)))
 		sz = -EFAULT;
+	else
+		sz = sizeof(struct si_io);
 
 	if (dump_queue_occupency == true) {
 		qdev->timepoint_2[io.buffer.bid.idx] = ktime_get_ns();
@@ -3783,33 +4583,42 @@ static ssize_t si_pep_write(struct file *filp, const char __user *buff,
 	struct si_pep_dev *pep;
 	struct si_pep_qdev *qdev;
 	struct si_io io;
-        size_t size = 0;
 	int ret;
-	u32 qid;
 
 	if (use_driver_loopback)
 		return -ENOENT;
 
+	/* The message names the device, so it has to be found first */
+	qdev = filp->private_data;
+	pep = qdev_to_pep_dev(qdev);
+
 	if (sz < sizeof(io)) {
-		si_err(pep, "Invalid write size");
+		si_err_ratelimited(pep, "Invalid write size");
 		return -EINVAL;
 	}
 
-	qdev = filp->private_data;
-	pep = qdev_to_pep_dev(qdev);
-	qid = qdev->qid;
-	
 	if (copy_from_user(&io, buff, sizeof(struct si_io)))
 		return -EFAULT;
 
 	si_pep_process_timestamp(pep, RECORD_ENTRY_TS, &qdev->write_ts);
 	ret = si_pep_send_io(qdev, &io);
-	if (!ret)
-		size = io.buffer.tsize;
 	si_pep_process_timestamp(pep, RECORD_EXIT_TS, &qdev->write_ts);
 	si_pep_process_timestamp(pep, COMPUTE_TS_METRICS, &qdev->write_ts);
 
-	return size;
+	/*
+	 * Report the failure. This used to return io.buffer.tsize on success
+	 * and a zero-initialised size otherwise, which made a dropped
+	 * response indistinguishable from a delivered one -- and identical
+	 * to the success return of every response that carries no payload,
+	 * which is most of them. A completion queue with no room comes back
+	 * from si_pep_get_cqe() as -EAGAIN, so with the two cases conflated
+	 * the endpoint would discard a response, report success, and leave
+	 * the host blocked in read() for a reply that was never sent.
+	 */
+	if (ret)
+		return ret;
+
+	return sizeof(struct si_io);
 }
 
 #define LPBACK_BUF_SIZ	(4 * 1024 * 1024)
@@ -3820,7 +4629,7 @@ static int si_pep_data_loopback_handler(void *arg)
 	struct si_data_param dparam = { 0 };
 	struct si_buffer *srcb = &dparam.src;
 	struct si_buffer *dstb = &dparam.dst;
-	struct si_io io;
+	struct si_io io = { 0 };
 	struct si_pep_qdev *qdev;
 	u32 qid = param->qid;
 	void *data;
@@ -3838,7 +4647,7 @@ static int si_pep_data_loopback_handler(void *arg)
 	dstb->nents = 1;
 	dstb->tsize = LPBACK_BUF_SIZ;
 	dstb->size = LPBACK_BUF_SIZ;
-	dstb->addr = (void*)pdata;
+	dstb->addr = pdata;
 
 	while (1) {
 		if (kthread_should_stop()) {
@@ -4094,9 +4903,12 @@ static int si_pep_probe(struct platform_device *pdev)
 	}
 	of_node_put(node);
 
+	mutex_init(&pep->state_lock);
+	INIT_DELAYED_WORK(&pep->link_down_handler, si_pep_link_down_handler);
 	ret = pep->drv_ops->platform_init(pep);
 	if (ret != 0) {
-		si_err(pep, "Platform init failed. %d\n", ret);
+		si_err(pep, "Platform init failed. %d", ret);
+		return ret;
 	}
 	si_pep_dump_devinfo(pep);
 
@@ -4112,13 +4924,13 @@ static int si_pep_probe(struct platform_device *pdev)
 		pep->drv_ops->set_mlsoc_caps(pep, SI_MLSOC_CAPABILITIES_0, val);
 	}
 
-	INIT_DELAYED_WORK(&pep->link_down_handler, si_pep_link_down_handler);
 	for (i = 0; i < MAX_DMA_CHANNELS; i++) {
 		spin_lock_init(&pep->dma_write_lock[i]);
 		spin_lock_init(&pep->dma_read_lock[i]);
 	}
 
 	mutex_init(&pep->qdev[0].ioctl_mutex);
+	mutex_init(&pep->qdev[0].dbuf_cache_lock);
 	init_waitqueue_head(&pep->mreq_wait);
 
 	pep->mwq_ctx = si_pep_cache_virt(pep, mwq_ctx);
@@ -4138,6 +4950,11 @@ static int si_pep_probe(struct platform_device *pdev)
 	memset(&pep->mchdr, 0, sizeof(struct si_pep_req_cache_hdr));
 	pep->mchdr.maxreqs = SI_MWQ_CACHE_SIZE;
 	mutex_init(&pep->mreq_cache_mutex);
+
+	for (i = 0; i < (SI_MAX_DQS + 1); i++) {
+		spin_lock_init(&pep->cqe_alloc_lock[i]);
+		spin_lock_init(&pep->rqe_alloc_lock[i]);
+	}
 
 	for (i = 0; i < SI_MAX_DQS; i++) {
 		pep->dwq_ctx[i] = si_pep_cache_virt(pep, dwq_ctx[i]);
@@ -4174,26 +4991,31 @@ static int si_pep_probe(struct platform_device *pdev)
 		qd->qtype = SI_DWQ;
 		qd->pep = pep;
 		mutex_init(&qd->ioctl_mutex);
+		mutex_init(&qd->dbuf_cache_lock);
 		snprintf(qd->devname, sizeof(qd->devname), "sima_pep.%d", i);
 
 		if (dump_queue_occupency == true) {
 			tpsize = sizeof(ktime_t) * MAX_TIMEPOINTS;
-			qd->timepoint_1 = devm_kzalloc(dev, tpsize, GFP_KERNEL);
-			qd->timepoint_2 = devm_kzalloc(dev, tpsize, GFP_KERNEL);
-			qd->timepoint_3 = devm_kzalloc(dev, tpsize, GFP_KERNEL);
-			qd->timepoint_4 = devm_kzalloc(dev, tpsize, GFP_KERNEL);
-			
-			if (IS_ERR_OR_NULL(qd->timepoint_1) ||
-					IS_ERR_OR_NULL(qd->timepoint_2) ||
-					IS_ERR_OR_NULL(qd->timepoint_3) ||
-					IS_ERR_OR_NULL(qd->timepoint_4)) {
+			qd->timepoint_1 = kzalloc(tpsize, GFP_KERNEL);
+			qd->timepoint_2 = kzalloc(tpsize, GFP_KERNEL);
+			qd->timepoint_3 = kzalloc(tpsize, GFP_KERNEL);
+			qd->timepoint_4 = kzalloc(tpsize, GFP_KERNEL);
+
+			if (qd->timepoint_1 == NULL ||
+					qd->timepoint_2 == NULL ||
+					qd->timepoint_3 == NULL ||
+					qd->timepoint_4 == NULL) {
 				si_err(pep, "Failed to allocate memory for"
 						"time points");
 				dump_queue_occupency = false;
-				devm_kfree(dev, qd->timepoint_1);
-				devm_kfree(dev, qd->timepoint_2);
-				devm_kfree(dev, qd->timepoint_3);
-				devm_kfree(dev, qd->timepoint_4);
+				kfree(qd->timepoint_1);
+				kfree(qd->timepoint_2);
+				kfree(qd->timepoint_3);
+				kfree(qd->timepoint_4);
+				qd->timepoint_1 = NULL;
+				qd->timepoint_2 = NULL;
+				qd->timepoint_3 = NULL;
+				qd->timepoint_4 = NULL;
 			}
 		}
 	}
@@ -4231,12 +5053,45 @@ static int si_pep_probe(struct platform_device *pdev)
 			si_err(pep, "Cannot create queue occupency sysfs file");
 	}
 
-	if (pep->modalix)
-		pep->drv_ops->set_soc_state(pep, SOC_STATE_RUN);
-
 	if (si_pep_create_device(pep)) {
 		si_err(pep, "Failed to register character device");
+		if (dump_queue_occupency) {
+			for (i = 0; i < SI_MAX_DQS; i++) {
+				kfree(pep->qdev[i+1].timepoint_1);
+				kfree(pep->qdev[i+1].timepoint_2);
+				kfree(pep->qdev[i+1].timepoint_3);
+				kfree(pep->qdev[i+1].timepoint_4);
+			}
+		}
 		return -ENOMEM;
+	}
+
+	/* From here on there is a driver for the link-down handler to tear down */
+	mutex_lock(&pep->state_lock);
+	pep->initialized = true;
+	mutex_unlock(&pep->state_lock);
+
+	/*
+	 * Everything the doorbell handler touches now exists -- the workqueue
+	 * and its work items from local_init(), the queue contexts and their
+	 * mutexes above, and the character devices userspace arrives through.
+	 * Only now is it safe to let the host in.
+	 *
+	 * Arming before announcing RUN, rather than after, means the first
+	 * doorbell the host writes finds a driver that can already serve it.
+	 */
+	if (pep->drv_ops->enable_doorbells)
+		pep->drv_ops->enable_doorbells(pep);
+
+	/*
+	 * The link-down handler undoes all of the above, so it is armed only
+	 * now, in the same spirit as the doorbells. platform_init() installed
+	 * it masked; an event latched in the meantime is discarded on the way
+	 * in, since there was nothing for it to tear down.
+	 */
+	if (pep->modalix) {
+		si_pep_irq_link_down_enable(pep);
+		pep->drv_ops->set_soc_state(pep, SOC_STATE_RUN);
 	}
 
 	return 0;
@@ -4252,9 +5107,34 @@ static void si_pep_remove(struct platform_device *pdev)
 	struct si_pep_dev *pep;
 
 	pep = platform_get_drvdata(pdev);
+	si_pep_irq_link_down_disable(pep);
+	/*
+	 * No further link-down work is queued now the event is masked. Wait
+	 * out one already in flight, then close the window the handler
+	 * checks, so anything that still slips through finds nothing to tear
+	 * down. The lock is not held across the wait: the handler needs it
+	 * to finish.
+	 */
+	cancel_delayed_work_sync(&pep->link_down_handler);
+	mutex_lock(&pep->state_lock);
+	pep->initialized = false;
+	mutex_unlock(&pep->state_lock);
+	/*
+	 * Stop the host before dismantling what it drives. local_deinit()
+	 * below frees the workqueue the doorbell handler defers to, and a
+	 * doorbell arriving after that would queue work on freed memory.
+	 */
+	if (pep->drv_ops->disable_doorbells)
+		pep->drv_ops->disable_doorbells(pep);
 	si_pep_teardown_netintf(pep);
 	wake_up_interruptible(&pep->mreq_wait);
 
+	/*
+	 * recovery_mode is stable from here: the recovery thread only
+	 * changes it under state_lock, after checking 'initialized', which
+	 * was cleared above. Still set means the thread never got to
+	 * rebuild, so there is nothing of local_init()'s to undo.
+	 */
 	if (pep->recovery_mode == 0) {
 		pep->drv_ops->local_deinit(pep);
 	} else {
@@ -4278,8 +5158,8 @@ static void si_pep_remove(struct platform_device *pdev)
 		}
 	}
 
-	for (i = 0; i < SI_MAX_DQS; i++) {
-		if (dump_queue_occupency == true) {
+	if (dump_queue_occupency) {
+		for (i = 0; i < SI_MAX_DQS; i++) {
 			kfree(pep->qdev[i+1].timepoint_1);
 			kfree(pep->qdev[i+1].timepoint_2);
 			kfree(pep->qdev[i+1].timepoint_3);
@@ -4288,8 +5168,31 @@ static void si_pep_remove(struct platform_device *pdev)
 	}
 
 	/* mgmt queue is qdev[0], data queues follow */
-	for (i = 0; i < SI_MAX_DQS + 1; i++)
+	for (i = 0; i < SI_MAX_DQS + 1; i++) {
 		si_pep_free_dma_ll_cache(&pep->qdev[i]);
+		si_pep_free_sge_cache(&pep->qdev[i]);
+		si_pep_dbuf_cache_flush(&pep->qdev[i]);
+	}
+
+	/*
+	 * A queue device outlives the command that created it: the host
+	 * creates a data write queue and the node appears, the host deletes
+	 * the queue and it goes away. Unloading with queues still up -- the
+	 * host never got round to deleting them, or the link went down and
+	 * took the chance to -- would otherwise reach class_destroy() below
+	 * with those devices still registered in the class.
+	 *
+	 * si_pep_create_queue() ties the node's lifetime to the write queue,
+	 * so the write queue context is what says whether a node is out
+	 * there. Destroy those and leave the rest alone: a minor that never
+	 * had a device is not ours to destroy.
+	 */
+	for (i = 0; i < SI_MAX_DQS; i++) {
+		if (pep->dwq_ctx[i]->status == SI_INVALID)
+			continue;
+
+		device_destroy(pep->class, MKDEV(MAJOR(pep->devt), i + 1));
+	}
 
 	device_destroy(pep->class, pep->devt);
 	class_destroy(pep->class);
@@ -4348,4 +5251,4 @@ module_exit(si_pep_drv_exit);
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("SiMa.ai SoC PCIe Endpoint Driver");
 MODULE_AUTHOR("SiMa.ai");
-MODULE_ALIAS("platform:sima_pep_drv");
+MODULE_ALIAS("platform:simaai_pep_drv");

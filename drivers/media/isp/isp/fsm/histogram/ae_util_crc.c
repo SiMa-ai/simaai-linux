@@ -63,11 +63,72 @@ uint8_t ae_check_metering_stats_crc( histogram_fsm_ptr_t p_fsm )
     const uint32_t crc = (uint32_t)calc_AE_CRC_u32( p_fsm );
 
     if ( crc != crc_hw ) {
-        LOG( LOG_ERR, "No CRC match for AE metering stats %x read, %x calced", crc_hw, crc );
+        LOG_CAT( ALOG_CAT_AE, LOG_ERR, "No CRC match for AE metering stats %x read, %x calced", crc_hw, crc );
         match = 0;
     } else {
         ;
     }
 
     return match;
+}
+
+/*
+ * Snapshot + decode of the aexp per-zone block, for the AE_ZONES
+ * stats section. Layout (32-bit cells from the metering memory base):
+ * cells 2z / 2z+1 hold zone z's stored bins ([15:0] bin0, [31:16]
+ * bin1 and [15:0] bin3, [31:16] bin4 -- bin2 is derived from the
+ * 65536 normalisation), followed by AEMEM_ADDITIONAL_DATA_ITEMS
+ * global cells and the CRC. One read pass into aexp_buf services
+ * both the CRC and the decode; the CRC is what actually protects
+ * against a frame boundary landing mid-pass.
+ */
+uint32_t ae_read_aexp_zone_bins( histogram_fsm_ptr_t p_fsm )
+{
+    const uint32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
+    const uint8_t nodes_h = acamera_isp_metering_aexp_nodes_used_horiz_read( isp_base );
+    const uint8_t nodes_v = acamera_isp_metering_aexp_nodes_used_vert_read( isp_base );
+    const uint32_t zones = (uint32_t)nodes_h * nodes_v;
+    const size_t crc_index = (size_t)zones * 2 + AEMEM_ADDITIONAL_DATA_ITEMS;
+    uint16_t crc16 = 0xffff;
+    size_t i;
+
+    /* Fail loud at build time if the snapshot buffer and the layout ever
+     * diverge; the runtime bound below then only guards a bad nodes readback. */
+    BUILD_BUG_ON( ISP_METERING_HISTOGRAM_ZONES_MAX * 2 + AEMEM_ADDITIONAL_DATA_ITEMS + 1 >
+                  ARRAY_SIZE( p_fsm->aexp_buf ) );
+    if ( zones == 0 || zones > ISP_METERING_HISTOGRAM_ZONES_MAX ||
+         crc_index + 1 > ARRAY_SIZE( p_fsm->aexp_buf ) ) {
+        return 0;
+    }
+
+    for ( i = 0; i <= crc_index; i++ ) {
+        p_fsm->aexp_buf[i] = acamera_metering_mem_array_data_read( isp_base, i );
+    }
+
+    for ( i = 0; i < crc_index; i++ ) {
+        const uint32_t data = p_fsm->aexp_buf[i];
+        crc16 = acrc_ccitt_byte( crc16, ( data >> 24 ) & 0xff );
+        crc16 = acrc_ccitt_byte( crc16, ( data >> 16 ) & 0xff );
+        crc16 = acrc_ccitt_byte( crc16, ( data >> 8 ) & 0xff );
+        crc16 = acrc_ccitt_byte( crc16, ( data >> 0 ) & 0xff );
+    }
+
+    if ( (uint32_t)crc16 != p_fsm->aexp_buf[crc_index] ) {
+        LOG_CAT( ALOG_CAT_AE, LOG_DEBUG, "CTX[%d] aexp CRC mismatch 0x%x read, 0x%x calculated",
+             (int)ACAMERA_FSM2ICTX_PTR( p_fsm )->context_id,
+             p_fsm->aexp_buf[crc_index], (uint32_t)crc16 );
+        return 0;
+    }
+
+    for ( i = 0; i < zones; i++ ) {
+        const uint32_t w0 = p_fsm->aexp_buf[2 * i];
+        const uint32_t w1 = p_fsm->aexp_buf[2 * i + 1];
+        p_fsm->aexp_zone_bins[4 * i + 0] = (uint16_t)( w0 & 0xffff );
+        p_fsm->aexp_zone_bins[4 * i + 1] = (uint16_t)( w0 >> 16 );
+        p_fsm->aexp_zone_bins[4 * i + 2] = (uint16_t)( w1 & 0xffff );
+        p_fsm->aexp_zone_bins[4 * i + 3] = (uint16_t)( w1 >> 16 );
+    }
+    p_fsm->aexp_nodes_h = nodes_h;
+    p_fsm->aexp_nodes_v = nodes_v;
+    return zones;
 }

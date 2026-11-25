@@ -71,10 +71,10 @@ int module_mcfe_scheduler_set_mode( module_mcfe_sched_mode_t mode )
 
     // error handler
     if ( mcfe_hwif_scheduler_mode_read() != 0 ) {
-        LOG( LOG_ERR, "Error, can't config while scheduler is running." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, can't config while scheduler is running." );
         return MCFE_ERR_BUSY;
     } else if ( mode >= MODULE_MCFE_SCHED_MODE_MAX ) {
-        LOG( LOG_ERR, "Error, invalid scheduler mode." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid scheduler mode." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -90,10 +90,10 @@ int module_mcfe_scheduler_start( void )
 
     // error handler
     if ( mcfe_hwif_scheduler_mode_read() != 0 ) {
-        LOG( LOG_ERR, "Error, scheduler is already running." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, scheduler is already running." );
         return MCFE_ERR_BUSY;
     } else if ( sched_mode >= MODULE_MCFE_SCHED_MODE_MAX ) {
-        LOG( LOG_ERR, "Error, scheduler is not configured yet." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, scheduler is not configured yet." );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -109,7 +109,7 @@ int module_mcfe_scheduler_stop( void )
 
     // error handler
     if ( mcfe_hwif_scheduler_mode_read() == 0 ) {
-        LOG( LOG_ERR, "Error, scheduler is not running." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, scheduler is not running." );
         return MCFE_ERR_NOT_RUN;
     }
 

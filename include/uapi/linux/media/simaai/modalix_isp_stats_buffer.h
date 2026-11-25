@@ -20,11 +20,13 @@
  *
  * Layout discipline: new sub-sections append to the END of the
  * struct so older user-space binaries that don't know about a new
- * section can still read existing ones at unchanged offsets.
- * struct sizeof is treated as the V4L2 buffer size; changes
- * coordinate with a new MODALIX_ISP_STATS_BUFFER_VERSION value (see
- * below) so user-space can refuse unknown versions instead of
- * silently misinterpreting.
+ * section can still read existing ones at unchanged offsets, gated
+ * by a new valid_mask bit an old consumer never tests. struct
+ * sizeof is treated as the V4L2 buffer size, so an append is still
+ * a lockstep kernel+consumer deploy. Bumping
+ * MODALIX_ISP_STATS_BUFFER_VERSION is reserved for changes that
+ * reinterpret existing fields or move offsets, so user-space can
+ * refuse those instead of silently misinterpreting.
  *
  * Pairs with [planned] modalix_isp_params_buffer.h on the other
  * direction (META_OUTPUT) — that header carries the IPA's computed
@@ -50,10 +52,15 @@
  * register-block size — 1024 bins, each a 32-bit pixel-count. */
 #define MODALIX_ISP_HISTOGRAM_BINS           1024u
 
+/* Maximum AE metering zones (aexp block) the HW reports per frame.
+ * Same 15x15 grid ceiling as AWB. */
+#define MODALIX_ISP_AE_MAX_ZONES             225u
+
 /* valid_mask bit positions in struct modalix_isp_stats_buffer. */
 #define MODALIX_ISP_STATS_VALID_AE           (1u << 0)
 #define MODALIX_ISP_STATS_VALID_AWB          (1u << 1)
 #define MODALIX_ISP_STATS_VALID_GAMMA        (1u << 2)
+#define MODALIX_ISP_STATS_VALID_AE_ZONES     (1u << 3)
 
 /**
  * struct modalix_isp_awb_zone - one entry in the AWB per-zone array.
@@ -101,6 +108,44 @@ struct modalix_isp_awb_stats {
 };
 
 /**
+ * struct modalix_isp_ae_zone - one entry in the AE per-zone (aexp)
+ * array.
+ *
+ * @hist: the four stored bins of the zone's 5-bin intensity
+ *        histogram, in threshold order: bin0, bin1, bin3, bin4.
+ *        Counts are normalised by the zone's processed pixel count
+ *        so the five bins sum to 65536; the middle bin is derived:
+ *        bin2 = 65536 - (bin0 + bin1 + bin3 + bin4). Bin edges are
+ *        the ISP's HIST_THRESH registers (defaults 16/32/208/224).
+ */
+struct modalix_isp_ae_zone {
+	__u16 hist[4];
+};
+
+/**
+ * struct modalix_isp_ae_zone_stats - AE per-zone histogram statistics
+ * (the metering aexp block).
+ *
+ * Spatial complement of the full-frame AE histogram: one 5-bin
+ * histogram per metering zone. Consumed by the rolling-shutter
+ * (spatial) flicker detector, which needs a per-row luma profile the
+ * full-frame histogram cannot provide.
+ *
+ * @zones:   fixed-size array in zone raster order; the first
+ *           @zones_h * @zones_v entries are populated this frame,
+ *           the rest are undefined.
+ * @zones_h: metering grid width in zones.
+ * @zones_v: metering grid height in zones; @zones_h * @zones_v is
+ *           bounded by MODALIX_ISP_AE_MAX_ZONES.
+ */
+struct modalix_isp_ae_zone_stats {
+	struct modalix_isp_ae_zone zones[MODALIX_ISP_AE_MAX_ZONES];
+	__u16 zones_h;
+	__u16 zones_v;
+	__u32 _reserved;
+};
+
+/**
  * struct modalix_isp_gamma_stats - histogram statistics for the gamma
  * FSM's auto-contrast loop.
  *
@@ -133,20 +178,26 @@ struct modalix_isp_gamma_stats {
  * @ae:           histogram statistics for the AE FSM.
  * @awb:          per-zone chromaticity statistics for the AWB FSM.
  * @gamma:        histogram statistics for the gamma FSM.
+ * @ae_zones:     AE per-zone histogram statistics (spatial flicker
+ *                detector feed). Appended after @gamma per the
+ *                layout discipline above: older user-space still
+ *                finds @ae/@awb/@gamma at unchanged offsets and
+ *                simply never sees MODALIX_ISP_STATS_VALID_AE_ZONES.
  *
  * Iridix is intentionally absent: the iridix FSM has no kernel→user
  * stats payload (it's user-space-produced only).
  */
 struct modalix_isp_stats_buffer {
-	__u32                          version;
-	__u32                          frame_id;
-	__u32                          valid_mask;
-	__u32                          _reserved;
-	__u64                          timestamp_ns;
+	__u32                            version;
+	__u32                            frame_id;
+	__u32                            valid_mask;
+	__u32                            _reserved;
+	__u64                            timestamp_ns;
 
-	struct modalix_isp_ae_stats    ae;
-	struct modalix_isp_awb_stats   awb;
-	struct modalix_isp_gamma_stats gamma;
+	struct modalix_isp_ae_stats      ae;
+	struct modalix_isp_awb_stats     awb;
+	struct modalix_isp_gamma_stats   gamma;
+	struct modalix_isp_ae_zone_stats ae_zones;
 };
 
 #endif /* _UAPI_MODALIX_ISP_STATS_BUFFER_H */

@@ -201,6 +201,15 @@ $sourcename ($packageversion) $distribution; urgency=low
 EOF
 
 # Generate a control file
+# sima.ai: /boot/fitImage is unversioned, so only one linux-image at a time.
+sima_fit_relations=
+if [ "${SRCARCH}" = arm64 ] && [ -x "${srctree}/scripts/sima/make-kernel-fit.sh" ]; then
+	sima_fit_relations="Provides: simaai-kernel-fit
+Conflicts: simaai-kernel-fit
+Replaces: simaai-kernel-fit
+"
+fi
+
 cat <<EOF > debian/control
 Source: $sourcename
 Section: kernel
@@ -217,7 +226,7 @@ Homepage: https://www.kernel.org/
 
 Package: $packagename-${KERNELRELEASE}
 Architecture: $debarch
-Description: Linux kernel, version ${KERNELRELEASE}
+${sima_fit_relations}Description: Linux kernel, version ${KERNELRELEASE}
  This package contains the Linux kernel, modules and corresponding other
  files, version: ${KERNELRELEASE}.
 EOF

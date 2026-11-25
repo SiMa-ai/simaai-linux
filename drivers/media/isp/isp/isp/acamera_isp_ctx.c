@@ -24,6 +24,7 @@
 #include "acamera_command_api.h"
 #include "acamera_configuration.h"
 #include "acamera_frontend_config.h"
+#include "acamera_isp_config.h" /* ACAMERA_ISP_SIZE: the register aperture */
 #include "acamera_interrupt_numbers.h"
 #include "acamera_logger.h"
 
@@ -84,8 +85,8 @@ int32_t acamera_isp_ctx_init( acamera_isp_ctx_ptr_t p_ictx, acamera_settings *se
     p_ictx->stop_profiling = 1000; // Stop  when gframe == 1000
 #endif                             // ACAMERA_ISP_PROFILING
 
-    LOG( LOG_INFO, "* -------------------------------------------" );
-    LOG( LOG_INFO, "* Start initializing context #%02d ------------", p_ictx->context_id );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "* -------------------------------------------" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "* Start initializing context #%02d ------------", p_ictx->context_id );
 
     // Copy settings.
     system_memcpy( (void *)&p_ictx->settings, (void *)settings, sizeof( acamera_settings ) );
@@ -108,8 +109,8 @@ int32_t acamera_isp_ctx_init( acamera_isp_ctx_ptr_t p_ictx, acamera_settings *se
     // Set context state parameter
     override_context_param( p_ictx, CONTEXT_STATE_PARAM, CTX_STATE_INIT );
 
-    LOG( LOG_INFO, "* End initializing context #%02d ------------", p_ictx->context_id );
-    LOG( LOG_INFO, "* -------------------------------------------" );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "* End initializing context #%02d ------------", p_ictx->context_id );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "* -------------------------------------------" );
 
 
     return result;
@@ -148,7 +149,7 @@ void acamera_isp_ctx_fsm_deinit( acamera_isp_ctx_ptr_t p_ictx )
 }
 
 #if 0
-#define DISCON_TRACE( fmt, ... ) LOG( LOG_ERR, fmt, ##__VA_ARGS__ )
+#define DISCON_TRACE( fmt, ... ) LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, fmt, ##__VA_ARGS__ )
 #else
 #define DISCON_TRACE( fmt, ... )
 #endif
@@ -334,10 +335,18 @@ void acamera_isp_ctx_load_custom_settings( acamera_isp_ctx_ptr_t p_ictx )
 {
     assert( p_ictx );
     if ( calib_mgr_lut_exists( p_ictx->calib_mgr_data, MODALIX_ISP_CALIB_CUSTOM_SETTINGS ) ) {
-        LOG( LOG_NOTICE, "Loading custom settings CTX[%d]", p_ictx->context_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "Loading custom settings CTX[%d]", p_ictx->context_id );
         const uint32_t *lut = calib_mgr_u32_lut_get( p_ictx->calib_mgr_data,
                                                      MODALIX_ISP_CALIB_CUSTOM_SETTINGS );
-        for ( ;; ) {
+        /* This walks the LUT in groups of four and stops on a terminator
+         * inside it. A tuning that forgets the terminator would otherwise
+         * keep walking, and every word it then read would become a register
+         * offset and a value to write - so bound the walk by the LUT. */
+        const uint32_t words = calib_mgr_lut_len( p_ictx->calib_mgr_data,
+                                                  MODALIX_ISP_CALIB_CUSTOM_SETTINGS );
+        uint32_t consumed;
+
+        for ( consumed = 0; consumed + 4u <= words; consumed += 4u ) {
             const uint32_t offset = *lut++;
             const uint32_t value = *lut++;
             const uint32_t mask = *lut++;
@@ -349,6 +358,36 @@ void acamera_isp_ctx_load_custom_settings( acamera_isp_ctx_ptr_t p_ictx )
              * with a non zero write is a legitimate operation where as a zero
              * offset with a zero mask is a terminating sequence. */
             if ( !( offset | mask ) ) break;
+
+            /* The offset is tuning data, and system_isp_write_*() falls
+             * through to the STU and ioremap() for an address outside the
+             * ISP window - so an offset this block does not own would reach
+             * arbitrary device memory. Keep the access inside the register
+             * aperture, and take only the three widths the switch below
+             * implements rather than treating anything else as a 32-bit
+             * write. */
+            if ( length != sizeof( uint8_t ) && length != sizeof( uint16_t ) &&
+                 length != sizeof( uint32_t ) ) {
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+                         "custom setting %u: access width %u is not 1, 2 or 4",
+                         consumed / 4u, length );
+                break;
+            }
+            if ( offset >= ACAMERA_ISP_REG_APERTURE_SIZE ||
+                 length > ACAMERA_ISP_REG_APERTURE_SIZE - offset ) {
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+                         "custom setting %u: offset 0x%x width %u is outside the "
+                         "ISP register aperture (0x%x)",
+                         consumed / 4u, offset, length,
+                         (unsigned)ACAMERA_ISP_REG_APERTURE_SIZE );
+                break;
+            }
+            if ( offset & ( length - 1u ) ) {
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR,
+                         "custom setting %u: offset 0x%x is not %u-byte aligned",
+                         consumed / 4u, offset, length );
+                break;
+            }
 
             switch ( length ) {
             case sizeof( uint8_t ):
@@ -362,8 +401,7 @@ void acamera_isp_ctx_load_custom_settings( acamera_isp_ctx_ptr_t p_ictx )
                                          ( value & mask ) );
                 break;
             case sizeof( uint32_t ):
-            /* By default assume 32bit register. */
-            default:
+            default: /* the width was checked above, so this is 4 */
                 system_isp_write_32( address,
                                      ( system_isp_read_32( address ) & ~mask ) |
                                          ( value & mask ) );
@@ -379,10 +417,10 @@ int32_t acamera_isp_ctx_load_calibrations( acamera_isp_ctx_ptr_t p_ictx, uint32_
 
     if ( p_ictx->calib_mgr_data != NULL ) {
         if ( ( result = acamera_calib_mgr_update( p_ictx->calib_mgr_data, wdr_mode ) ) != 0 ) {
-            LOG( LOG_CRIT, "Failed to update calibration set. Fatal error." );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Failed to update calibration set. Fatal error." );
         }
     } else {
-        LOG( LOG_CRIT, "Calibration manager entry is not initialized. Failed to get calibrations." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_CRIT, "Calibration manager entry is not initialized. Failed to get calibrations." );
         result = -1;
     }
 
@@ -408,7 +446,7 @@ static void count_algo_done( acamera_fsmgr_t *p_fsmgr )
 
         last_stamps[context_id] = this_stamp;
 
-        LOG( LOG_NOTICE, "Algo done, context_id %d, count %zu, ftime %zums, fps: %zu.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "Algo done, context_id %d, count %zu, ftime %zums, fps: %zu.",
              context_id,
              counters[context_id],
              average_frame_time,
@@ -664,11 +702,7 @@ static uint8_t handle_register_get_value( acamera_isp_ctx_ptr_t p_ictx, uint32_t
     const uint32_t reg_src = get_context_param( p_ictx, REGISTERS_SOURCE_ID_PARAM );
 
     switch ( reg_src ) {
-#if defined( ISP_HAS_SENSOR_FSM )
-    case SENSOR:
-        *value = p_ictx->fsmgr.sensor_fsm.ctrl.read_sensor_register( p_ictx->fsmgr.sensor_fsm.drv_priv, reg_addr );
-        return SUCCESS;
-#endif
+    /* SENSOR register access is not supported; the sensor is a V4L2 subdev. */
     case ISP:
         switch ( reg_size ) {
         case 8:
@@ -703,11 +737,7 @@ static uint8_t handle_register_set_value( acamera_isp_ctx_ptr_t p_ictx, uint32_t
     const uint32_t reg_src = get_context_param( p_ictx, REGISTERS_SOURCE_ID_PARAM );
 
     switch ( reg_src ) {
-#if defined( ISP_HAS_SENSOR_FSM )
-    case SENSOR:
-        p_ictx->fsmgr.sensor_fsm.ctrl.write_sensor_register( p_ictx->fsmgr.sensor_fsm.drv_priv, reg_addr, value );
-        return SUCCESS;
-#endif
+    /* SENSOR register access is not supported; the sensor is a V4L2 subdev. */
     case ISP:
         switch ( reg_size ) {
         case 8:

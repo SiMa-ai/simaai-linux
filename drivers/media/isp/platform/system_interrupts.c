@@ -26,7 +26,7 @@
 #include <linux/workqueue.h>    // For bottom half approach.
 #include "acamera_configuration.h" // FIRMWARE_CONTEXT_NUMBER
 #include "acamera_interrupts.h" // For isr_data_t
-#include "acamera_logger.h"     // LOG()
+#include "acamera_logger.h"     // LOG_CAT( ALOG_CAT_GENERAL, )
 
 #undef LOG_MODULE
 #define LOG_MODULE LOG_MODULE_GENERIC
@@ -110,7 +110,7 @@ static void bh_work_handler( struct work_struct *work )
 
     while ( kfifo_out( &s->isr_data_fifo, &data, sizeof( data ) ) == sizeof( data ) ) {
         drained++;
-        LOG( LOG_DEBUG, "BH ctx=%u dispatch #%u slot=%u stats=0x%x mcfe=0x%x sof=0x%x eof=0x%x",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "BH ctx=%u dispatch #%u slot=%u stats=0x%x mcfe=0x%x sof=0x%x eof=0x%x",
              (unsigned)s->ctx_id,
              drained,
              (unsigned)data.slot,
@@ -123,7 +123,7 @@ static void bh_work_handler( struct work_struct *work )
         }
     }
     if ( drained == 0u ) {
-        LOG( LOG_DEBUG, "BH ctx=%u ran with empty fifo (spurious wakeup)",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "BH ctx=%u ran with empty fifo (spurious wakeup)",
              (unsigned)s->ctx_id );
     }
 }
@@ -154,7 +154,7 @@ static irqreturn_t system_interrupt_handler( int irq, void *dev_id )
     data.slot = acamera_interrupt_read_current_slot();
     data.regs = acamera_interrupt_read_acknowledge();
 
-    LOG( LOG_DEBUG, "ISR slot=%u stats=0x%x mcfe=0x%x sof=0x%x eof=0x%x",
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "ISR slot=%u stats=0x%x mcfe=0x%x sof=0x%x eof=0x%x",
          (unsigned)data.slot,
          (unsigned)data.regs.stats,
          (unsigned)data.regs.mcfe,
@@ -269,7 +269,7 @@ int system_interrupts_init( void )
 	cpumask_set_cpu(ISP_CPU_CORE_NUMBER, &mask);
 	irq_set_affinity(m_irq_num, &mask);
 
-    LOG( LOG_NOTICE, "system_interrupts_init: %u ctx fifos x %u records each, irq=%d on CPU%d",
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_NOTICE, "system_interrupts_init: %u ctx fifos x %u records each, irq=%d on CPU%d",
          (unsigned)FIRMWARE_CONTEXT_NUMBER, (unsigned)ISP_IRQ_FIFO_DEPTH,
          m_irq_num, ISP_CPU_CORE_NUMBER );
 
@@ -304,7 +304,7 @@ void system_interrupts_deinit( void )
         kfifo_free( &m_irq_ctx[i].isr_data_fifo );
     }
 
-    LOG( LOG_DEBUG, "system_interrupts_deinit: total drops across %u ctx fifos = %u",
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "system_interrupts_deinit: total drops across %u ctx fifos = %u",
          (unsigned)FIRMWARE_CONTEXT_NUMBER, total_drops );
 
     m_interrupt_request_status = ISP_IRQ_STATUS_DEINIT;

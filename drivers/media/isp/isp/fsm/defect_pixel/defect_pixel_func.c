@@ -40,7 +40,7 @@ static void defect_pixel_lut_reload( defect_pixel_fsm_ptr_t p_fsm )
     const uint32_t defect_pixel_lut_min_size = ( defect_pixel_lut_size < defect_pixel_lut_hw_size ) ? defect_pixel_lut_size : defect_pixel_lut_hw_size;
 
     if ( defect_pixel_lut_size != defect_pixel_lut_hw_size ) {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_DEFECT_PIXEL has wrong size: expected %d got %d", defect_pixel_lut_hw_size, defect_pixel_lut_size );
+        LOG_CAT( ALOG_CAT_DPC, LOG_ERR, "MODALIX_ISP_CALIB_DEFECT_PIXEL has wrong size: expected %d got %d", defect_pixel_lut_hw_size, defect_pixel_lut_size );
     }
 
     uint32_t i;
@@ -143,7 +143,7 @@ void defect_pixel_update_hw( defect_pixel_fsm_ptr_t p_fsm )
                     p_fsm->frame_counter = FRAME_COUNTER_LIMIT;
                 } else {
                     if ( ( dp_pixel_cnt < ACAMERA_FW_SHP_DETECTED_MAXIMUM ) && ( p_fsm->hp_strength == 0 ) ) {
-                        LOG( LOG_ERR, "Defect pixel calibration procedure fails! Detected dp pixles: %u, required dp pixels: %u!", dp_pixel_cnt, ACAMERA_FW_SHP_DETECTED_MAXIMUM );
+                        LOG_CAT( ALOG_CAT_DPC, LOG_ERR, "Defect pixel calibration procedure fails! Detected dp pixles: %u, required dp pixels: %u!", dp_pixel_cnt, ACAMERA_FW_SHP_DETECTED_MAXIMUM );
                     }
                     // Finish calibration
                     acamera_isp_defect_pixel_detection_trigger_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, 0 ); // Detection trigger

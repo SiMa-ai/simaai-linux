@@ -36,6 +36,13 @@ extern "C" {
  * surface were retired in the V4L2 META migration. */
 
 int32_t ctrl_channel_init( acamera_settings *settings, uint8_t num_of_contexts );
+
+/* Teardown is two steps, and the order matters. ctrl_channel_shutdown()
+ * stops the bridge handing calibrations out and releases anyone waiting
+ * on a push; ctrl_channel_deinit() frees the storage, and may only run
+ * once every calibration manager entry has been torn down, because until
+ * then the firmware holds slot pointers into it. */
+void    ctrl_channel_shutdown( void );
 void    ctrl_channel_deinit( void );
 void    ctrl_channel_process( void );  /* no-op; retained for callsite stability */
 

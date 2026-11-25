@@ -69,7 +69,7 @@ int module_mcfe_slot_create( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t *slo
             mcfe_slots[i].occupied = 1;
             rc = module_mcfe_slot_set_config( i, slot_cfg );
             if ( rc != MCFE_ERR_NONE ) {
-                LOG( LOG_ERR, "Error, failed to configure slot %d!", i );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to configure slot %d!", i );
                 mcfe_slots[i].occupied = 0;
 
                 return rc;
@@ -80,19 +80,19 @@ int module_mcfe_slot_create( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t *slo
         }
     }
 
-    LOG( LOG_ERR, "Error, could not find empty slot to create." );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, could not find empty slot to create." );
 #else
     if ( mcfe_slots[slot_id].occupied == 0 ) {
         mcfe_slots[slot_id].occupied = 1;
         rc = module_mcfe_slot_set_config( slot_id, slot_cfg );
         if ( rc != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Error, failed to configure slot %d!", slot_id );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to configure slot %d!", slot_id );
             mcfe_slots[slot_id].occupied = 0;
 
             return rc;
         }
     } else {
-        LOG( LOG_ERR, "Error, slot %d is already created.", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot %d is already created.", slot_id );
         return MCFE_ERR_INV_PARM;
     }
 #endif
@@ -108,44 +108,44 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
 
     // Error handler
     if ( slot_id >= ISP_MCFE_MAX_SLOT ) {
-        LOG( LOG_ERR, "Error, slot id (%d) is too big.", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot id (%d) is too big.", slot_id );
         return MCFE_ERR_INV_PARM;
     } else if ( mcfe_slots[slot_id].occupied != 1 ) {
-        LOG( LOG_ERR, "Error, slot #%d is not yet occupied.", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot #%d is not yet occupied.", slot_id );
         return MCFE_ERR_INV_PARM;
     } else if ( slot_cfg->slot_mode >= MODULE_MCFE_SLOT_MODE_MAX ) {
-        LOG( LOG_ERR, "Error, invalid slot mode. (mode = %d)", slot_cfg->slot_mode );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid slot mode. (mode = %d)", slot_cfg->slot_mode );
         return MCFE_ERR_INV_PARM;
     } else if ( slot_cfg->slot_bufset_out == NULL ) {
-        LOG( LOG_ERR, "Error, slot output buffer set pointer is NULL" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot output buffer set pointer is NULL" );
         return MCFE_ERR_INV_PARM;
     } else if ( slot_cfg->slot_bufset_raw == NULL ) {
-        LOG( LOG_ERR, "Error, slot raw buffer set pointer is NULL" );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot raw buffer set pointer is NULL" );
         return MCFE_ERR_INV_PARM;
     } else if ( slot_cfg->num_output != slot_cfg->slot_bufset_out->buffs.num_planes ) {
-        LOG( LOG_ERR, "Error, slot number of outputs (%d) and buffer set number of planes (%d) don't match.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot number of outputs (%d) and buffer set number of planes (%d) don't match.",
              slot_cfg->num_output, slot_cfg->slot_bufset_out->buffs.num_planes );
         return MCFE_ERR_INV_PARM;
     } else if ( slot_cfg->num_input != slot_cfg->slot_bufset_raw->buffs.num_planes ) {
-        LOG( LOG_ERR, "Error, slot number of inputs (%d) and buffer set number of planes (%d) don't match.",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot number of inputs (%d) and buffer set number of planes (%d) don't match.",
              slot_cfg->num_input, slot_cfg->slot_bufset_raw->buffs.num_planes );
         return MCFE_ERR_INV_PARM;
     } else if ( slot_cfg->slot_bufset_out->frames.num_frames > 2 ) {
-        LOG( LOG_ERR, "Output buffer count of %d is not supported.", slot_cfg->slot_bufset_out->frames.num_frames );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Output buffer count of %d is not supported.", slot_cfg->slot_bufset_out->frames.num_frames );
         return MCFE_ERR_INV_PARM;
     } else {
         for ( i = 0; i < MODULE_MCFE_BUFSET_MAX_FRAMES; i++ ) {
             if ( ( slot_cfg->slot_bufset_raw->frames.frame[i] == NULL ) &&
                  ( i < slot_cfg->slot_bufset_raw->frames.num_frames ) &&
                  ( ( slot_cfg->slot_bufset_raw->flags & MCFE_BUFSET_FLAG_CREATE_EMPTY ) == 0 ) ) {
-                LOG( LOG_ERR, "Error, raw buffer set associated frame %d pointer is NULL.", i );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, raw buffer set associated frame %d pointer is NULL.", i );
                 return MCFE_ERR_INV_PARM;
             }
 
             if ( ( slot_cfg->slot_bufset_out->frames.frame[i] == NULL ) &&
                  ( i < slot_cfg->slot_bufset_out->frames.num_frames ) &&
                  ( ( slot_cfg->slot_bufset_out->flags & MCFE_BUFSET_FLAG_CREATE_EMPTY ) == 0 ) ) {
-                LOG( LOG_ERR, "Error, out buffer set associated frame %d pointer is NULL.", i );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, out buffer set associated frame %d pointer is NULL.", i );
                 return MCFE_ERR_INV_PARM;
             }
         }
@@ -154,7 +154,7 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
     // Prepare buffer ids and flag slt.
     if ( slot_cfg->slot_mode == MODULE_MCFE_SLOT_MODE_MANUAL ) {
         if ( slot_cfg->num_input > MODULE_MCFE_INPUT_PORT_MAX ) {
-            LOG( LOG_ERR, "Number of slot inputs (%d) exceeds maximum value (%d).", slot_cfg->num_input, MODULE_MCFE_INPUT_PORT_MAX );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Number of slot inputs (%d) exceeds maximum value (%d).", slot_cfg->num_input, MODULE_MCFE_INPUT_PORT_MAX );
             return MCFE_ERR_INV_PARM;
         }
 
@@ -163,17 +163,17 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
             // Handle sensor channel ordering
 
             if ( module_mcfe_bufset_get_buf_id( slot_cfg->slot_bufset_raw, -1, i, MCFE_BUFSET_STATUS_EMPTY, &buf_id_raw[i] ) != MCFE_ERR_NONE ) {
-                LOG( LOG_ERR, "Slot %d failed to get empty buffer index from buffer set (type = %d, index = %d, plane = %d)",
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Slot %d failed to get empty buffer index from buffer set (type = %d, index = %d, plane = %d)",
                      slot_id, slot_cfg->slot_bufset_raw->type, slot_cfg->slot_bufset_raw->index, i );
                 return MCFE_ERR_NO_RES;
             }
 
-            LOG( LOG_INFO, "Slot = %d, plane = %d raw buffer index = %d", slot_id, i, buf_id_raw[i] );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Slot = %d, plane = %d raw buffer index = %d", slot_id, i, buf_id_raw[i] );
         }
     } else {
         for ( i = 0; i < slot_cfg->num_input; i++ ) {
             if ( slot_cfg->slot_input_port_id[i] >= MODULE_MCFE_INPUT_PORT_MAX ) {
-                LOG( LOG_ERR, "Error, invalid input port id (port id = %d), channel %d.", slot_cfg->slot_input_port_id[i], i );
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid input port id (port id = %d), channel %d.", slot_cfg->slot_input_port_id[i], i );
                 return MCFE_ERR_INV_PARM;
             }
         }
@@ -187,14 +187,14 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
         hwif_out_buf_cfg.slot_output_buffers[i] = slot_cfg->slot_bufset_out->frames.cached_planes[i].hw_cfg.axi;
 
         if ( module_mcfe_bufset_get_buf_id( slot_cfg->slot_bufset_out, 0, i, MCFE_BUFSET_STATUS_EMPTY, &hwif_out_buf_cfg.first[i] ) != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Slot %d failed to get empty buffer index from buffer set (type = %d, index = %d, plane = %d)",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Slot %d failed to get empty buffer index from buffer set (type = %d, index = %d, plane = %d)",
                  slot_id, slot_cfg->slot_bufset_raw->type, slot_cfg->slot_bufset_raw->index, i );
             return MCFE_ERR_NO_RES;
         }
 
         if ( slot_cfg->slot_bufset_out->frames.num_frames == 2 ) {
             if ( module_mcfe_bufset_get_buf_id( slot_cfg->slot_bufset_out, 1, i, MCFE_BUFSET_STATUS_EMPTY, &hwif_out_buf_cfg.second[i] ) != MCFE_ERR_NONE ) {
-                LOG( LOG_ERR, "Slot %d failed to get empty buffer index from buffer set (type = %d, index = %d, plane = %d)",
+                LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Slot %d failed to get empty buffer index from buffer set (type = %d, index = %d, plane = %d)",
                      slot_id, slot_cfg->slot_bufset_raw->type, slot_cfg->slot_bufset_raw->index, i );
                 return MCFE_ERR_NO_RES;
             }
@@ -218,7 +218,7 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
 
     mcfe_hwif_disable_hist_on_slot_and_input( slot_id, slot_cfg->slot_input_port_id[0] );
     mcfe_hwif_slot_cfg_CDMA_config( slot_id, slot_cfg->cdma_addr, slot_cfg->hist_position_is_be );
-    LOG( LOG_INFO, "slot remoter %x.", slot_cfg->is_remote );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "slot remoter %x.", slot_cfg->is_remote );
     if ( slot_cfg->is_remote == 0 ) {
         mcfe_hwif_slot_stat_CDMA_config( slot_cfg->slot_input_port_id[0], slot_cfg->cdma_addr, slot_cfg->hist_position_is_be );
     }
@@ -232,7 +232,7 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
         module_mcfe_input_cfg_t input_cfg;
         rc = module_mcfe_input_get_input_cfg( slot_cfg->slot_input_port_id[0], &input_cfg );
         if ( rc != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Error, failed to find out buffer from bufq (bufq_id = 0x%04x).", slot_cfg->slot_input_port_id[0] );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to find out buffer from bufq (bufq_id = 0x%04x).", slot_cfg->slot_input_port_id[0] );
             return rc;
         }
 
@@ -242,7 +242,7 @@ int module_mcfe_slot_set_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
 
     int rggb_start = slot_cfg->rggb_start;
     int cfa_pattern = slot_cfg->cfa_pattern;
-    LOG( LOG_INFO, "Slot: %d , Top configuration [width = %d, height = %d, rggb_start = %d, cfa_pattern = %d].", slot_id, width, height, rggb_start, cfa_pattern );
+    LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Slot: %d , Top configuration [width = %d, height = %d, rggb_start = %d, cfa_pattern = %d].", slot_id, width, height, rggb_start, cfa_pattern );
     isp_hwif_top_config( slot_cfg->cdma_addr, width, height, rggb_start, cfa_pattern );
 
 
@@ -295,13 +295,13 @@ int module_mcfe_slot_get_config( mcfe_slot_id_t slot_id, module_mcfe_slot_cfg_t 
 
     // Error handler
     if ( slot_id >= ISP_MCFE_MAX_SLOT ) {
-        LOG( LOG_ERR, "Error, slot id (%d) is too big.", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot id (%d) is too big.", slot_id );
         return MCFE_ERR_INV_PARM;
     } else if ( slot_cfg == NULL ) {
-        LOG( LOG_ERR, "Error, NULL param passed." );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, NULL param passed." );
         return MCFE_ERR_INV_PARM;
     } else if ( mcfe_slots[slot_id].occupied != 1 ) {
-        LOG( LOG_ERR, "Error, slot #%d is not yet occupied.", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, slot #%d is not yet occupied.", slot_id );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -317,7 +317,7 @@ int module_mcfe_slot_get_slot_id_with_input_id( mcfe_slot_id_t *slot_id, unsigne
 
     // Error handler
     if ( input_id >= MODULE_MCFE_INPUT_PORT_MAX ) {
-        LOG( LOG_ERR, "Error, invalid input id (%d).", input_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid input id (%d).", input_id );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -330,7 +330,7 @@ int module_mcfe_slot_get_slot_id_with_input_id( mcfe_slot_id_t *slot_id, unsigne
             for ( j = 0; j < pslot->slot_cfg.num_input; j++ ) {
                 if ( input_id == pslot->slot_cfg.slot_input_port_id[j] ) {
                     if ( *slot_id == MODULE_MCFE_SLOT_ARRAY_SIZE ) {
-                        LOG( LOG_DEBUG, "Found input %d on slot %d (oc=%d, md=%d, id=%d, nm=%d).",
+                        LOG_CAT( ALOG_CAT_GENERAL, LOG_DEBUG, "Found input %d on slot %d (oc=%d, md=%d, id=%d, nm=%d).",
                              input_id,
                              i,
                              pslot->occupied,
@@ -340,7 +340,7 @@ int module_mcfe_slot_get_slot_id_with_input_id( mcfe_slot_id_t *slot_id, unsigne
                         *slot_id = i;
                         rc = MCFE_ERR_NONE;
                     } else {
-                        LOG( LOG_ERR, "Error, duplicated input %d on slot %d and %d.", input_id, *slot_id, i );
+                        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, duplicated input %d on slot %d and %d.", input_id, *slot_id, i );
                         return MCFE_ERR_GENERAL;
                     }
                 }
@@ -358,7 +358,7 @@ int module_mcfe_slot_start( mcfe_slot_id_t slot_id )
     // Error handler
     if ( slot_id >= ISP_MCFE_MAX_SLOT ||
          mcfe_slots[slot_id].occupied == 0 ) {
-        LOG( LOG_ERR, "Error, invalid slot id (%d).", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid slot id (%d).", slot_id );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -376,14 +376,14 @@ int module_mcfe_slot_trigger_manual( mcfe_slot_id_t slot_id )
 
     // Error handlers
     if ( slot_id >= ISP_MCFE_MAX_SLOT || mcfe_slots[slot_id].occupied == 0 ) {
-        LOG( LOG_ERR, "Error, invalid slot id (%d).", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid slot id (%d).", slot_id );
         return MCFE_ERR_INV_PARM;
     }
 
     slot_cfg = &( mcfe_slots[slot_id].slot_cfg );
 
     if ( slot_cfg->slot_bufset_raw->buffs.num_planes > ISP_MCFE_MAX_INPUT ) {
-        LOG( LOG_ERR, "Error, number of buffers (%d) exceeds maximum allowed number (%d).",
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, number of buffers (%d) exceeds maximum allowed number (%d).",
              slot_cfg->slot_bufset_raw->buffs.num_planes, ISP_MCFE_MAX_INPUT );
         return MCFE_ERR_INV_PARM;
     }
@@ -392,7 +392,7 @@ int module_mcfe_slot_trigger_manual( mcfe_slot_id_t slot_id )
         // Handling reverse order of sensor channels
 
         if ( module_mcfe_bufset_get_buf_id( slot_cfg->slot_bufset_raw, -1, i, MCFE_BUFSET_STATUS_FILLED, &buffer_ids[i] ) != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Slot %d failed to get filled buffer index from buffer set (type = %d, index = %d, plane = %d)",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Slot %d failed to get filled buffer index from buffer set (type = %d, index = %d, plane = %d)",
                  slot_id, slot_cfg->slot_bufset_raw->type, slot_cfg->slot_bufset_raw->index, i );
             return MCFE_ERR_NO_RES;
         }
@@ -414,7 +414,7 @@ int module_mcfe_slot_cdma_address_update( unsigned short slot_id, unsigned int a
     // Error handler
     if ( slot_id >= ISP_MCFE_MAX_SLOT ||
          mcfe_slots[slot_id].occupied == 0 ) {
-        LOG( LOG_ERR, "Error, invalid slot id (%d).", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid slot id (%d).", slot_id );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -433,7 +433,7 @@ int module_mcfe_slot_stop( mcfe_slot_id_t slot_id )
     // Error handler
     if ( slot_id >= ISP_MCFE_MAX_SLOT ||
          mcfe_slots[slot_id].occupied == 0 ) {
-        LOG( LOG_ERR, "Error, invalid slot id (%d).", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid slot id (%d).", slot_id );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -449,7 +449,7 @@ int module_mcfe_slot_destroy( mcfe_slot_id_t slot_id )
 
     // Error handler
     if ( slot_id >= ISP_MCFE_MAX_SLOT ) {
-        LOG( LOG_ERR, "Error, invalid slot id (%d).", slot_id );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, invalid slot id (%d).", slot_id );
         return MCFE_ERR_INV_PARM;
     }
 
@@ -473,7 +473,7 @@ int module_mcfe_slot_get_free_inputs( mcfe_slot_id_t slot_id )
             retval++;
             continue;
         } else if ( rc != MCFE_ERR_NONE ) {
-            LOG( LOG_ERR, "Error, failed to get slot id for input %d (rc = %d)\n", i, rc );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, failed to get slot id for input %d (rc = %d)\n", i, rc );
             return 0;
         } else if ( input_slot_id == slot_id ) {
             retval++;

@@ -241,7 +241,7 @@ static int acamera_socket_do_init( acamera_socket_connection_t *con )
 
     /* f = acamera_socket_f_impl();
     if ( !f ) {
-        LOG( LOG_ERR, "Please double check your platform provide TCP/IP socket routines" );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Please double check your platform provide TCP/IP socket routines" );
         return -1;
     }
 */
@@ -269,7 +269,7 @@ void acamera_connection_init( void )
     acamera_api_ack_t ack = {0};
 
     acamera_buffer_manager_init( &buff_mgr, ACAMERA_CMD_QUEUES_BASE_ADDR, ACAMERA_CMD_QUEUES_SIZE / 2 );
-    LOG( LOG_INFO, "acamera connection Init." );
+    LOG_CAT( ALOG_CAT_CONTROL, LOG_INFO, "acamera connection Init." );
     con.param = &buff_mgr;
     con.data_read = (data_read_f)acamera_buffer_manager_read;
     con.data_write = (data_write_f)acamera_buffer_manager_write;
@@ -285,7 +285,7 @@ void acamera_connection_init( void )
     if ( !acamera_socket_do_init( &con ) ) {
         ACAMERA_CONNECTION_TRACE( "Connection is TCP/IP socket" );
     } else {
-        LOG( LOG_ERR, "Unable to initialise TCP/IP socket" );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Unable to initialise TCP/IP socket" );
     }
 
 #elif ISP_HAS_CONNECTION_CHARDEV
@@ -294,11 +294,11 @@ void acamera_connection_init( void )
         con.data_read = (data_read_f)acamera_chardev_read;
         con.data_write = (data_write_f)acamera_chardev_write;
     } else {
-        LOG( LOG_ERR, "Unable to register character device" );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Unable to register character device" );
     }
 #endif
     if ( !con.data_read || !con.data_write ) {
-        LOG( LOG_WARNING, "Connection method is not defined" );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Connection method is not defined" );
     }
 #endif // ISP_HAS_STREAM_CONNECTION
 }
@@ -309,7 +309,7 @@ void acamera_connection_destroy( void )
 #if ISP_HAS_CONNECTION_CHARDEV
     int rc = acamera_chardev_destroy();
     if ( rc )
-        LOG( LOG_ERR, "Unable to destroy character device with error %d", rc );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Unable to destroy character device with error %d", rc );
 #else
     ACAMERA_CONNECTION_TRACE( LOG_WARNING, "Connection destroy method is not defined" );
 #endif /* connection type */
@@ -360,7 +360,7 @@ static uint32_t process_request( void )
 
     // Check the minimum size of the input packet, and the maximum size allowed by the protcol:
     if ( packet->in.header.total_size < sizeof( acamera_socket_input_packet_t ) || ( !has_extra_data && packet->in.header.total_size > sizeof( acamera_socket_input_packet_t ) ) ) {
-        LOG( LOG_WARNING, "Wrong packet size %u for type %u.", (unsigned int)con.rx_buffer_size, (unsigned int)type );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong packet size %u for type %u.", (unsigned int)con.rx_buffer_size, (unsigned int)type );
         con.state = STATE_TX_PACKET;
         con.tx_buffer_inx = 0;
         con.tx_buffer_size = sizeof( acamera_socket_packet_header_t );
@@ -386,7 +386,7 @@ static uint32_t process_request( void )
             }
         } else {
             packet->out.status = FAIL;
-            LOG( LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
         }
         break;
     case TransactionTypeRegWrite:
@@ -400,7 +400,7 @@ static uint32_t process_request( void )
             }
         } else {
             packet->out.status = FAIL;
-            LOG( LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
         }
         break;
     case TransactionTypeRegMaskWrite:
@@ -417,7 +417,7 @@ static uint32_t process_request( void )
             }
         } else {
             packet->out.status = FAIL;
-            LOG( LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
         }
         break;
     case TransactionTypeLUTRead:
@@ -433,7 +433,7 @@ static uint32_t process_request( void )
             }
         } else {
             packet->out.status = FAIL;
-            LOG( LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
         }
         break;
     case TransactionTypeLUTWrite:
@@ -448,7 +448,7 @@ static uint32_t process_request( void )
             }
         } else {
             packet->out.status = FAIL;
-            LOG( LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
         }
         break;
     case TransactionTypeAPIRead:
@@ -481,11 +481,11 @@ static uint32_t process_request( void )
             case FILE_TRANSFER_ID:
             default:
                 packet->out.status = FAIL;
-                LOG( LOG_WARNING, "Wrong buffer class %u.", (unsigned int)buf_class );
+                LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong buffer class %u.", (unsigned int)buf_class );
             }
         } else {
             packet->out.status = FAIL;
-            LOG( LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
         }
         break;
     case TransactionTypeBUFWrite:
@@ -501,16 +501,16 @@ static uint32_t process_request( void )
             case FILE_TRANSFER_ID:
             default:
                 packet->out.status = FAIL;
-                LOG( LOG_WARNING, "Wrong buffer class %d.", buf_class );
+                LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong buffer class %d.", buf_class );
             }
         } else {
             packet->out.status = FAIL;
-            LOG( LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong request size %u for type %u.", (unsigned int)size, (unsigned int)type );
         }
         break;
     default:
         packet->out.header.total_size = sizeof( acamera_socket_packet_header_t ); // no output
-        LOG( LOG_WARNING, "Wrong packet type %d.", type );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Wrong packet type %d.", type );
     }
 
     return packet->out.header.total_size;
@@ -546,7 +546,7 @@ static void process_api_request( void )
         if ( ack.acked_req_type == API_RESET ) {
             status = application_command( (uint8_t)req.cmd_type, (uint8_t)req.cmd, req.data, COMMAND_GET, &data );
             if ( ( status != SUCCESS ) && ( status != NOT_SUPPORTED ) && ( status != NOT_IMPLEMENTED ) ) {
-                LOG( LOG_ERR, "Error at cmd: 0x%x, value: %d, status: %d.", req.cmd, req.data, status );
+                LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Error at cmd: 0x%x, value: %d, status: %d.", req.cmd, req.data, status );
             }
             send_api_response( &req, &ack, status, data );
         }
@@ -555,7 +555,7 @@ static void process_api_request( void )
         if ( ack.acked_req_type == API_RESET ) {
             status = application_command( (uint8_t)req.cmd_type, (uint8_t)req.cmd, req.data, COMMAND_SET, &data );
             if ( ( status != SUCCESS ) && ( status != NOT_SUPPORTED ) && ( status != NOT_IMPLEMENTED ) ) {
-                LOG( LOG_ERR, "Error at cmd: %d, value: %d, status: %d.", req.cmd, req.data, status );
+                LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Error at cmd: %d, value: %d, status: %d.", req.cmd, req.data, status );
             }
             send_api_response( &req, &ack, status, data );
         }
@@ -563,7 +563,7 @@ static void process_api_request( void )
     case API_RESET:
         break;
     default:
-        LOG( LOG_ERR, "Wrong request %u.", req.req_type );
+        LOG_CAT( ALOG_CAT_CONTROL, LOG_ERR, "Wrong request %u.", req.req_type );
         data = ERR_BAD_ARGUMENT;
         status = FAIL;
         send_api_response( &req, &ack, status, data );
@@ -599,7 +599,7 @@ void process_socket_request( void )
                 con.rx_buffer_size = buf[0];
                 if ( con.rx_buffer_size > CONNECTION_BUFFER_SIZE ) {
                     reset_connection();
-                    LOG( LOG_WARNING, "Too big request %u, maximum allowed %u.", (unsigned int)con.rx_buffer_size, (unsigned int)CONNECTION_BUFFER_SIZE );
+                    LOG_CAT( ALOG_CAT_CONTROL, LOG_WARNING, "Too big request %u, maximum allowed %u.", (unsigned int)con.rx_buffer_size, (unsigned int)CONNECTION_BUFFER_SIZE );
                     con.state = STATE_SKIP_DATA;
                 } else {
                     con.state = STATE_RX_DATA;
@@ -658,7 +658,7 @@ void process_socket_request( void )
             break;
         default:
             res = -1;
-            LOG( LOG_CRIT, "Wrong state %d", con.state );
+            LOG_CAT( ALOG_CAT_CONTROL, LOG_CRIT, "Wrong state %d", con.state );
             reset_connection();
             return;
         }

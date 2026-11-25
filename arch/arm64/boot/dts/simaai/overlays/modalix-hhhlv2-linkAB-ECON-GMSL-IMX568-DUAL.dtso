@@ -1,0 +1,200 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ *
+ * Both cameras on the shared MAX96716A deserializer: link A
+ * (Pipe Y, VC0) and link B (Pipe Z, VC1). Union of the linkA
+ * and linkB overlays - load one of the three, not several.
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+    /* ---- link A camera supplies ---- */
+    imx568_clk0: imx568_clk0 {
+        status = "okay";
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+
+    imx568_vana0: vana0 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vana0";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+
+    imx568_vdig0: vdig0 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vdig0";
+        regulator-min-microvolt = <110000>;
+        regulator-max-microvolt = <110000>;
+        regulator-always-on;
+    };
+
+    imx568_vddl0: vddl0 {
+        compatible = "regulator-fixed";
+        regulator-name = "vddl0";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+
+    /* ---- link B camera supplies ---- */
+    imx568_clk1: imx568_clk1 {
+        status = "okay";
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <37125000>;
+    };
+
+    imx568_vana1: vana1 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vana1";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        enable-active-high;
+        startup-delay-us = <300000>;
+        regulator-always-on;
+    };
+
+    imx568_vdig1: vdig1 {
+        compatible = "regulator-fixed";
+        regulator-name = "imx568_vdig1";
+        regulator-min-microvolt = <110000>;
+        regulator-max-microvolt = <110000>;
+        regulator-always-on;
+    };
+
+    imx568_vddl1: vddl1 {
+        compatible = "regulator-fixed";
+        regulator-name = "vddl1";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        regulator-always-on;
+    };
+};
+
+/* Shared platform nodes - enabled once for both cameras. */
+&csi3 {
+    status = "okay";
+};
+
+&axi_vdma3 {
+    status = "okay";
+};
+
+&mipi_dphy_rx3 {
+    status = "okay";
+};
+
+&v4l2video3 {
+    status = "okay";
+};
+
+&v4l2vdma3 {
+    status = "okay";
+};
+
+/* VC1's video capture node is status="disabled" in modalix-mipi.dtsi
+ * (only VC0's raw30in is enabled there), so link B's stream would have
+ * nowhere to land without this. */
+&raw31in {
+    status = "okay";
+};
+
+/* VC0 sink port on csi3 - link A / Pipe Y. */
+&csi30in {
+    clock-lanes = <0>;
+    data-lanes = <1 2 3 4>;
+    link-frequencies = /bits/ 64 <594000000>;
+    remote-endpoint = <&cam30out>;
+    clock-continuous;
+};
+
+/* VC1 sink port on csi3 - link B / Pipe Z. Must match both the VC the
+ * deserializer stamps (DSER_PIPE_Z_CONF's MAP_DST_* bytes) and the
+ * sima,virtual-channel property on the camera endpoint below. */
+&csi31in {
+    clock-lanes = <0>;
+    data-lanes = <1 2 3 4>;
+    link-frequencies = /bits/ 64 <594000000>;
+    remote-endpoint = <&cam31out>;
+    clock-continuous;
+};
+
+&i2c01 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    /*
+     * Both camera MCUs are natively 0x42. SER1_I2C_CONF
+     * (econ_imx568_serdes.h) programs serializer A's translator with
+     * SRC 0x44 -> DST 0x42, giving each camera a unique address here.
+     */
+    imx568: imx568@44 {
+        compatible = "econ,imx568-gmsl";
+        reg = <0x44>;
+        clocks = <&imx568_clk0>;
+        clock-names = "xclk";
+        VANA-supply = <&imx568_vana0>;
+        VDIG-supply = <&imx568_vdig0>;
+        VDDL-supply = <&imx568_vddl0>;
+        camera_mipi_lanes = <2>;
+        cam_fw_name = "imx568_cam_fw_gmsl.bin";
+        port@1 {
+            reg = <1>;
+            cam30out: endpoint@0 {
+                reg = <0>;
+                clock-lanes = <0>;
+                data-lanes = <1 2 3 4>;
+                link-frequencies = /bits/ 64 <594000000>;
+                remote-endpoint = <&csi30in>;
+                clock-continuous;
+                /* Link A is Pipe Y / VC0. */
+                sima,virtual-channel = <0>;
+            };
+        };
+    };
+
+    /*
+     * SER2_I2C_CONF programs serializer B's translator with
+     * SRC_B 0x43 -> DST_B 0x42.
+     */
+    imx568b: imx568@43 {
+        compatible = "econ,imx568-gmsl";
+        reg = <0x43>;
+        clocks = <&imx568_clk1>;
+        clock-names = "xclk";
+        VANA-supply = <&imx568_vana1>;
+        VDIG-supply = <&imx568_vdig1>;
+        VDDL-supply = <&imx568_vddl1>;
+        camera_mipi_lanes = <2>;
+        cam_fw_name = "imx568_cam_fw_gmsl.bin";
+        port@1 {
+            reg = <1>;
+            cam31out: endpoint@0 {
+                reg = <0>;
+                clock-lanes = <0>;
+                data-lanes = <1 2 3 4>;
+                link-frequencies = /bits/ 64 <594000000>;
+                remote-endpoint = <&csi31in>;
+                clock-continuous;
+                /*
+                 * VC the deserializer stamps on this camera's packets
+                 * (DSER_PIPE_Z_CONF MAP_DST_*). The driver reports it
+                 * via .get_frame_desc and dwc-mipi-csi2 programs the
+                 * IPI VCID filter from it.
+                 */
+                sima,virtual-channel = <1>;
+            };
+        };
+    };
+};

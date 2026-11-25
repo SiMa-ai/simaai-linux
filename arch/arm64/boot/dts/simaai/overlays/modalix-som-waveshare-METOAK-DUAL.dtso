@@ -87,6 +87,9 @@
 
 &mipi_dphy_rx2 {
     status = "okay";
+    /* the band's own gain mode loses ~20% of this transmitter's frames;
+     * mode 3, the choice above 1.5 Gbps, recovers them */
+    snps,rx-hs-gain-mode = <3>;
 };
 
 &v4l2video1 {
@@ -108,7 +111,7 @@
 &csi10in {
     clock-lanes = <0>;
     data-lanes = <1 2>;
-    link-frequencies = /bits/ 64 <450000000>;
+    link-frequencies = /bits/ 64 <480000000>;
     remote-endpoint = <&cam10out>;
     clock-continuous;
 };
@@ -116,7 +119,7 @@
 &csi20in {
     clock-lanes = <0>;
     data-lanes = <1 2>;
-    link-frequencies = /bits/ 64 <450000000>;
+    link-frequencies = /bits/ 64 <480000000>;
     remote-endpoint = <&cam20out>;
     clock-continuous;
 };
@@ -133,6 +136,7 @@
                         cam10out: endpoint@0 {
                                 clock-lanes = <0>;
                                 data-lanes = <1 2>;
+                                /* datasheet mipiclk 960 Mbps/lane (measured ~904) */
                                 link-frequencies = /bits/ 64 <480000000>;
                                 remote-endpoint = <&csi10in>;
                                 clock-continuous;
@@ -148,6 +152,9 @@
                         cam20out: endpoint@0 {
                                 clock-lanes = <0>;
                                 data-lanes = <1 2>;
+                                /* datasheet mipiclk 960 Mbps/lane; with HS gain
+                                 * mode 3 the 900, 1000 and 1100 bands receive
+                                 * alike */
                                 link-frequencies = /bits/ 64 <480000000>;
                                 remote-endpoint = <&csi20in>;
                                 clock-continuous;

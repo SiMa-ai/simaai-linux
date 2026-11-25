@@ -5,9 +5,10 @@
 
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/clock/simaai,clkc-prc.h>
 
 / {
-	compatible = "arm,rtsm_ve,aemv8a","arm,vexpress";
+	compatible = "simaai,modalix";
 	interrupt-parent = <&gic>;
 
 	cpus {
@@ -21,6 +22,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_0>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 			l2_0: l2-cache {
 				compatible = "cache";
 				cache-level = <2>;
@@ -39,6 +42,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_0>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 		};
 
 		cpu2: cpu@100 {
@@ -48,6 +53,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_1>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 			l2_1: l2-cache {
 				compatible = "cache";
 				cache-level = <2>;
@@ -62,6 +69,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_1>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 		};
 
 		cpu4: cpu@200 {
@@ -71,6 +80,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_2>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 			l2_2: l2-cache {
 				compatible = "cache";
 				cache-level = <2>;
@@ -85,6 +96,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_2>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 		};
 
 		cpu6: cpu@300 {
@@ -94,6 +107,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_3>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 			l2_3: l2-cache {
 				compatible = "cache";
 				cache-level = <2>;
@@ -108,6 +123,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_3>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 		};
 
 		cpu8: cpu@400 {
@@ -117,6 +134,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_4>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 			l2_4: l2-cache {
 				compatible = "cache";
 				cache-level = <2>;
@@ -131,6 +150,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_4>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 		};
 
 		cpu10: cpu@500 {
@@ -140,6 +161,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_5>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 			l2_5: l2-cache {
 				compatible = "cache";
 				cache-level = <2>;
@@ -154,6 +177,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_5>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 		};
 
 		cpu12: cpu@600 {
@@ -163,6 +188,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_6>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 			l2_6: l2-cache {
 				compatible = "cache";
 				cache-level = <2>;
@@ -177,6 +204,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_6>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 		};
 
 		cpu14: cpu@700 {
@@ -186,6 +215,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_7>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 			l2_7: l2-cache {
 				compatible = "cache";
 				cache-level = <2>;
@@ -200,6 +231,8 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x10 0x03fffff0>;
 			next-level-cache = <&l2_7>;
+			clocks = <&clkc SIMAAI_PRC_CLK_APU_PLL>;
+			operating-points-v2 = <&cpu_opp_table>;
 		};
 
 		cpu-map {
@@ -331,4 +364,5 @@
 			status = "disabled";
 		};
 	};
+
 };

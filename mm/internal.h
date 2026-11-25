@@ -936,9 +936,11 @@ void init_cma_reserved_pageblock(struct page *page);
 struct cma;
 
 #ifdef CONFIG_CMA
+extern int sysctl_cma_first;
 void *cma_reserve_early(struct cma *cma, unsigned long size);
 void init_cma_pageblock(struct page *page);
 #else
+#define sysctl_cma_first 0
 static inline void *cma_reserve_early(struct cma *cma, unsigned long size)
 {
 	return NULL;

@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2026 SiMa ai
+ *
+ * cam1 overlay for the Introspect Technology SV3C-DPTX MIPI generator.
+ *
+ * Confirmed generator-side config this overlay must match (Introspect
+ * Pinetree, SV3C_4L6G_MIPI_DPHY_GENERATOR):
+ *   - dataLanes        = [1, 2]        -> data-lanes = <1 2> below
+ *   - continuousClock  = True          -> clock-continuous; below
+ *   - mipiClockConfig2.dataRate = 900.0 (Mbps/lane) -> link-frequencies
+ *     = 450000000 below (bit rate = link freq * 2 for DDR)
+ *   - virtualChannel   = 0             -> VC0, matches driver/host default
+ *   - imageFormat      = CSI_RAW8,
+ *     rawFormatBayerCell = RGGB        -> sima,pixel-bits = <8> below,
+ *     driver's fmt_code = MEDIA_BUS_FMT_SRGGB8_1X8
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+	xclk20: xclk20 {
+		status = "okay";
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+
+	i2cmux0: i2cmux@0 {
+		compatible = "i2c-mux-gpio";
+		i2c-parent = <&i2c52>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		/* Set port6 gpio6 to GPIO_ACTIVE_LOW mode */
+		mux-gpios = <&port6 6 0>;
+		i2cmux0p1: i2c@1 {
+		    reg = <1>;
+		    #address-cells = <1>;
+		    #size-cells = <0>;
+		};
+	};
+};
+
+&port5 {
+	cam-hog1 {
+		gpio-hog;
+		/* Set port5 gpio7 to GPIO_ACTIVE_HIGH mode */
+		gpios = <7 0>;
+		output-high;
+		line-name = "cam1_powdn";
+	};
+};
+
+&i2c52 {
+    status = "okay";
+    clock-frequency = <400000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+};
+
+&csi2 {
+    status = "okay";
+};
+
+&axi_vdma2 {
+    status = "okay";
+};
+
+&mipi_dphy_rx2 {
+    status = "okay";
+};
+
+&v4l2video2 {
+    status = "okay";
+};
+
+&v4l2vdma2 {
+    status = "okay";
+};
+
+&csi20in {
+    clock-lanes = <0>;
+    data-lanes = <1 2>;
+    link-frequencies = /bits/ 64 <450000000>;
+    remote-endpoint = <&cam20out>;
+    clock-continuous;
+};
+
+&i2cmux0p1 {
+	introspect_gen: introspect_gen@1a {
+		compatible = "sima,mipi-gen";
+		reg = <0x1a>;
+
+		clocks = <&xclk20>;
+		clock-names = "xclk";
+
+		port@1 {
+			cam20out: endpoint@0 {
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				link-frequencies = /bits/ 64 <450000000>;
+				remote-endpoint = <&csi20in>;
+				clock-continuous;
+				sima,pixel-bits = <8>;
+			};
+		};
+	};
+};

@@ -384,11 +384,16 @@ static const char * const imx568_supply_name[] = {
 
 #define IMX568_NUM_SUPPLIES ARRAY_SIZE(imx568_supply_name)
 
+struct econ_imx568_frame_size {
+	u32 width;
+	u32 height;
+};
+
 /* Per-solution identity and limits, by compatible. 0 = as the module reports. */
 struct econ_imx568_variant {
 	const char *name;
-	u32 only_width;
-	u32 only_height;
+	const struct econ_imx568_frame_size *frame_sizes;
+	u32 num_frame_sizes;
 	u32 max_fps;
 };
 
@@ -434,6 +439,10 @@ struct imx568 {
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *exposure;
 	u64 link_freq_value;
+
+	/* debugfs sensor-register passthrough */
+	struct dentry			*debugfs_dir;
+	u16				dbg_reg;
 
 	struct clk *xclk;
 	u32 xclk_freq;

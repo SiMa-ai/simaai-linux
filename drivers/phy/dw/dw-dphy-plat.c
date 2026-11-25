@@ -1,275 +1,149 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2018 Synopsys, Inc.
+ * Copyright (c) 2018-2019 Synopsys, Inc. and/or its affiliates.
  *
- * Synopsys MIPI D-PHY controller driver.
- * Platform dependent functions
+ * Synopsys DesignWare MIPI D-PHY controller driver.
+ * Platform driver
  *
  * Author: Luis Oliveira <Luis.Oliveira@synopsys.com>
  */
 
+#include <linux/of_device.h>
+
+#include <media/dwc/dw-dphy-data.h>
+#include <media/dwc/dw-csi-data.h>
+
 #include "dw-dphy-rx.h"
-
-static struct phy *dw_dphy_xlate(struct device *dev,
-				 const struct of_phandle_args *args)
-{
-	struct dw_dphy_rx *dphy = dev_get_drvdata(dev);
-
-	return dphy->phy;
-}
-
-static ssize_t dphy_reset_show(struct device *dev,
-			       struct device_attribute *attr, char *buf)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-
-	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 0);
-	usleep_range(100, 200);
-	dw_dphy_write(dphy, R_CSI2_DPHY_RSTZ, 1);
-
-	return sysfs_emit(buf, "dphy reset done\n");
-}
-
-static ssize_t dphy_freq_store(struct device *dev,
-			       struct device_attribute *attr, const char *buf,
-			       size_t count)
-{
-	int ret;
-	unsigned long freq;
-
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-
-	ret = kstrtoul(buf, 10, &freq);
-	if (ret < 0)
-		return ret;
-
-	if (freq > 2500) {
-		dev_info(dev, "Freq must be under 2500 Mhz\n");
-		return count;
-	}
-	if (freq < 80) {
-		dev_info(dev, "Freq must be over 80 Mhz\n");
-		return count;
-	}
-
-	dev_info(dev, "Data Rate %lu Mbps\n", freq);
-	dphy->dphy_freq = freq * 1000;
-
-	return count;
-}
-
-static ssize_t dphy_freq_show(struct device *dev, struct device_attribute *attr,
-			      char *buf)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-	char buffer[15];
-
-	snprintf(buffer, 15, "Freq %d\n", dphy->dphy_freq / 1000);
-
-	return strscpy(buf, buffer, PAGE_SIZE);
-}
-
-static ssize_t dphy_addr_store(struct device *dev,
-			       struct device_attribute *attr, const char *buf,
-			       size_t count)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-	unsigned long val;
-	int ret;
-	u8 addr;
-
-	ret = kstrtoul(buf, 16, &val);
-	if (ret < 0)
-		return ret;
-
-	addr = (u8)(val >> 16);
-
-	dev_info(dev, "Addr [0x%x] -> 0x%x\n", (unsigned int)addr,
-		 dw_dphy_te_read(dphy, addr));
-
-	return count;
-}
-
-#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-static ssize_t idelay_show(struct device *dev, struct device_attribute *attr,
-			   char *buf)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-	char buffer[15];
-
-	snprintf(buffer, 15, "idelay %d\n", dw_dphy_if_get_idelay(dphy));
-
-	return strscpy(buf, buffer, PAGE_SIZE);
-}
-
-static ssize_t idelay_store(struct device *dev, struct device_attribute *attr,
-			    const char *buf, size_t count)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-	int ret;
-	unsigned long val;
-	u8 lane, delay;
-
-	ret = kstrtoul(buf, 16, &val);
-	if (ret < 0)
-		return ret;
-
-	lane = (u8)val;
-	delay = (u8)(val >> 8);
-
-	dev_dbg(dev, "Lanes %u\n", lane);
-	dev_dbg(dev, "Delay %u\n", delay);
-
-	dw_dphy_if_set_idelay_lane(dphy, delay, lane);
-
-	return count;
-}
-#endif
-
-static ssize_t len_config_store(struct device *dev,
-				struct device_attribute *attr, const char *buf,
-				size_t count)
-{
-	int ret;
-	unsigned long length;
-
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-
-	ret = kstrtoul(buf, 10, &length);
-	if (ret < 0)
-		return ret;
-
-	if (length == BIT8)
-		pr_info("Configured for 8-bit interface\n");
-	else if (length == BIT12)
-		pr_info("Configured for 12-bit interface\n");
-	else
-		return count;
-
-	dphy->dphy_te_len = length;
-
-	return count;
-}
-
-static ssize_t len_config_show(struct device *dev,
-			       struct device_attribute *attr, char *buf)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-	char buffer[20];
-
-	snprintf(buffer, 20, "Length %d\n", dphy->dphy_te_len);
-
-	return strscpy(buf, buffer, PAGE_SIZE);
-}
-
-static ssize_t dw_dphy_g118_settle_store(struct device *dev,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
-{
-	int ret;
-	unsigned long lp_time;
-
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-
-	ret = kstrtoul(buf, 10, &lp_time);
-	if (ret < 0)
-		return ret;
-
-	if ((lp_time > 1) && (lp_time < 10000)) {
-		dphy->lp_time = lp_time;
-	} else {
-		pr_info("Invalid Value configuring for 1000 ns\n");
-		dphy->lp_time = 1000;
-	}
-
-	return count;
-}
-
-static ssize_t dw_dphy_g118_settle_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dw_dphy_rx *dphy = platform_get_drvdata(pdev);
-	char buffer[10];
-
-	snprintf(buffer, 10, "Settle %d ns\n", dphy->lp_time);
-
-	return strscpy(buf, buffer, PAGE_SIZE);
-}
-
-static DEVICE_ATTR_RO(dphy_reset);
-static DEVICE_ATTR_RW(dphy_freq);
-static DEVICE_ATTR_WO(dphy_addr);
-#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-static DEVICE_ATTR_RW(idelay);
-#endif
-static DEVICE_ATTR_RW(len_config);
-static DEVICE_ATTR_RW(dw_dphy_g118_settle);
-
-static struct attribute *dw_dphy_attrs[] = {
-	&dev_attr_dphy_reset.attr,
-	&dev_attr_dphy_freq.attr,
-	&dev_attr_dphy_addr.attr,
-#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
-	&dev_attr_idelay.attr,
-#endif
-	&dev_attr_len_config.attr,
-	&dev_attr_dw_dphy_g118_settle.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(dw_dphy);
 
 static struct phy_ops dw_dphy_ops = {
 	.init = dw_dphy_init,
 	.reset = dw_dphy_reset,
 	.power_on = dw_dphy_power_on,
 	.power_off = dw_dphy_power_off,
-	.configure = dw_dphy_configure,
+	.configure = __dw_dphy_configure,
 	.owner = THIS_MODULE,
 };
 
+static struct phy_provider *phy_provider;
+
+#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
+static u8 get_config(struct device *dev, struct dw_dphy_rx *dphy)
+{
+	dphy->config_gpio = of_get_named_gpio(dev->of_node,
+					      "snps,config-gpios", 0);
+	if (!gpio_is_valid(dphy->config_gpio)) {
+		dev_warn(dev,
+			 "failed to parse config, default is 0\n");
+		dphy->config_gpio = 0;
+	}
+
+	return dphy->config_gpio;
+}
+#endif
+static int get_resources(struct device *dev, struct dw_dphy_rx *dphy)
+{
+	int ret = 0;
+	u32 val;
+
+	dphy->hs_gain_mode = -1;
+	dphy->hs_eq_strength = DPHY_RX_HS_EQ_STRENGTH;
+	if (of_property_read_u32(dev->of_node, "snps,dphy-te-len",
+				 &dphy->dphy_te_len)) {
+		dev_err(dev, "failed to find dphy te length\n");
+		return -EINVAL;
+	}
+
+	/* Absent, malformed or out of range: the band's own gain mode applies. */
+	if (!of_property_read_u32(dev->of_node, "snps,rx-hs-gain-mode", &val)) {
+		if (val > DW_DPHY_HS_GAIN_MODE_MAX)
+			dev_err(dev, "snps,rx-hs-gain-mode %u out of range, ignored\n",
+				val);
+		else
+			dphy->hs_gain_mode = val;
+	}
+
+	/* Absent, malformed or out of range: the default strength applies. */
+	if (!of_property_read_u32(dev->of_node, "snps,rx-hs-eq-strength", &val)) {
+		if (val > DPHY_RX_HS_EQ_STRENGTH_MAX)
+			dev_err(dev, "snps,rx-hs-eq-strength %u out of range, ignored\n",
+				val);
+		else
+			dphy->hs_eq_strength = val;
+	}
+	dev_set_drvdata(dev, dphy);
+
+	return ret;
+}
+
+static int phy_register(struct device *dev)
+{
+	int ret = 0;
+
+	if (IS_ENABLED(CONFIG_OF) && dev->of_node) {
+		phy_provider = devm_of_phy_provider_register(dev,
+							     dw_dphy_xlate);
+		if (IS_ERR(phy_provider)) {
+			dev_err(dev, "error getting phy provider\n");
+			ret = PTR_ERR(phy_provider);
+		}
+	} else {
+		struct dw_phy_pdata *pdata = dev->platform_data;
+		struct dw_dphy_rx *dphy = dev_get_drvdata(dev);
+
+		ret = phy_create_lookup(dphy->phy,
+					phys[pdata->id].name,
+					csis[pdata->id].name);
+		if (ret)
+			dev_err(dev, "Failed to create dphy lookup\n");
+		else
+			dev_warn(dev,
+				 "Created dphy lookup [%s] --> [%s]\n",
+				 phys[pdata->id].name, csis[pdata->id].name);
+	}
+	return ret;
+}
+
+static void phy_unregister(struct device *dev)
+{
+	if (!dev->of_node) {
+		struct dw_dphy_rx *dphy = dev_get_drvdata(dev);
+
+		phy_remove_lookup(dphy->phy, "dw-dphy", "dw-csi");
+	}
+}
+
 static int dw_dphy_rx_probe(struct platform_device *pdev)
 {
-	struct dw_dphy_rx *dphy;
 	struct device *dev = &pdev->dev;
+	struct dw_dphy_rx *dphy;
 	struct resource *res;
-	struct phy_provider *phy_provider;
-	struct phy *phy;
 
-	dphy = devm_kzalloc(dev, sizeof(*dphy), GFP_KERNEL);
+	dphy = devm_kzalloc(&pdev->dev, sizeof(*dphy), GFP_KERNEL);
 	if (!dphy)
 		return -ENOMEM;
-
-	dphy->dev = &pdev->dev;
+	dphy->dphy_gen = (uintptr_t)of_device_get_match_data(dev);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	dphy->base_address = devm_ioremap(dev, res->start, resource_size(res));
-	if (!dphy->base_address) {
-		dev_err(dev, "error requesting base address\n");
-		return -ENOMEM;
+	dphy->base_address = devm_ioremap(&pdev->dev,
+					  res->start, resource_size(res));
+	if (IS_ERR(dphy->base_address)) {
+		dev_err(&pdev->dev, "error requesting base address\n");
+		return PTR_ERR(dphy->base_address);
 	}
+
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	dphy->glue_base_address = devm_ioremap(dev, res->start, resource_size(res));
-	if (!dphy->glue_base_address) {
+	if (IS_ERR(dphy->glue_base_address)) {
 		dev_err(dev, "error requesting glue reg base address for dphy\n");
-		return -ENOMEM;
+		return PTR_ERR(dphy->glue_base_address);
 	}
 
 #if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	dphy->dphy1_if_addr = devm_ioremap_resource(dev, res);
+
+	dphy->dphy1_if_addr = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(dphy->dphy1_if_addr)) {
-		dev_err(dev, "error requesting dphy 1 if regbank\n");
+		dev_err(&pdev->dev, "error requesting dphy 1 if regbank\n");
 		return PTR_ERR(dphy->dphy1_if_addr);
 	}
 
@@ -277,72 +151,81 @@ static int dw_dphy_rx_probe(struct platform_device *pdev)
 		dw_dphy_if_read_msk(dphy, DPHYID, DPHY_ID_LANE_SUPPORT, 4);
 
 	dphy->dphy_gen = dw_dphy_if_read_msk(dphy, DPHYID, DPHY_ID_GEN, 4);
-	dev_info(dev, "DPHY GEN %s with maximum %s lanes\n",
-		 dphy->dphy_gen == GEN3 ? "3" : "2",
-		 dphy->max_lanes == CTRL_8_LANES ? "8" : "4");
+
+	dev_dbg(&pdev->dev, "DPHY GEN %s with maximum %s lanes\n",
+		dphy->dphy_gen == GEN3 ? "3" : "2",
+		dphy->max_lanes == CTRL_8_LANES ? "8" : "4");
 
 	if (dphy->max_lanes == CTRL_8_LANES) {
 		res = platform_get_resource(pdev, IORESOURCE_MEM, 2);
 		dphy->dphy2_if_addr =
-			devm_ioremap(dev, res->start, resource_size(res));
+			devm_ioremap(&pdev->dev,
+				     res->start, resource_size(res));
 
 		if (IS_ERR(dphy->dphy2_if_addr)) {
-			dev_err(dev, "error requesting dphy 2 if regbank\n");
+			dev_err(&pdev->dev,
+				"error requesting dphy 2 if regbank\n");
 			return PTR_ERR(dphy->dphy2_if_addr);
 		}
-
-		dphy->config_gpio = of_get_gpio(dev->of_node, 0);
-		if (!gpio_is_valid(dphy->config_gpio)) {
-			dev_err(dev, "failed to parse config gpio\n");
-			return dphy->config_gpio;
-		}
+		dphy->config_gpio = get_config(&pdev->dev, dphy);
 	}
 #endif
-	if (of_property_read_u32(dev->of_node, "snps,dphy-te-len",
-				 &dphy->dphy_te_len)) {
-		dev_err(dev, "failed to find dphy te length\n");
+	if (get_resources(dev, dphy)) {
+		dev_err(dev, "failed to parse PHY resources\n");
 		return -EINVAL;
 	}
 
-	dev_set_drvdata(dev, dphy);
-
-	phy = devm_phy_create(dev, NULL, &dw_dphy_ops);
-	if (IS_ERR(phy)) {
+	dphy->phy = devm_phy_create(dev, NULL, &dw_dphy_ops);
+	if (IS_ERR(dphy->phy)) {
 		dev_err(dev, "failed to create PHY\n");
-		return PTR_ERR(phy);
+		return PTR_ERR(dphy->phy);
 	}
 
-	dphy->phy = phy;
-	phy_set_drvdata(phy, dphy);
+	platform_set_drvdata(pdev, dphy);
+	phy_set_drvdata(dphy->phy, dphy);
 
-	phy_provider = devm_of_phy_provider_register(dev, dw_dphy_xlate);
-	if (IS_ERR(phy_provider)) {
-		dev_err(dev, "error getting phy provider\n");
-		return PTR_ERR(phy_provider);
+	if (phy_register(dev)) {
+		dev_err(dev, "failed to register PHY\n");
+		return -EINVAL;
 	}
 
 	dphy->lp_time = 1000; /* 1000 ns */
 	dphy->lanes_config = dw_dphy_setup_config(dphy);
-	dev_dbg(dev, "rx-dphy created\n");
-	dev_info(dev, "rx-dphy done!!! \n");
+
+	dev_dbg(dev, "Probing dphy finished\n");
+#if IS_ENABLED(CONFIG_DWC_MIPI_TC_DPHY_GEN3)
+	dw_dphy_create_capabilities_sysfs(pdev);
+#endif
 
 	return 0;
 }
 
+static void dw_dphy_rx_remove(struct platform_device *pdev)
+{
+	phy_unregister(&pdev->dev);
+}
+
+#if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id dw_dphy_rx_of_match[] = {
-	{ .compatible = "snps,dphy-rx" },
+	{ .compatible = "simaai,modalix-dphy-rx", .data = (void *)GEN3 },
+	{ .compatible = "snps,dphy-rx", .data = (void *)GEN2 },
 	{},
 };
-MODULE_DEVICE_TABLE(of, dw_dphy_rx_of_match);
 
-static struct platform_driver dw_dphy_rx_driver =
-	{ .probe = dw_dphy_rx_probe,
-	  .driver = {
-		  .of_match_table = dw_dphy_rx_of_match,
-		  .name = "snps-dphy-rx",
-		  .owner = THIS_MODULE,
-		  .dev_groups = dw_dphy_groups,
-	  } };
+MODULE_DEVICE_TABLE(of, dw_dphy_rx_of_match);
+#endif
+
+static struct platform_driver dw_dphy_rx_driver = {
+	.probe = dw_dphy_rx_probe,
+	.remove = dw_dphy_rx_remove,
+	.driver = {
+#if IS_ENABLED(CONFIG_OF)
+		.of_match_table = of_match_ptr(dw_dphy_rx_of_match),
+#endif
+		.name = "dw-dphy",
+		.owner = THIS_MODULE,
+	}
+};
 module_platform_driver(dw_dphy_rx_driver);
 
 MODULE_DESCRIPTION("Synopsys DesignWare MIPI DPHY Rx driver");

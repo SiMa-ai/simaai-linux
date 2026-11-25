@@ -3,6 +3,7 @@
  * Copyright 2026 SiMa Technologies, Inc.
  */
 
+#include <linux/atomic.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/of.h>
@@ -13,6 +14,7 @@
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/dmaengine.h>
+#include <linux/debugfs.h>
 
 #include <media/v4l2-async.h>
 #include <media/v4l2-subdev.h>
@@ -37,7 +39,8 @@ struct vdma_channel {
 	bool				streaming;
 	bool				enabled;
 	struct timer_list		fwd_timer;	/* frame watchdog */
-	unsigned int			fwd_fires;	/* consecutive watchdog fires */
+	atomic_t			fwd_fires;	/* consecutive watchdog fires */
+	struct vb2_queue		*vbq;		/* queue to error out on a dead stream */
 	struct dma_interleaved_template	xt;
 	struct data_chunk 		sgl;
 	/*
@@ -56,52 +59,32 @@ int dw_axi_dma_quiesce_for_overflow(struct dma_chan *dchan);
 int dw_axi_dma_resume_after_overflow(struct dma_chan *dchan);
 int dw_axi_dma_inject_halt(struct dma_chan *dchan);	/* test injector */
 
-/* Provided by dwc-mipi-csi2 (the upstream CSI subdev); registers the DMA
- * quiesce/resume callbacks used by the CSI IPI-overflow recovery (SOCSW-5392). */
-int dwc_csi_register_overflow_recovery(struct v4l2_subdev *sd,
-				       void (*quiesce)(void *data),
-				       void (*resume)(void *data), void *data);
-void dwc_csi_trigger_overflow_recovery(struct v4l2_subdev *sd);
-
 /* CSI IPI-overflow recovery parks the DMA across the CSI reset and restarts
  * it after, via these thunks. */
-static void vdma_dma_quiesce(void *dma_chan)
+static int vdma_dma_quiesce(void *dma_chan)
 {
-	dw_axi_dma_quiesce_for_overflow((struct dma_chan *)dma_chan);
+	return dw_axi_dma_quiesce_for_overflow((struct dma_chan *)dma_chan);
 }
 
-static void vdma_dma_resume(void *dma_chan)
+static int vdma_dma_resume(void *dma_chan)
 {
-	dw_axi_dma_resume_after_overflow((struct dma_chan *)dma_chan);
+	return dw_axi_dma_resume_after_overflow((struct dma_chan *)dma_chan);
 }
 
 /* frame-watchdog timeout in ms, 0 = off. */
 static unsigned int frame_watchdog_ms = 5000;
-#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
-module_param(frame_watchdog_ms, uint, 0644);
-MODULE_PARM_DESC(frame_watchdog_ms, "frame-watchdog timeout in ms (0 = disabled)");
-#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
 
 /* Max consecutive recovery attempts before giving up. 0 = infinite (never give
  * up, keep recovering as long as the stall persists). The counter is reset to 0
  * on every completed frame, so it counts *consecutive* failures, not lifetime. */
 static unsigned int frame_watchdog_max_retry = 3;
-#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
-module_param(frame_watchdog_max_retry, uint, 0644);
-MODULE_PARM_DESC(frame_watchdog_max_retry,
-		 "max consecutive watchdog recovery attempts before giving up (0 = infinite)");
-#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
 
 /*
  * Test knob: skip arming the DMA scratch fallback so the DMA runs out of
- * descriptors mid-stream and the CSI IPI overflows (SOCSW-5392) — used to
+ * descriptors mid-stream and the CSI IPI overflows — used to
  * validate the IPI-overflow recovery. Default off.
  */
 static bool scratch_disable;
-#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
-module_param(scratch_disable, bool, 0644);
-MODULE_PARM_DESC(scratch_disable, "skip DMA scratch arm (force mid-stream IPI overflow; test only)");
-#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
 
 /*
  * Test injector: writing to this param halts the active channel's DMA the way
@@ -111,8 +94,7 @@ MODULE_PARM_DESC(scratch_disable, "skip DMA scratch arm (force mid-stream IPI ov
  */
 static struct dma_chan *g_inject_dma;
 
-#ifdef CONFIG_SIMAAI_CAMERA_INSTRUMENTATION
-static int dma_inject_halt_set(const char *val, const struct kernel_param *kp)
+static int dma_inject_halt_set(void *data, u64 val)
 {
 	struct dma_chan *dc = READ_ONCE(g_inject_dma);
 
@@ -120,12 +102,7 @@ static int dma_inject_halt_set(const char *val, const struct kernel_param *kp)
 		return -ENODEV;
 	return dw_axi_dma_inject_halt(dc);
 }
-static const struct kernel_param_ops dma_inject_halt_ops = {
-	.set = dma_inject_halt_set,
-};
-module_param_cb(dma_inject_halt, &dma_inject_halt_ops, NULL, 0644);
-MODULE_PARM_DESC(dma_inject_halt, "write to halt the active DMA (force the wedge; test only)");
-#endif /* CONFIG_SIMAAI_CAMERA_INSTRUMENTATION */
+DEFINE_DEBUGFS_ATTRIBUTE(dma_inject_halt_fops, NULL, dma_inject_halt_set, "%llu\n");
 
 struct vdma_dev {
 	struct device			*dev;
@@ -291,29 +268,34 @@ static void vdma_v4l2_notifier_unregister(struct vdma_dev *dev)
 static void vdma_frame_watchdog(struct timer_list *t)
 {
 	struct vdma_channel *chan = timer_container_of(chan, t, fwd_timer);
+	unsigned int fires;
 
-	if (!chan->streaming || !frame_watchdog_ms)
+	if (!READ_ONCE(chan->streaming) || !frame_watchdog_ms)
 		return;
 
-	chan->fwd_fires++;
+	fires = atomic_inc_return(&chan->fwd_fires);
 
 	/* Finite budget exhausted (max_retry == 0 means infinite -> never here). */
-	if (frame_watchdog_max_retry &&
-	    chan->fwd_fires > frame_watchdog_max_retry) {
-		if (chan->fwd_fires == frame_watchdog_max_retry + 1)
+	if (frame_watchdog_max_retry && fires > frame_watchdog_max_retry) {
+		if (fires == frame_watchdog_max_retry + 1) {
 			dev_err(chan->dev->dev,
 				"ch%u: frame watchdog: stalled after %u recovery attempts; giving up (restart the stream)\n",
 				chan->id, frame_watchdog_max_retry);
+			/* Fail the queue so a waiting DQBUF returns -EIO rather
+			 * than blocking on frames that will never arrive. */
+			if (chan->vbq)
+				vb2_queue_error(chan->vbq);
+		}
 		return;	/* stop re-arming; a completed frame re-arms via fill_buffer */
 	}
 
 	dev_warn(chan->dev->dev,
 		 "ch%u: frame watchdog: no frame in %u ms, recovery attempt #%u%s\n",
-		 chan->id, frame_watchdog_ms, chan->fwd_fires,
+		 chan->id, frame_watchdog_ms, fires,
 		 frame_watchdog_max_retry ? "" : " (infinite)");
 
 	if (chan->ep_sd)
-		dwc_csi_trigger_overflow_recovery(chan->ep_sd);
+		dwc_csi_trigger_overflow_recovery(chan->ep_sd, chan->ep_pad);
 
 	mod_timer(&chan->fwd_timer, jiffies + msecs_to_jiffies(frame_watchdog_ms));
 }
@@ -367,11 +349,11 @@ static int vdma_enable_channel(struct v4l2_subdev *sd,
 	}
 
 	/*
-	 * Let the upstream CSI's IPI-overflow recovery (SOCSW-5392) un-stick this
+	 * Let the upstream CSI's IPI-overflow recovery un-stick this
 	 * DMA channel: register the resume callback now that dma + scratch are up.
 	 */
 	if (chan->ep_sd)
-		dwc_csi_register_overflow_recovery(chan->ep_sd, vdma_dma_quiesce,
+		dwc_csi_register_overflow_recovery(chan->ep_sd, chan->ep_pad, vdma_dma_quiesce,
 						   vdma_dma_resume, chan->dma);
 
 	WRITE_ONCE(g_inject_dma, chan->dma);	/* test injector target */
@@ -391,15 +373,15 @@ static int vdma_enable_channel(struct v4l2_subdev *sd,
 		dmaengine_terminate_sync(chan->dma);
 		cmpxchg(&g_inject_dma, chan->dma, NULL);	/* retract only our own */
 		if (chan->ep_sd)
-			dwc_csi_register_overflow_recovery(chan->ep_sd, NULL,
+			dwc_csi_register_overflow_recovery(chan->ep_sd, chan->ep_pad, NULL,
 							   NULL, NULL);
 		goto unlock;
 	}
 
-	chan->streaming = true;
+	WRITE_ONCE(chan->streaming, true);
 
 	/* arm the frame watchdog; fill_buffer re-arms it on every frame. */
-	chan->fwd_fires = 0;
+	atomic_set(&chan->fwd_fires, 0);
 	if (frame_watchdog_ms)
 		mod_timer(&chan->fwd_timer,
 			  jiffies + msecs_to_jiffies(frame_watchdog_ms));
@@ -437,16 +419,20 @@ static int vdma_disable_channel(struct v4l2_subdev *sd,
 	}
 
 	/* disarm the watchdog before teardown so it can't fire while frames stop. */
-	chan->streaming = false;
+	WRITE_ONCE(chan->streaming, false);
 	timer_delete_sync(&chan->fwd_timer);
+	chan->vbq = NULL;
 
 	/* The upstream feeding this source pad is the routed sink channel. */
 	remote = &dev->channels[other_pad];
-	ret = v4l2_subdev_disable_streams(remote->ep_sd, remote->ep_pad,
-					  BIT(other_stream));
-	if (ret) {
-		dev_err(dev->dev, "Cannot disable streams: %d", ret);
-		goto unlock;
+	/* Upstream may have unbound already; only the local teardown is left. */
+	if (remote->ep_sd) {
+		ret = v4l2_subdev_disable_streams(remote->ep_sd, remote->ep_pad,
+						  BIT(other_stream));
+		if (ret) {
+			dev_err(dev->dev, "Cannot disable streams: %d", ret);
+			goto unlock;
+		}
 	}
 
 	/* terminate_sync stops the DMA, tears down the scratch/RELOAD state and
@@ -457,7 +443,7 @@ static int vdma_disable_channel(struct v4l2_subdev *sd,
 
 	/* Stop the CSI from resuming a channel that is going away. */
 	if (chan->ep_sd)
-		dwc_csi_register_overflow_recovery(chan->ep_sd, NULL, NULL, NULL);
+		dwc_csi_register_overflow_recovery(chan->ep_sd, chan->ep_pad, NULL, NULL, NULL);
 
 unlock:
 	mutex_unlock(&chan->lock);
@@ -567,10 +553,15 @@ static void fill_buffer(void *param, const struct dmaengine_result *result)
 	buf->vb.vb2_buf.timestamp = ktime_get_ns();
 	vb2_set_plane_payload(&buf->vb.vb2_buf, 0, buf->size - VDMA_FRAME_METADATA_SIZE);
 	vb2_buffer_done(&buf->vb.vb2_buf, done);
+	/* the CSI counts the frames the DMA completed, good and bad; an
+	 * aborted or failed transfer is not a frame from the link */
+	if (chan->ep_sd && result->result == DMA_TRANS_NOERROR)
+		dwc_csi_frame_delivered(chan->ep_sd, chan->ep_pad,
+					done == VB2_BUF_STATE_DONE);
 
 	/* a frame completed -> pipeline is alive: clear escalation + re-arm. */
-	if (frame_watchdog_ms && chan->streaming) {
-		chan->fwd_fires = 0;
+	if (frame_watchdog_ms && READ_ONCE(chan->streaming)) {
+		atomic_set(&chan->fwd_fires, 0);
 		mod_timer(&chan->fwd_timer,
 			  jiffies + msecs_to_jiffies(frame_watchdog_ms));
 	}
@@ -584,6 +575,7 @@ void vdma_buffer_queue(struct vb2_buffer *vb)
 	struct dma_async_tx_descriptor *desc;
 
 	mutex_lock(&chan->lock);
+	chan->vbq = vb->vb2_queue;
 	chan->xt.dst_start = vb2_dma_contig_plane_dma_addr(vb, 0);
 	chan->xt.sgl[0].size = buf->size;
 	/* Remember the live buffer size so stream-on can size the scratch buffer. */
@@ -603,7 +595,7 @@ void vdma_buffer_queue(struct vb2_buffer *vb)
 
 	dmaengine_submit(desc);
 
-	if (vb2_is_streaming(vb->vb2_queue) && chan->streaming)
+	if (vb2_is_streaming(vb->vb2_queue) && READ_ONCE(chan->streaming))
 		dma_async_issue_pending(chan->dma);
 	mutex_unlock(&chan->lock);
 }
@@ -676,24 +668,25 @@ static int vdma_v4l2_register(struct vdma_dev *dev)
 	if (ret)
 		return ret;
 
-	ret = vdma_v4l2_notifier_register(dev);
+	/* ACTIVE state must exist before notifier .bound() can publish sources. */
+	ret = v4l2_subdev_init_finalize(sd);
 	if (ret)
 		goto err_media_entity_cleanup;
 
-	ret = v4l2_subdev_init_finalize(sd);
-	if (ret)
-		goto err_nf_cleanup;
-
-	ret = v4l2_async_register_subdev(sd);
+	ret = vdma_v4l2_notifier_register(dev);
 	if (ret)
 		goto err_sd_cleanup;
 
+	ret = v4l2_async_register_subdev(sd);
+	if (ret)
+		goto err_nf_cleanup;
+
 	return 0;
 
-err_sd_cleanup:
-	v4l2_subdev_cleanup(sd);
 err_nf_cleanup:
 	vdma_v4l2_notifier_unregister(dev);
+err_sd_cleanup:
+	v4l2_subdev_cleanup(sd);
 err_media_entity_cleanup:
 	media_entity_cleanup(&sd->entity);
 
@@ -705,8 +698,8 @@ static void vdma_v4l2_unregister(struct vdma_dev *dev)
 	struct v4l2_subdev *sd = &dev->sd;
 
 	v4l2_async_unregister_subdev(sd);
-	v4l2_subdev_cleanup(sd);
 	vdma_v4l2_notifier_unregister(dev);
+	v4l2_subdev_cleanup(sd);
 	media_entity_cleanup(&sd->entity);
 }
 
@@ -806,17 +799,20 @@ static void vdma_remove(struct platform_device *pdev)
 	struct vdma_dev *dev = platform_get_drvdata(pdev);
 	unsigned int i;
 
+	/* Release downstream queues while their DMA and endpoints are valid. */
+	vdma_v4l2_unregister(dev);
 
 	for (i = 0; i < VDMA_CHANNELS; ++i) {
 		if (dev->channels[i].dma) {
 			dmaengine_terminate_sync(dev->channels[i].dma);
+			/* Abort completions run fill_buffer(), which re-arms. */
+			timer_delete_sync(&dev->channels[i].fwd_timer);
 			dma_release_channel(dev->channels[i].dma);
+			dev->channels[i].dma = NULL;
 		}
 		if (dev->channels[i].ep_fwnode)
 			fwnode_handle_put(dev->channels[i].ep_fwnode);
 	}
-
-	vdma_v4l2_unregister(dev);
 }
 
 static const struct of_device_id vdma_of_match[] = {
@@ -833,7 +829,42 @@ static struct platform_driver simaai_v4l2_vdma = {
 		.name		= "simaai-v4l2-vdma",
 	}
 };
-module_platform_driver(simaai_v4l2_vdma);
+
+static struct dentry *vdma_debugfs_dir;
+
+/* debug knobs; absent on production (!SIMAAI_CAMERA_INSTRUMENTATION) builds */
+static void vdma_debugfs_init(void)
+{
+	if (!IS_ENABLED(CONFIG_SIMAAI_CAMERA_INSTRUMENTATION))
+		return;
+
+	vdma_debugfs_dir = debugfs_create_dir("simaai-v4l2-vdma", NULL);
+	debugfs_create_u32("frame_watchdog_ms", 0644, vdma_debugfs_dir,
+			   &frame_watchdog_ms);
+	debugfs_create_u32("frame_watchdog_max_retry", 0644, vdma_debugfs_dir,
+			   &frame_watchdog_max_retry);
+	debugfs_create_bool("scratch_disable", 0644, vdma_debugfs_dir,
+			    &scratch_disable);
+	debugfs_create_file_unsafe("dma_inject_halt", 0200, vdma_debugfs_dir,
+				   NULL, &dma_inject_halt_fops);
+}
+
+static int __init simaai_v4l2_vdma_init(void)
+{
+	int ret = platform_driver_register(&simaai_v4l2_vdma);
+
+	if (!ret)
+		vdma_debugfs_init();
+	return ret;
+}
+module_init(simaai_v4l2_vdma_init);
+
+static void __exit simaai_v4l2_vdma_exit(void)
+{
+	debugfs_remove_recursive(vdma_debugfs_dir);
+	platform_driver_unregister(&simaai_v4l2_vdma);
+}
+module_exit(simaai_v4l2_vdma_exit);
 
 MODULE_AUTHOR("Yurii Konovalenko <yurii.konovalenko@sima.ai");
 MODULE_DESCRIPTION("V4L2 driver for SiMa.ai vision DMA");

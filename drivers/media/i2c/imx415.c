@@ -50,6 +50,7 @@
 #define IMX415_VREVERSE_SHIFT	  BIT(0)
 #define IMX415_ADBIT		  CCI_REG8(0x3031)
 #define IMX415_MDBIT		  CCI_REG8(0x3032)
+#define IMX415_ADBIT1		  CCI_REG8(0x3701)
 #define IMX415_SYS_MODE		  CCI_REG8(0x3033)
 #define IMX415_OUTSEL		  CCI_REG8(0x30c0)
 #define IMX415_DRV		  CCI_REG8(0x30c1)
@@ -519,7 +520,14 @@ struct imx415_mode_reg_list {
 
 struct imx415_mode {
 	u64 lane_rate;
+	/*
+	 * Per-rate HMAX minima from the datasheet mode tables, indexed
+	 * [0]=2-lane, [1]=4-lane. The 12-bit values are discrete per-mode
+	 * settings, not a scaling of the 10-bit ones; 0 means the datasheet
+	 * defines no 12-bit setting for that rate/lane combination.
+	 */
 	u32 hmax_min[2];
+	u32 hmax_min_12[2];
 	struct imx415_mode_reg_list reg_list;
 };
 
@@ -528,6 +536,7 @@ static const struct imx415_mode supported_modes[] = {
 	{
 		.lane_rate = 720000000,
 		.hmax_min = { 2032, 1066 },
+		.hmax_min_12 = { 0, 1280 },
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(imx415_linkrate_720mbps),
 			.regs = imx415_linkrate_720mbps,
@@ -536,6 +545,7 @@ static const struct imx415_mode supported_modes[] = {
 	{
 		.lane_rate = 1440000000,
 		.hmax_min = { 1066, 533 },
+		.hmax_min_12 = { 0, 1066 },
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(imx415_linkrate_1440mbps),
 			.regs = imx415_linkrate_1440mbps,
@@ -544,6 +554,7 @@ static const struct imx415_mode supported_modes[] = {
 	{
 		.lane_rate = 891000000,
 		.hmax_min = { 2200, 1100 },
+		.hmax_min_12 = { 2200, 1100 },
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(imx415_linkrate_891mbps),
 			.regs = imx415_linkrate_891mbps,
@@ -552,6 +563,7 @@ static const struct imx415_mode supported_modes[] = {
 	{
 		.lane_rate = 594000000,
 		.hmax_min = { 3300, 1320 },
+		.hmax_min_12 = { 3300, 1650 },
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(imx415_linkrate_594mbps),
 			.regs = imx415_linkrate_594mbps,
@@ -569,13 +581,9 @@ struct imx415_readout_mode {
 	u32 height;
 	u32 crop_top;
 	u32 crop_left;
-	/*
-	 * Minimum (and default) VBLANK. Chosen so the default VMAX
-	 * (height + vblank_min) is 2250, matching the datasheet default and
-	 * keeping the frame rate identical across windows. For the crop this
-	 * also satisfies VTTL >= PIX_VWIDTH/2 + 46.
-	 */
 	u32 vblank_min;
+	/* Target fps, [0]=2-lane, [1]=4-lane; 0 keeps vblank_min. */
+	u32 fps_target[2];
 	struct imx415_mode_reg_list reg_list;
 };
 
@@ -591,6 +599,9 @@ static const struct cci_reg_sequence imx415_window_crop_uhd[] = {
 	{ IMX415_PIX_HWIDTH, 3840 },	/* multiple of 24 */
 	{ IMX415_PIX_VST, 32 },		/* 16 lines x 2, multiple of 4 */
 	{ IMX415_PIX_VWIDTH, 4320 },	/* 2160 lines x 2, multiple of 4 */
+	/* active lines, need to be set as per crop window when OB is enabled */
+	{ IMX415_ACTIVE_LOW, 0x70 },	/* 2160 */
+	{ IMX415_ACTIVE_HIGH, 0x08 },
 };
 
 /* Window cropping: 1920x1080 (FHD) centred in the effective array. */
@@ -600,18 +611,22 @@ static const struct cci_reg_sequence imx415_window_crop_fhd[] = {
 	{ IMX415_PIX_HWIDTH, 1920 },	/* multiple of 24 */
 	{ IMX415_PIX_VST, 1112 },	/* 556 lines x 2, multiple of 4 */
 	{ IMX415_PIX_VWIDTH, 2160 },	/* 1080 lines x 2, multiple of 4 */
+	/* active lines, need to be set as per crop window when OB is enabled */
+	{ IMX415_ACTIVE_LOW, 0x38 },	/* 1080 */
+	{ IMX415_ACTIVE_HIGH, 0x04 },
 };
 
 #define IMX415_DEFAULT_MODE 0
 
 static const struct imx415_readout_mode imx415_readout_modes[] = {
-	/* [0] 3840x2160 (UHD) window crop, centred. */
+	/* [0] 3840x2160 (UHD) window crop, centred; VMAX comes from fps_target. */
 	{
 		.width = 3840,
 		.height = 2160,
 		.crop_top = 16,
 		.crop_left = 12,
 		.vblank_min = 90,
+		.fps_target = { 10, 30 },
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(imx415_window_crop_uhd),
 			.regs = imx415_window_crop_uhd,
@@ -629,19 +644,51 @@ static const struct imx415_readout_mode imx415_readout_modes[] = {
 			.regs = imx415_window_all_pixel,
 		},
 	},
-	/* [2] 1920x1080 (FHD) window crop, centred. */
+	/* [2] 1920x1080 (FHD) window crop, centred; VMAX comes from fps_target. */
 	{
 		.width = 1920,
 		.height = 1080,
 		.crop_top = 556,
 		.crop_left = 972,
-		.vblank_min = 1170,
+		.vblank_min = 46,
+		.fps_target = { 30, 30 },
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(imx415_window_crop_fhd),
 			.regs = imx415_window_crop_fhd,
 		},
 	},
 };
+
+/*
+ * Supported output formats. Bit depth is orthogonal to the readout-window
+ * configuration: it selects ADBIT/MDBIT (0 = 10-bit, 1 = 12-bit), the
+ * matching AD converter precision ADBIT1 (00h = 10-bit, 03h = 12-bit) and
+ * the CSI-2 data type. SYS_MODE and the D-PHY timing are driven by the lane
+ * rate; the HMAX line minima are per-(lane, rate, depth) mode-table values.
+ */
+struct imx415_pixfmt {
+	u32 code;
+	u8 bit_setting;		/* ADBIT/MDBIT register value */
+	u8 adbit1;		/* ADBIT1 (AD converter bits) register value */
+	u8 csi_dt;		/* MIPI CSI-2 data type */
+};
+
+static const struct imx415_pixfmt imx415_formats[] = {
+	{ MEDIA_BUS_FMT_SGBRG10_1X10, 0x00, 0x00, MIPI_CSI2_DT_RAW10 },
+	{ MEDIA_BUS_FMT_SGBRG12_1X12, 0x01, 0x03, MIPI_CSI2_DT_RAW12 },
+};
+
+/* Look up a format by mbus code, defaulting to 10-bit for an unknown code. */
+static const struct imx415_pixfmt *imx415_find_format(u32 code)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(imx415_formats); i++)
+		if (imx415_formats[i].code == code)
+			return &imx415_formats[i];
+
+	return &imx415_formats[0];
+}
 
 static const char *const imx415_test_pattern_menu[] = {
 	"disabled",
@@ -691,15 +738,15 @@ static const struct cci_reg_sequence imx415_init_table[] = {
 	/* no binning, no flip; the readout window is selected per mode */
 	{ IMX415_ADDMODE, 0x00 },
 	{ IMX415_REVERSE, 0x00 },
-	/* use RAW 10-bit mode */
-	{ IMX415_ADBIT, 0x00 },
-	{ IMX415_MDBIT, 0x00 },
+	/* ADBIT/MDBIT (RAW bit depth) are set per the active format in setup */
 	/* output VSYNC on XVS and low on XHS */
 	{ IMX415_OUTSEL, 0x22 },
 	{ IMX415_DRV, 0x00 },
 
-	/* Disable embedded data */
+	/* Disable embedded and optical black data */
 	{ IMX415_EMB_DATA, 0x00 },
+	{ IMX415_OB_DATA_1, 0x00 },
+	{ IMX415_OB_DATA_2, 0x80 },
 
 	/* SONY magic registers */
 	{ CCI_REG8(0x32D4), 0x21 },
@@ -787,26 +834,73 @@ static const struct imx415_readout_mode *imx415_find_mode(u32 width, u32 height)
 				      width, height, width, height);
 }
 
+/* A half-width window on 2 lanes needs no more line than full width on 4. */
+static u32 imx415_hmax_min(const struct imx415 *sensor,
+			   const struct imx415_readout_mode *mode, bool raw12)
+{
+	const struct imx415_mode *cur = &supported_modes[sensor->cur_mode];
+	unsigned int idx = sensor->num_data_lanes == 2 ? 0 : 1;
+
+	if (idx == 0 && mode->width * 2 <= IMX415_NATIVE_WIDTH)
+		idx = 1;
+
+	/*
+	 * 12-bit line minima are discrete per-mode datasheet values, not a
+	 * scaling of the 10-bit ones (e.g. 4-lane 1440 Mbps doubles).
+	 */
+	if (raw12 && cur->hmax_min_12[idx])
+		return cur->hmax_min_12[idx];
+
+	return cur->hmax_min[idx];
+}
+
+/* Hold the frame rate with HMAX, so VMAX and the line burst stay minimal. */
+static u32 imx415_hblank_def(const struct imx415 *sensor,
+			     const struct imx415_readout_mode *mode,
+			     u32 hblank_min)
+{
+	u32 fps = mode->fps_target[sensor->num_data_lanes == 2 ? 0 : 1];
+	u32 hts;
+
+	if (!fps || !sensor->pixel_rate)
+		return hblank_min;
+
+	/* Round down: a short HMAX overshoots the target, a long one misses. */
+	hts = sensor->pixel_rate / ((mode->height + mode->vblank_min) * fps);
+	hts -= hts % IMX415_HMAX_MULTIPLIER;
+
+	if (hts < hblank_min + mode->width)
+		return hblank_min;
+
+	return hts - mode->width;
+}
+
 /*
  * Update the blanking and exposure control ranges to match the selected
  * readout window. Called from .set_fmt with the subdev state (== control
  * handler) lock held, so the __v4l2_ctrl_modify_range() variants are used.
  */
 static void imx415_update_controls(struct imx415 *sensor,
-				   const struct imx415_readout_mode *mode)
+				   const struct imx415_readout_mode *mode,
+				   u32 code)
 {
-	const struct imx415_mode *cur = &supported_modes[sensor->cur_mode];
-	unsigned int idx = sensor->num_data_lanes == 2 ? 0 : 1;
-	u32 hblank_min, hblank_max, exposure_max;
+	u32 hblank_min, hblank_max, hblank_def, exposure_max;
+	u32 hmax_min = imx415_hmax_min(sensor, mode,
+				       imx415_find_format(code)->csi_dt ==
+				       MIPI_CSI2_DT_RAW12);
 
-	hblank_min = (cur->hmax_min[idx] * IMX415_HMAX_MULTIPLIER) - mode->width;
+	hblank_min = (hmax_min * IMX415_HMAX_MULTIPLIER) - mode->width;
 	hblank_max = (IMX415_HMAX_MAX * IMX415_HMAX_MULTIPLIER) - mode->width;
+	hblank_def = imx415_hblank_def(sensor, mode, hblank_min);
 	__v4l2_ctrl_modify_range(sensor->hblank, hblank_min, hblank_max,
-				 IMX415_HMAX_MULTIPLIER, hblank_min);
+				 IMX415_HMAX_MULTIPLIER, hblank_def);
+	/* modify_range moves the default only; the value must follow too. */
+	__v4l2_ctrl_s_ctrl(sensor->hblank, hblank_def);
 
 	__v4l2_ctrl_modify_range(sensor->vblank, mode->vblank_min,
 				 IMX415_VMAX_MAX - mode->height, 1,
 				 mode->vblank_min);
+	__v4l2_ctrl_s_ctrl(sensor->vblank, mode->vblank_min);
 
 	exposure_max = mode->height + mode->vblank_min - IMX415_EXPOSURE_OFFSET;
 	__v4l2_ctrl_modify_range(sensor->exposure, sensor->exposure->minimum,
@@ -930,9 +1024,13 @@ static int imx415_ctrls_init(struct imx415 *sensor)
 	const struct imx415_readout_mode *mode =
 		&imx415_readout_modes[IMX415_DEFAULT_MODE];
 	u64 lane_rate = cur_mode->lane_rate;
+	u32 hblank_min = (imx415_hmax_min(sensor, mode, false) *
+			  IMX415_HMAX_MULTIPLIER) - mode->width;
+	u32 hblank_max = (IMX415_HMAX_MAX * IMX415_HMAX_MULTIPLIER) -
+			 mode->width;
+	u32 hblank_def = imx415_hblank_def(sensor, mode, hblank_min);
 	u32 exposure_max = mode->height + mode->vblank_min -
 			   IMX415_EXPOSURE_OFFSET;
-	u32 hblank_min, hblank_max;
 	unsigned int i;
 	int ret;
 
@@ -969,13 +1067,10 @@ static int imx415_ctrls_init(struct imx415 *sensor)
 			  IMX415_AGAIN_MAX, IMX415_AGAIN_STEP,
 			  IMX415_AGAIN_MIN);
 
-	hblank_min = (cur_mode->hmax_min[sensor->num_data_lanes == 2 ? 0 : 1] *
-		      IMX415_HMAX_MULTIPLIER) - mode->width;
-	hblank_max = (IMX415_HMAX_MAX * IMX415_HMAX_MULTIPLIER) - mode->width;
 	sensor->hblank = v4l2_ctrl_new_std(&sensor->ctrls, &imx415_ctrl_ops,
 					   V4L2_CID_HBLANK, hblank_min,
 					   hblank_max, IMX415_HMAX_MULTIPLIER,
-					   hblank_min);
+					   hblank_def);
 
 	sensor->vblank = v4l2_ctrl_new_std(&sensor->ctrls, &imx415_ctrl_ops,
 					   V4L2_CID_VBLANK, mode->vblank_min,
@@ -1043,12 +1138,23 @@ static int imx415_setup(struct imx415 *sensor, struct v4l2_subdev_state *state)
 		v4l2_subdev_state_get_format(state, 0);
 	const struct imx415_readout_mode *mode =
 		imx415_find_mode(format->width, format->height);
+	const struct imx415_pixfmt *pixfmt = imx415_find_format(format->code);
 	int ret;
 
 	ret = cci_multi_reg_write(sensor->regmap,
 				  imx415_init_table,
 				  ARRAY_SIZE(imx415_init_table),
 				  NULL);
+	if (ret)
+		return ret;
+
+	/* Select the RAW bit depth (10- or 12-bit) for the active format:
+	 * output/bus width (ADBIT/MDBIT) and the matching AD converter
+	 * precision (ADBIT1). */
+	ret = 0;
+	cci_write(sensor->regmap, IMX415_ADBIT, pixfmt->bit_setting, &ret);
+	cci_write(sensor->regmap, IMX415_MDBIT, pixfmt->bit_setting, &ret);
+	cci_write(sensor->regmap, IMX415_ADBIT1, pixfmt->adbit1, &ret);
 	if (ret)
 		return ret;
 
@@ -1150,14 +1256,36 @@ err_pm:
 	goto unlock;
 }
 
+/*
+ * Whether the active rate/lane combination can carry @fmt. 12-bit needs an
+ * HMAX minimum the mode may not define, and both enumerations and set_format
+ * have to agree about that - a frame size offered for a code the mbus
+ * enumeration hides is an invitation to build a pipeline that then
+ * silently negotiates something else.
+ */
+static bool imx415_format_supported(struct imx415 *sensor,
+				    const struct imx415_pixfmt *fmt)
+{
+	if (fmt->csi_dt != MIPI_CSI2_DT_RAW12)
+		return true;
+
+	return supported_modes[sensor->cur_mode]
+		       .hmax_min_12[sensor->num_data_lanes == 2 ? 0 : 1] != 0;
+}
+
 static int imx415_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
-	if (code->index != 0)
+	struct imx415 *sensor = to_imx415(sd);
+
+	if (code->index >= ARRAY_SIZE(imx415_formats))
 		return -EINVAL;
 
-	code->code = MEDIA_BUS_FMT_SGBRG10_1X10;
+	if (!imx415_format_supported(sensor, &imx415_formats[code->index]))
+		return -EINVAL;
+
+	code->code = imx415_formats[code->index].code;
 
 	return 0;
 }
@@ -1166,12 +1294,11 @@ static int imx415_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
-	const struct v4l2_mbus_framefmt *format;
-
-	format = v4l2_subdev_state_get_format(state, fse->pad);
+	struct imx415 *sensor = to_imx415(sd);
+	const struct imx415_pixfmt *fmt = imx415_find_format(fse->code);
 
 	if (fse->index >= ARRAY_SIZE(imx415_readout_modes) ||
-	    fse->code != format->code)
+	    fmt->code != fse->code || !imx415_format_supported(sensor, fmt))
 		return -EINVAL;
 
 	fse->min_width = imx415_readout_modes[fse->index].width;
@@ -1200,7 +1327,7 @@ static int imx415_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	fd->entry->pixelcode = code;
 	fd->entry->stream = 0;
 	fd->entry->bus.csi2.vc = 0; //Read from device tree
-	fd->entry->bus.csi2.dt = MIPI_CSI2_DT_RAW10;
+	fd->entry->bus.csi2.dt = imx415_find_format(code)->csi_dt;
 
 	return 0;
 }
@@ -1211,6 +1338,7 @@ static int imx415_set_format(struct v4l2_subdev *sd,
 {
 	struct imx415 *sensor = to_imx415(sd);
 	const struct imx415_readout_mode *mode;
+	const struct imx415_pixfmt *pixfmt;
 	struct v4l2_mbus_framefmt *format;
 
 	mode = imx415_find_mode(fmt->format.width, fmt->format.height);
@@ -1219,7 +1347,16 @@ static int imx415_set_format(struct v4l2_subdev *sd,
 
 	format->width = mode->width;
 	format->height = mode->height;
-	format->code = MEDIA_BUS_FMT_SGBRG10_1X10;
+	pixfmt = imx415_find_format(fmt->format.code);
+	/*
+	 * Fall back to 10-bit where the datasheet defines no 12-bit setting
+	 * for the active rate/lane combination.
+	 */
+	if (pixfmt->csi_dt == MIPI_CSI2_DT_RAW12 &&
+	    !supported_modes[sensor->cur_mode]
+		     .hmax_min_12[sensor->num_data_lanes == 2 ? 0 : 1])
+		pixfmt = &imx415_formats[0];
+	format->code = pixfmt->code;
 	format->field = V4L2_FIELD_NONE;
 	format->colorspace = V4L2_COLORSPACE_RAW;
 	format->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
@@ -1229,7 +1366,7 @@ static int imx415_set_format(struct v4l2_subdev *sd,
 	fmt->format = *format;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		imx415_update_controls(sensor, mode);
+		imx415_update_controls(sensor, mode, format->code);
 
 	return 0;
 }

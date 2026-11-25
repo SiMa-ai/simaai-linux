@@ -47,12 +47,14 @@ static void stitching_error_calculate( noise_reduction_fsm_t *p_fsm )
 
 #ifdef ACAMERA_ISP_FRAME_STITCH_MCOFF_MODE_ENABLE_DEFAULT
     // Change to MC off mode when gain is higher than gain_log2 value found in calibration.
-    uint16_t MC_off_enable_gain = calib_mgr_u32_lut_get( p_cmgr, MODALIX_ISP_CALIB_FS_MC_OFF )[0];
+    // The threshold is a single u16 - reading it through the u32 getter took four
+    // bytes out of a two-byte LUT and only looked right because the low half of a
+    // little-endian read happens to be the value.
+    if ( calib_mgr_lut_exists( p_cmgr, MODALIX_ISP_CALIB_FS_MC_OFF ) ) {
+        const uint16_t MC_off_enable_gain = calib_mgr_u16_lut_get( p_cmgr, MODALIX_ISP_CALIB_FS_MC_OFF )[0];
 
-    if ( ldr_gain_log2 > MC_off_enable_gain ) {
-        acamera_isp_frame_stitch_mcoff_mode_enable_write( p_ictx->settings.isp_base, 1 );
-    } else if ( ldr_gain_log2 <= MC_off_enable_gain ) {
-        acamera_isp_frame_stitch_mcoff_mode_enable_write( p_ictx->settings.isp_base, 0 );
+        acamera_isp_frame_stitch_mcoff_mode_enable_write( p_ictx->settings.isp_base,
+                                                          ldr_gain_log2 > MC_off_enable_gain ? 1 : 0 );
     }
 #endif
 
@@ -195,7 +197,12 @@ void noise_reduction_config( noise_reduction_fsm_t *p_fsm )
     acamera_isp_frame_stitch_svs_thresh_low_write( p_ictx->settings.isp_base, 49151 );
 
     acamera_isp_sinter_view_filter_write( p_ictx->settings.isp_base, 0 );
-    acamera_isp_sinter_int_select_write( p_ictx->settings.isp_base, *p_sinter_params );
+    if ( p_sinter_params != NULL ) {
+        acamera_isp_sinter_int_select_write( p_ictx->settings.isp_base, *p_sinter_params );
+    } else {
+        LOG_CAT( ALOG_CAT_SINTER, LOG_ERR,
+                 "MODALIX_ISP_CALIB_SINTER_PARAMS is missing; leaving sinter_int_select alone" );
+    }
     acamera_isp_sinter_scale_mode_write( p_ictx->settings.isp_base,
                                          ACAMERA_ISP_SINTER_SCALE_MODE_USE_ALL_FILTERS );
 
@@ -209,7 +216,12 @@ void noise_reduction_reload_calibration( noise_reduction_fsm_t *p_fsm )
     // Params must be in the following format: rm_enable, rm_centre_x, rm_centre_y, rm_off_centre_mult
     const uint16_t *p_sinter_radial_params = (const uint16_t *)calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SINTER_RADIAL_PARAMS );
     int i;
-    uint8_t number_of_nodes = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SINTER_RADIAL_LUT );
+    uint32_t number_of_nodes = calib_mgr_lut_len( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_SINTER_RADIAL_LUT );
+
+    /* Indexes the hardware array by the descriptor's own length. */
+    if ( number_of_nodes > ACAMERA_ISP_SINTER_SHADING_RM_SHADING_LUT_NODES ) {
+        number_of_nodes = ACAMERA_ISP_SINTER_SHADING_RM_SHADING_LUT_NODES;
+    }
 
     for ( i = 0; i < number_of_nodes; ++i ) {
         acamera_isp_sinter_shading_rm_shading_lut_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, i, p_sinter_radial_lut[i] );
@@ -220,7 +232,11 @@ void noise_reduction_reload_calibration( noise_reduction_fsm_t *p_fsm )
     acamera_isp_sinter_rm_off_center_mult_write( ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base, p_sinter_radial_params[3] );
 
 #if ( ISP_RTL_VERSION_R >= 1 ) //TODO: Figure out the behaviour for R2, for now assume same as R1
-    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_PROFILE_CONFIG ) ) {
+    /* The thresholds are computed against the black levels, so an absent
+     * GAMMA_BLACK_LEVELS is handled the same way as an absent config: the
+     * block is left unprogrammed rather than read through a NULL. */
+    if ( calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_PROFILE_CONFIG ) &&
+         calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_GAMMA_BLACK_LEVELS ) ) {
         const acamera_isp_ctx_ptr_t p_ictx = ACAMERA_FSM2ICTX_PTR( p_fsm );
         const uint16_t *config = calib_mgr_u16_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_PROFILE_CONFIG );
         const uint32_t isp_base = ACAMERA_FSM2ICTX_PTR( p_fsm )->settings.isp_base;
@@ -251,7 +267,7 @@ void noise_reduction_reload_calibration( noise_reduction_fsm_t *p_fsm )
         acamera_isp_noise_profile_hlog_exp_rat_0_2_max_diff_write( isp_base, *config++ );
         acamera_isp_noise_profile_hlog_exp_rat_0_3_max_diff_write( isp_base, *config++ );
     } else {
-        LOG( LOG_ERR, "MODALIX_ISP_CALIB_NOISE_PROFILE_CONFIG is missing, module will not be configured correctly!" );
+        LOG_CAT( ALOG_CAT_SINTER, LOG_ERR, "MODALIX_ISP_CALIB_NOISE_PROFILE_CONFIG is missing, module will not be configured correctly!" );
     }
 #endif /* ISP_RTL_VERSION_R */
 }
@@ -295,7 +311,11 @@ void noise_reduction_update_hw( noise_reduction_fsm_t *p_fsm )
     uint16_t gain_01 = acamera_isp_white_balance_gain_01_read( p_ictx->settings.isp_base );
     uint16_t gain_11 = acamera_isp_white_balance_gain_11_read( p_ictx->settings.isp_base );
     /* during bootup the gains might be read as zero, which leads to a division by zero below) */
-    if ( gain_01 != 0 ) {
+    /* No tuning in tree provides these two, and nothing guarded them, so
+     * reaching here at all used to panic in the calibration manager. */
+    if ( gain_01 != 0 &&
+         calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_LEVEL_R_LUT ) &&
+         calib_mgr_lut_exists( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_LEVEL_B_LUT ) ) {
         // gain_01 will not always be = 256, so this division is needed
         uint32_t rgain = div_fixed( gain_00, gain_01, 8 );
         uint32_t noise_level_r = calc_modulation_u32( rgain, calib_mgr_mod32_lut_get( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_LEVEL_R_LUT ), calib_mgr_lut_rows( ACAMERA_FSM2CM_PTR( p_fsm ), MODALIX_ISP_CALIB_NOISE_LEVEL_R_LUT ) );

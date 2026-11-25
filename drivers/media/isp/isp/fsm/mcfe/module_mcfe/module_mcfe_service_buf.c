@@ -172,7 +172,7 @@ void module_mcfe_buf_destroy( module_mcfe_buf_t *const buffer )
     while ( iterations ) {
         status = mcfe_hwif_buff_status_get( buffer->type, buffer->index );
         if ( ( status == 1 ) || ( status == 0 ) || ( status == 7 ) ) {
-            LOG( LOG_INFO, "Buffer (type %d) %d cancelled after %d ms with status %d.", buffer->type, buffer->index, 100 - iterations, status );
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_INFO, "Buffer (type %d) %d cancelled after %d ms with status %d.", buffer->type, buffer->index, 100 - iterations, status );
             break;
         }
         system_timer_usleep( 1000 );
@@ -180,7 +180,7 @@ void module_mcfe_buf_destroy( module_mcfe_buf_t *const buffer )
     }
 
     if ( !iterations ) {
-        LOG( LOG_ERR, "Failed to cancel buffer %d after 100 ms (buffer status = %d).", buffer->index, status );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Failed to cancel buffer %d after 100 ms (buffer status = %d).", buffer->index, status );
     }
 
     mcfe_hwif_buff_status_set( buffer->type, buffer->index, 0 );
@@ -192,7 +192,7 @@ module_mcfe_buf_t *module_mcfe_buf_create( module_mcfe_buf_cfg_t *const config )
     assert( config );
 
     if ( module_mcfe_buf_get_free_count( config->type ) == 0 ) {
-        LOG( LOG_ERR, "Error, out of buffers. (type = %u)", config->type );
+        LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Error, out of buffers. (type = %u)", config->type );
         return NULL;
     }
 

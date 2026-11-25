@@ -38,7 +38,9 @@
 
 #include "al_ioctl.h"
 #include "al_alloc_ioctl.h"
+#include "al_dmabuf.h"
 #include "al_ip.h"
+#include "al_cmd.h"
 
 int al5r_codec_major;
 int al5r_codec_nr_devs = AL5R_NR_DEVS;
@@ -54,7 +56,7 @@ int channel_is_ready(struct al5r_codec_chan *chan)
 	int ret = chan->unblock;
 
 	spin_lock_irqsave(&chan->codec->i_lock, flags);
-	ret = ret || !list_empty(&chan->codec->irq_masks);
+	ret = ret || !list_empty(&chan->irq_masks);
 	spin_unlock_irqrestore(&chan->codec->i_lock, flags);
 	return ret;
 }
@@ -62,38 +64,32 @@ int channel_is_ready(struct al5r_codec_chan *chan)
 static int al5r_codec_open(struct inode *inode, struct file *filp)
 {
 	struct al5r_codec_chan *chan;
-	int ret;
 
 	/* initialize channel */
 	chan = kzalloc(sizeof(struct al5r_codec_chan), GFP_KERNEL);
-	if (!chan) {
-		ret = -ENOMEM;
-		goto fail;
-	}
+	if (!chan)
+		return -ENOMEM;
 
 	INIT_LIST_HEAD(&chan->mem);
+	chan->import_set = al5_dmabuf_alloc_import_set(
+			container_of(inode->i_cdev, struct al5r_codec_desc,
+				     cdev)->device);
+	if (!chan->import_set) {
+		kfree(chan);
+		return -ENOMEM;
+	}
 	spin_lock_init(&chan->lock);
 	chan->num_bufs = 0;
+	chan->codec = container_of(inode->i_cdev, struct al5r_codec_desc,
+				   cdev);
 
 	filp->private_data = chan;
 
 	/* irq */
 	init_waitqueue_head(&chan->irq_queue);
-
-	ret = al5r_codec_bind_channel(chan, inode);
-	if (ret)
-		goto fail_codec_binding;
+	al5_cmd_chan_init(chan);
 
 	return 0;
-
-fail_codec_binding:
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-	kfree_sensitive(chan);
-#else
-	kzfree(chan);
-#endif
-fail:
-	return ret;
 }
 
 static int al5r_codec_release(struct inode *inode, struct file *filp)
@@ -102,13 +98,19 @@ static int al5r_codec_release(struct inode *inode, struct file *filp)
 	struct al5_dma_buf_mmap *tmp;
 	struct list_head *pos, *n;
 
-	al5r_codec_unbind_channel(chan);
+	al5_cmd_chan_release(chan);
 	list_for_each_safe(pos, n, &chan->mem){
 		tmp = list_entry(pos, struct al5_dma_buf_mmap, list);
 		list_del(pos);
 		al5_free_dma(chan->codec->device, tmp->buf);
 		kfree(tmp);
 	}
+
+	/* Drop the channel's own reference.  Any command still on the
+	 * hardware took its own in al5_cmd_chan_release(), so the mappings
+	 * survive until that command retires.
+	 */
+	al5_dmabuf_put_import_set(chan->import_set);
 
 	kfree(chan);
 	return 0;
@@ -189,7 +191,11 @@ static int wait_irq(struct al5r_codec_chan *chan, unsigned long arg)
 	}
 
 	spin_lock_irqsave(&codec->i_lock, flags);
-	i_callback = list_first_entry(&chan->codec->irq_masks,
+	if (list_empty(&chan->irq_masks)) {
+		spin_unlock_irqrestore(&codec->i_lock, flags);
+		return -EINTR;
+	}
+	i_callback = list_first_entry(&chan->irq_masks,
 				      struct r_irq, list);
 	callback = i_callback->bitfield;
 	list_del(&i_callback->list);
@@ -222,6 +228,10 @@ static int read_reg(struct al5r_codec_chan *chan, unsigned long arg)
 		return -EINVAL;
 	}
 
+	err = al5_legacy_reg_access(chan, reg.id);
+	if (err)
+		return err;
+
 	err = al5r_codec_read_register(chan, &reg);
 	if (err)
 		return err;
@@ -238,6 +248,7 @@ static int write_reg(struct al5r_codec_chan *chan, unsigned long arg)
 {
 	struct al5_reg reg;
 	struct al5r_codec_desc *codec = chan->codec;
+	int err;
 
 	if (copy_from_user(&reg, (struct al5_reg *)arg, sizeof(struct al5_reg)))
 		return -EFAULT;
@@ -254,7 +265,16 @@ static int write_reg(struct al5r_codec_chan *chan, unsigned long arg)
 		return -EINVAL;
 	}
 
-	al5r_codec_write_register(chan, &reg);
+	err = al5_legacy_reg_access(chan, reg.id);
+	if (err)
+		return err;
+
+	/* An MVD holder's writes to the shared TOP interrupt registers are
+	 * masked to the MVD bits in-kernel; everything else is a raw write.
+	 */
+	if (!al5_mvd_shared_reg_write(chan, reg.id - codec->regs_min_addr,
+				      reg.value))
+		al5r_codec_write_register(chan, &reg);
 
 	if (copy_to_user((struct al5_reg *)arg, &reg, sizeof(struct al5_reg)))
 		return -EFAULT;
@@ -267,25 +287,47 @@ static long al5r_codec_ioctl(struct file *filp, unsigned int cmd,
 {
 	struct al5r_codec_chan *chan = filp->private_data;
 	struct al5r_codec_desc *codec = chan->codec;
+	int err;
 
 	switch (cmd) {
 	case GET_DMA_MMAP:
 		return al5_ioctl_get_dma_mmap(codec->device, chan, arg);
 	case GET_DMA_FD:
-		return al5_ioctl_get_dma_fd(codec->device, codec->dma_offset, arg);
+		return al5_ioctl_get_dma_fd(chan, codec->device,
+					    codec->dma_offset, arg);
 	case GET_DMA_FD_CACHED:
-		return al5_ioctl_get_dma_fd_cached(codec->device, codec->dma_offset, arg);
+		return al5_ioctl_get_dma_fd_cached(chan, codec->device,
+						   codec->dma_offset, arg);
 	case GET_DMA_PHY:
-		return al5_ioctl_get_dmabuf_dma_addr(codec->device, codec->dma_offset,
-						     arg);
+		return al5_ioctl_get_dmabuf_dma_addr(chan, codec->device,
+						     codec->dma_offset, arg);
 	case AL_CMD_UNBLOCK_CHANNEL:
+		err = al5_legacy_event_access(chan);
+		if (err)
+			return err;
 		return unblock_channel(chan);
 	case AL_CMD_IP_WAIT_IRQ:
+		err = al5_legacy_event_access(chan);
+		if (err)
+			return err;
 		return wait_irq(chan, arg);
 	case AL_CMD_IP_READ_REG:
 		return read_reg(chan, arg);
 	case AL_CMD_IP_WRITE_REG:
 		return write_reg(chan, arg);
+	case AL5_CMD_SUBMIT:
+		return al5_cmd_ioctl_submit(chan, arg);
+	case AL5_CMD_WAIT:
+		return al5_cmd_ioctl_wait(chan, arg,
+					  filp->f_flags & O_NONBLOCK);
+	case AL5_GET_HW_INFO:
+		return al5_cmd_ioctl_hw_info(chan, arg);
+	case AL5_GET_LOAD:
+		return al5_cmd_ioctl_load(chan, arg);
+	case AL5_MVD_ACQUIRE:
+		return al5_mvd_acquire(chan);
+	case AL5_MVD_RELEASE:
+		return al5_mvd_release(chan);
 	default:
 		al5_err("Unknown ioctl: 0x%.8X\n", cmd);
 		return -EINVAL;
@@ -299,6 +341,7 @@ const struct file_operations al5r_codec_fops = {
 	.unlocked_ioctl = al5r_codec_ioctl,
 	.compat_ioctl	= al5r_codec_compat_ioctl,
 	.mmap		= al5r_dma_mmap,
+	.poll		= al5_cmd_poll,
 };
 
 void clean_up_al5r_codec_cdev(struct al5r_codec_desc *dev)
@@ -354,10 +397,10 @@ int al5r_setup_codec_cdev(struct al5r_codec_desc *codec, int minor,
 
 static int init_codec_desc(struct al5r_codec_desc *codec)
 {
-	INIT_LIST_HEAD(&codec->irq_masks);
 	spin_lock_init(&codec->i_lock);
-	/* make chan requirement explicit */
-	codec->chan = NULL;
+	/* make ownership requirements explicit */
+	codec->legacy_chan = NULL;
+	codec->mvd_chan = NULL;
 	codec->cache =  kmem_cache_create("al_codec_ram",
 					  sizeof(struct r_irq),
 					  0, SLAB_HWCACHE_ALIGN, NULL);
@@ -556,6 +599,10 @@ int al5r_codec_probe(struct platform_device *pdev)
 	if (err)
 		goto out_failed_request_irq;
 
+	err = al5_cmd_engine_setup(codec, codec->device->of_node);
+	if (err)
+		goto out_failed_request_irq;
+
 	if (has_irq) {
 		err = devm_request_irq(codec->device,
 				       irq,
@@ -598,6 +645,7 @@ void al5r_codec_remove(struct platform_device *pdev)
 	struct al5r_codec_desc *codec = platform_get_drvdata(pdev);
 	dev_t dev = MKDEV(al5r_codec_major, codec->minor);
 
+	al5_cmd_engine_teardown(codec);
 	of_reserved_mem_device_release(codec->device);
 	device_destroy(&module_class, dev);
 	clean_up_al5r_codec_cdev(codec);
@@ -645,6 +693,10 @@ static int al5r_codec_pci_probe(struct pci_dev *pdev,
 	if (err)
 		goto out_disable_msi;
 
+	err = al5_cmd_engine_setup(codec, NULL);
+	if (err)
+		goto out_disable_msi;
+
 	if (request_irq(irq,
 			al5r_hardirq_handler,
 			IRQF_SHARED, device_name, codec))
@@ -679,6 +731,7 @@ static void al5r_codec_pci_remove(struct pci_dev *pdev)
 {
 	struct al5r_codec_desc *codec = pci_get_drvdata(pdev);
 
+	al5_cmd_engine_teardown(codec);
 	free_irq(pdev->irq, codec);
 #ifdef CONFIG_PCI_MSI_IRQ_DOMAIN
 	pci_disable_msi(pdev);

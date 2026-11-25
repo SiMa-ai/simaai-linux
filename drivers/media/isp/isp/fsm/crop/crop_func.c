@@ -90,7 +90,7 @@ void crop_config( crop_fsm_ptr_t p_fsm )
              ( ysize == 0 ) ||
              ( xsize > max_width ) ||
              ( ysize > max_height ) ) {
-            LOG( LOG_ERR, "Invalid crop configuration, size: (%ux%u), offset:%u,%u, max: (%ux%u)",
+            LOG_CAT( ALOG_CAT_GENERAL, LOG_ERR, "Invalid crop configuration, size: (%ux%u), offset:%u,%u, max: (%ux%u)",
                  width,
                  height,
                  xoffset,

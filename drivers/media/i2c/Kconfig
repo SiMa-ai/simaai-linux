@@ -52,14 +52,18 @@ config VIDEO_ALVIUM_CSI2
 	  module will be called alvium-csi2.
 
 config VIDEO_AR0234
-	tristate "ON Semiconductor AR0234 sensor support"
+	bool "ON Semiconductor AR0234 sensor support"
 	select V4L2_CCI_I2C
 	help
-	  This is a Video4Linux2 sensor driver for the Sony
-	  IMX219 camera.
+	  This is a Video4Linux2 sensor driver for the ON Semiconductor
+	  AR0234 camera.
 
-	  To compile this driver as a module, choose M here: the
-	  module will be called ar0234.
+config VIDEO_AR0822
+	bool "ON Semiconductor AR0822 sensor support"
+	select V4L2_CCI_I2C
+	help
+	  This is a Video4Linux2 sensor driver for the ON Semiconductor
+	  AR0822 camera.
 
 config VIDEO_AR0521
 	tristate "ON Semiconductor AR0521 sensor support"
@@ -170,14 +174,11 @@ config VIDEO_IMX214
 	  module will be called imx214.
 
 config VIDEO_IMX219
-	tristate "Sony IMX219 sensor support"
+	bool "Sony IMX219 sensor support"
 	select V4L2_CCI_I2C
 	help
 	  This is a Video4Linux2 sensor driver for the Sony
 	  IMX219 camera.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called imx219.
 
 config VIDEO_IMX258
 	tristate "Sony IMX258 sensor support"
@@ -277,15 +278,12 @@ config VIDEO_IMX412
 	  module will be called imx412.
 
 config VIDEO_IMX415
-	tristate "Sony IMX415 sensor support"
+	bool "Sony IMX415 sensor support"
 	depends on OF_GPIO
 	select V4L2_CCI_I2C
 	help
 	  This is a Video4Linux2 sensor driver for the Sony
 	  IMX415 camera.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called imx415.
 
 config VIDEO_IMX477
 	tristate "Sony IMX477 sensor support"
@@ -315,7 +313,7 @@ config VIDEO_IMX678
         module will be called imx678.
 
 config VIDEO_IMX568_LI
-	tristate "Sony IMX568 sensor support"
+	bool "Sony IMX568 sensor support"
 	depends on I2C && VIDEO_DEV
 	select V4L2_CCI_I2C
 	select VIDEO_V4L2_SUBDEV_API
@@ -324,9 +322,6 @@ config VIDEO_IMX568_LI
 	help
 	This is a Video4Linux2 sensor driver for the Sony
 	IMX568 camera.
-
-	To compile this driver as a module, choose M here: the
-	module will be called imx568.
 
 config VIDEO_IMX568
 	tristate "Sony IMX568 sensor support"
@@ -354,6 +349,51 @@ config VIDEO_IMX568_GMSL
 
 	To compile this driver as a module, choose M here: the
 	module will be called imx568.
+
+config VIDEO_IMX568_GMSL_AVM
+	tristate "Sony IMX568 sensor support over GMSL (AverMedia D133TE)"
+	depends on I2C && VIDEO_DEV
+	select VIDEO_V4L2_SUBDEV_API
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	help
+	This is a Video4Linux2 sensor driver for the e-con Sony
+	IMX568 GMSL camera on the AverMedia D133TE carrier
+	(MAX96717 serializer to MAX96714 single-link deserializer).
+	Separate from VIDEO_IMX568_GMSL so the HHHLv2/MAX96716A
+	variant is not affected.
+
+	To compile this driver as a module, choose M here: the
+	module will be called econ_imx568_gmsl_avm.
+
+config VIDEO_IMX568_GMSL_8C
+	tristate "e-con IMX568 GMSL camera on maxim-serdes"
+	depends on I2C && VIDEO_DEV
+	select VIDEO_V4L2_SUBDEV_API
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	help
+	This is a Video4Linux2 driver for the e-con IMX568 GMSL camera
+	module whose serializer and deserializer are driven by maxim-serdes.
+
+	To compile this driver as a module, choose M here: the
+	module will be called econ_imx568.
+
+config VIDEO_ISX031
+	tristate "Sony ISX031 sensor support"
+	depends on OF_GPIO
+	select V4L2_CCI_I2C
+	help
+	  This is a Video4Linux2 sensor driver for the Sony ISX031
+	  YUV422 automotive camera.
+
+	  The sensor integrates its own ISP and emits CSI-2 YUV422, so it
+	  needs no raw processing pipeline. It is supported both on a
+	  direct MIPI connection and behind a GMSL2 link (MAX96717
+	  serializer with a MAX9296A/MAX96716A/MAX96724 deserializer).
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called isx031.
 
 config VIDEO_ECON_FPGA
 	tristate "Econ FPGA support"
@@ -480,13 +520,14 @@ config VIDEO_OG0VE1B
 	  module will be called og0ve1b.
 
 config VIDEO_OG05C10
-	tristate "Omni vision OG05C10 sensor support"
+	tristate "OmniVision OG05C10 sensor support"
 	depends on I2C && VIDEO_DEV
+	select V4L2_CCI_I2C
 	select VIDEO_V4L2_SUBDEV_API
 	select MEDIA_CONTROLLER
 	select V4L2_FWNODE
 	help
-	  This is a Video4Linux2 sensor driver for the Omnivision
+	  This is a Video4Linux2 sensor driver for the OmniVision
 	  OG05C10 camera.
 
 	  To compile this driver as a module, choose M here: the
@@ -908,6 +949,7 @@ config VIDEO_VGXY61
 
 source "drivers/media/i2c/ccs/Kconfig"
 source "drivers/media/i2c/et8ek8/Kconfig"
+source "drivers/media/i2c/simaai/Kconfig"
 
 endif
 
@@ -1745,6 +1787,19 @@ config VIDEO_LI_FPGA
 	  To compile this driver as a module, choose M here: the
 	  module will be called li-fpga.
 
+config VIDEO_LI_IIC2IO
+	tristate "iic2io I/O expander support on Leopard Imaging Carrier Board"
+	depends on VIDEO_DEV && I2C
+	select REGMAP_I2C
+	help
+	  Support for the LI iic2io I/O expander.
+
+	  This sits on the second deserializer's I2C bus on the carrier
+	  board from Leopard Imaging and is initialised once at probe.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called li-iic2io.
+
 config VIDEO_M52790
 	tristate "Mitsubishi M52790 A/V switch"
 	depends on VIDEO_DEV && I2C
@@ -1827,7 +1882,7 @@ config VIDEO_DS90UB960
 	  FPD-Link III Deserializer and DS90UB9702 FPD-Link IV Deserializer.
 
 config VIDEO_MAX96714
-	tristate "Maxim MAX96714 GMSL2 deserializer"
+	bool "Maxim MAX96714 GMSL2 deserializer"
 	depends on OF && I2C && VIDEO_DEV
 	select I2C_MUX
 	select MEDIA_CONTROLLER
@@ -1840,11 +1895,8 @@ config VIDEO_MAX96714
 	  MAX96714 deserializers convert a GMSL2 input to MIPI CSI-2
 	  output.
 
-	  To compile this driver as a module, choose M here: the
-	  module will be called max96714.
-
 config VIDEO_MAX96717
-	tristate "Maxim MAX96717 GMSL2 Serializer support"
+	bool "Maxim MAX96717 GMSL2 Serializer support"
 	depends on I2C && VIDEO_DEV && COMMON_CLK
 	select I2C_MUX
 	select MEDIA_CONTROLLER
@@ -1856,9 +1908,6 @@ config VIDEO_MAX96717
 	  Device driver for the Maxim MAX96717 GMSL2 Serializer.
 	  MAX96717 serializers convert video on a MIPI CSI-2
 	  input to a GMSL2 output.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called max96717.
 
 source "drivers/media/i2c/maxim-serdes/Kconfig"
 
